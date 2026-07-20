@@ -1,0 +1,106 @@
+import path from 'node:path'
+
+import { describe, expect, it, vi } from 'vitest'
+
+import type { ContextSnapshot, SearchResult } from '../../src/shared/types'
+import { AiService } from './ai'
+import type { PdfTextService } from './pdf'
+import type { ProjectService } from './project'
+import type { ProjectSearchService } from './search'
+import type { SettingsStore } from './settings'
+
+const projectPath = path.resolve('/tmp/coscribe-ai-context')
+const documentPath = path.join(projectPath, 'lesson.md')
+
+function snapshot(scope: ContextSnapshot['scope'], overrides: Partial<ContextSnapshot> = {}): ContextSnapshot {
+  return {
+    projectName: 'Context test',
+    projectPath,
+    pane: 'primary',
+    documentPath,
+    kind: 'markdown',
+    selection: 'SELECTED_ONLY',
+    visibleText: 'VISIBLE_ONLY',
+    sectionText: 'SECTION_ONLY',
+    documentText: 'SECRET_FULL_DOCUMENT',
+    scope,
+    referencedFiles: [],
+    capturedAt: Date.now(),
+    ...overrides
+  }
+}
+
+function service(results: SearchResult[] = []) {
+  const retrieve = vi.fn(async () => results)
+  const project = {
+    info: { name: 'Context test', path: projectPath },
+    guard: {
+      existing: vi.fn(async (value: string) => path.isAbsolute(value) ? value : path.join(projectPath, value))
+    },
+    read: vi.fn(async () => ({ content: 'REFERENCED_FILE', modifiedAt: 1 }))
+  } as unknown as ProjectService
+  const ai = new AiService(
+    {} as SettingsStore,
+    project,
+    {} as PdfTextService,
+    { retrieve } as unknown as ProjectSearchService
+  )
+  const exposed = ai as unknown as {
+    validatedContext(value: ContextSnapshot, question: string): Promise<{ text: string; sources: unknown[] }>
+  }
+  return { exposed, retrieve }
+}
+
+describe('AI context scope boundaries', () => {
+  it('prioritizes selection while keeping visible scope out of the full document', async () => {
+    const { exposed } = service()
+    const result = await exposed.validatedContext(snapshot('visible'), 'explain this')
+
+    expect(result.text).toContain('VISIBLE_ONLY')
+    expect(result.text).toContain('SELECTED_ONLY')
+    expect(result.text).not.toContain('SECTION_ONLY')
+    expect(result.text).not.toContain('SECRET_FULL_DOCUMENT')
+  })
+
+  it('does not silently widen an empty selection', async () => {
+    const { exposed } = service()
+    const result = await exposed.validatedContext(snapshot('selection', { selection: '' }), 'explain this')
+
+    expect(result.text).toContain('未自动扩大')
+    expect(result.text).not.toContain('VISIBLE_ONLY')
+    expect(result.text).not.toContain('SECRET_FULL_DOCUMENT')
+  })
+
+  it('uses app-owned retrieval only for explicit project scope', async () => {
+    const resultPath = path.join(projectPath, 'retrieved.md')
+    const { exposed, retrieve } = service([{
+      id: 'retrieved',
+      type: 'content',
+      path: resultPath,
+      title: 'retrieved.md',
+      excerpt: 'PROJECT_RETRIEVAL_RESULT',
+      kind: 'markdown',
+      line: 3,
+      score: 42
+    }])
+    const result = await exposed.validatedContext(snapshot('project'), 'Where is retrieval?')
+
+    expect(retrieve).toHaveBeenCalledWith('Where is retrieval?', 10)
+    expect(result.text).toContain('PROJECT_RETRIEVAL_RESULT')
+    expect(result.text).not.toContain('SECRET_FULL_DOCUMENT')
+    expect(result.sources).toHaveLength(1)
+  })
+
+  it('sends no project material in general scope', async () => {
+    const { exposed, retrieve } = service()
+    const result = await exposed.validatedContext(snapshot('general', {
+      referencedFiles: [documentPath]
+    }), 'general question')
+
+    expect(retrieve).not.toHaveBeenCalled()
+    expect(result.text).not.toContain('VISIBLE_ONLY')
+    expect(result.text).not.toContain('SECRET_FULL_DOCUMENT')
+    expect(result.text).not.toContain('REFERENCED_FILE')
+    expect(result.sources).toHaveLength(0)
+  })
+})

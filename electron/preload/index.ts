@@ -1,0 +1,84 @@
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+
+import type {
+  AiRequest,
+  AiStreamEvent,
+  Annotation,
+  AppSettings,
+  ChatSession,
+  FileChangeEvent,
+  FileOperationProposal,
+  SearchProgress,
+  CoScribeAPI,
+  WorkspaceState
+} from '../../src/shared/types'
+import { IPC } from '../ipc-channels'
+
+function subscribe<T>(channel: string, listener: (value: T) => void): () => void {
+  const wrapped = (_event: Electron.IpcRendererEvent, value: T) => listener(value)
+  ipcRenderer.on(channel, wrapped)
+  return () => ipcRenderer.removeListener(channel, wrapped)
+}
+
+const api: CoScribeAPI = {
+  app: {
+    platform: process.platform,
+    version: () => ipcRenderer.invoke(IPC.appVersion)
+  },
+  project: {
+    recent: () => ipcRenderer.invoke(IPC.projectRecent),
+    chooseLocation: () => ipcRenderer.invoke(IPC.projectChooseLocation),
+    create: (name: string, parentPath: string) => ipcRenderer.invoke(IPC.projectCreate, name, parentPath),
+    openDialog: () => ipcRenderer.invoke(IPC.projectOpenDialog),
+    openPath: (projectPath: string) => ipcRenderer.invoke(IPC.projectOpenPath, projectPath),
+    initial: () => ipcRenderer.invoke(IPC.projectInitial),
+    close: () => ipcRenderer.invoke(IPC.projectClose),
+    tree: () => ipcRenderer.invoke(IPC.projectTree),
+    getState: () => ipcRenderer.invoke(IPC.projectGetState),
+    saveState: (state: WorkspaceState) => ipcRenderer.invoke(IPC.projectSaveState, state),
+    onFilesChanged: (listener: (events: FileChangeEvent[]) => void) => subscribe(IPC.projectFilesChanged, listener)
+  },
+  file: {
+    read: (filePath: string) => ipcRenderer.invoke(IPC.fileRead, filePath),
+    saveMarkdown: (filePath: string, content: string, expectedModifiedAt?: number) =>
+      ipcRenderer.invoke(IPC.fileSaveMarkdown, filePath, content, expectedModifiedAt),
+    createMarkdown: (filePath: string, content?: string) => ipcRenderer.invoke(IPC.fileCreateMarkdown, filePath, content),
+    createFolder: (filePath: string) => ipcRenderer.invoke(IPC.fileCreateFolder, filePath),
+    rename: (filePath: string, nextName: string) => ipcRenderer.invoke(IPC.fileRename, filePath, nextName),
+    move: (filePath: string, targetFolder: string) => ipcRenderer.invoke(IPC.fileMove, filePath, targetFolder),
+    trash: (filePath: string) => ipcRenderer.invoke(IPC.fileTrash, filePath),
+    importFiles: (sourcePaths: string[], targetFolder: string) => ipcRenderer.invoke(IPC.fileImportFiles, sourcePaths, targetFolder),
+    reveal: (filePath: string) => ipcRenderer.invoke(IPC.fileReveal, filePath),
+    url: (filePath: string) => ipcRenderer.invoke(IPC.fileUrl, filePath),
+    pathForDroppedFile: (file: File) => webUtils.getPathForFile(file),
+    applyAiOperation: (operation: FileOperationProposal) => ipcRenderer.invoke(IPC.fileApplyAiOperation, operation)
+  },
+  sessions: {
+    list: () => ipcRenderer.invoke(IPC.sessionsList),
+    save: (sessions: ChatSession[]) => ipcRenderer.invoke(IPC.sessionsSave, sessions)
+  },
+  annotations: {
+    list: () => ipcRenderer.invoke(IPC.annotationsList),
+    save: (annotations: Annotation[]) => ipcRenderer.invoke(IPC.annotationsSave, annotations)
+  },
+  search: {
+    query: (requestId: string, query: string) => ipcRenderer.invoke(IPC.searchQuery, requestId, query),
+    cancel: (requestId: string) => ipcRenderer.invoke(IPC.searchCancel, requestId),
+    onProgress: (listener: (progress: SearchProgress) => void) => subscribe(IPC.searchProgress, listener)
+  },
+  pdf: {
+    pageText: (filePath: string, page: number) => ipcRenderer.invoke(IPC.pdfPageText, filePath, page),
+    search: (filePath: string, query: string) => ipcRenderer.invoke(IPC.pdfSearch, filePath, query)
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(IPC.settingsGet),
+    save: (value: AppSettings) => ipcRenderer.invoke(IPC.settingsSave, value)
+  },
+  ai: {
+    start: (request: AiRequest) => ipcRenderer.invoke(IPC.aiStart, request),
+    stop: (requestId: string) => ipcRenderer.invoke(IPC.aiStop, requestId),
+    onStream: (listener: (event: AiStreamEvent) => void) => subscribe(IPC.aiStream, listener)
+  }
+}
+
+contextBridge.exposeInMainWorld('coscribe', Object.freeze(api))

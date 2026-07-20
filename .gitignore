@@ -1,0 +1,10 @@
+node_modules/
+.omx/
+out/
+release/
+playwright-report/
+test-results/
+coverage/
+.DS_Store
+*.log
+*.tmp
