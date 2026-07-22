@@ -74,7 +74,11 @@ export interface ProjectMemoryDocument {
 }
 
 export type ContextScope = 'selection' | 'visible' | 'document' | 'project' | 'general'
-export type AiOperationMode = 'organize-project-notes' | 'generate-project-plan' | 'generate-flashcards'
+export type AiOperationMode =
+  | 'organize-project-notes'
+  | 'generate-project-plan'
+  | 'generate-flashcards'
+  | 'generate-literature-matrix'
 
 export interface ContextSnapshot {
   projectName: string
@@ -323,6 +327,9 @@ export type PluginPermission =
   | 'ai:request'
   | 'calendar:write'
   | 'diagnostics:read'
+  | 'network:read'
+  | 'mcp:connect'
+  | 'git:snapshot'
 
 export interface CalendarSyncRequest {
   kind: 'event' | 'reminder'
@@ -355,6 +362,162 @@ export interface DiagnosticsSnapshot {
   enabledPlugins: number
   totalPlugins: number
   speechModelInstalled: boolean
+}
+
+export type ResearchReferenceType = 'article' | 'book' | 'chapter' | 'conference' | 'thesis' | 'report' | 'web' | 'other'
+
+export interface ResearchReference {
+  id: string
+  citeKey: string
+  type: ResearchReferenceType
+  title: string
+  authors: string[]
+  year?: number
+  journal?: string
+  publisher?: string
+  doi?: string
+  url?: string
+  pdfPath?: string
+  abstract?: string
+  tags: string[]
+  notes?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type LiteratureReviewStatus = 'unread' | 'reading' | 'reviewed'
+
+export interface LiteratureMatrixRow {
+  referenceId: string
+  citeKey: string
+  title: string
+  year?: number
+  researchQuestion: string
+  method: string
+  sample: string
+  findings: string
+  limitations: string
+  evidence: string
+  tags: string[]
+  status: LiteratureReviewStatus
+}
+
+export type McpTransportKind = 'stdio' | 'streamable-http'
+
+export interface McpServerConfig {
+  id: string
+  name: string
+  transport: McpTransportKind
+  command?: string
+  args?: string[]
+  cwd?: string
+  url?: string
+  env?: Record<string, string>
+  headers?: Record<string, string>
+  createdAt: number
+  updatedAt: number
+}
+
+export interface McpToolDescriptor {
+  name: string
+  description?: string
+  inputSchema?: Record<string, unknown>
+}
+
+export interface McpResourceDescriptor {
+  uri: string
+  name: string
+  description?: string
+  mimeType?: string
+}
+
+export interface McpPromptDescriptor {
+  name: string
+  description?: string
+  arguments?: Array<{ name: string; description?: string; required?: boolean }>
+}
+
+export interface McpServerCatalog {
+  serverId: string
+  serverName: string
+  serverVersion?: string
+  instructions?: string
+  tools: McpToolDescriptor[]
+  resources: McpResourceDescriptor[]
+  prompts: McpPromptDescriptor[]
+  connectedAt: number
+}
+
+export interface McpInvocationRequest {
+  serverId: string
+  kind: 'tool' | 'resource' | 'prompt'
+  name: string
+  arguments?: Record<string, unknown>
+}
+
+export interface McpInvocationResult {
+  kind: McpInvocationRequest['kind']
+  name: string
+  content: string
+  structuredContent?: unknown
+  isError: boolean
+  durationMs: number
+}
+
+export interface GitSnapshotStatus {
+  available: boolean
+  initialized: boolean
+  branch?: string
+  head?: string
+  changedFiles: string[]
+  stagedFiles: string[]
+  excludedFiles: string[]
+  error?: string
+}
+
+export interface GitSnapshotEntry {
+  hash: string
+  shortHash: string
+  message: string
+  author: string
+  createdAt: number
+}
+
+export interface GitSnapshotResult {
+  entry: GitSnapshotEntry
+  status: GitSnapshotStatus
+}
+
+export type WebTrackingIntervalMinutes = 0 | 60 | 360 | 1440
+
+export interface WebTrackedSource {
+  id: string
+  url: string
+  title: string
+  intervalMinutes: WebTrackingIntervalMinutes
+  createdAt: number
+  updatedAt: number
+  lastCheckedAt?: number
+  lastChangedAt?: number
+  lastHash?: string
+  etag?: string
+  lastModified?: string
+  changeCount: number
+  status: 'idle' | 'checking' | 'unchanged' | 'changed' | 'error'
+  error?: string
+  latestSnapshotPath?: string
+}
+
+export interface WebTrackedSourceInput {
+  url: string
+  title?: string
+  intervalMinutes?: WebTrackingIntervalMinutes
+}
+
+export interface WebTrackingCheckResult {
+  source: WebTrackedSource
+  changed: boolean
+  snapshot?: FileReadResult
 }
 
 export type OcrEngine = 'paddleocr-v6' | 'ai-vision'
@@ -545,6 +708,28 @@ export interface CoScribeAPI {
   }
   diagnostics: {
     snapshot: () => Promise<DiagnosticsSnapshot>
+  }
+  references: {
+    lookupDoi: (doi: string) => Promise<Partial<ResearchReference>>
+  }
+  mcp: {
+    listServers: () => Promise<McpServerConfig[]>
+    saveServer: (server: Partial<McpServerConfig>) => Promise<McpServerConfig>
+    removeServer: (serverId: string) => Promise<void>
+    inspect: (serverId: string) => Promise<McpServerCatalog>
+    invoke: (request: McpInvocationRequest) => Promise<McpInvocationResult>
+  }
+  gitSnapshots: {
+    status: () => Promise<GitSnapshotStatus>
+    create: (message: string) => Promise<GitSnapshotResult>
+    history: (limit?: number) => Promise<GitSnapshotEntry[]>
+  }
+  webTracker: {
+    list: () => Promise<WebTrackedSource[]>
+    add: (input: WebTrackedSourceInput) => Promise<WebTrackedSource>
+    update: (sourceId: string, input: WebTrackedSourceInput) => Promise<WebTrackedSource>
+    remove: (sourceId: string) => Promise<void>
+    check: (sourceId?: string) => Promise<WebTrackingCheckResult[]>
   }
   pdf: {
     pageText: (path: string, page: number) => Promise<PdfPageText>

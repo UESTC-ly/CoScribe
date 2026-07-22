@@ -58,7 +58,14 @@ function service(results: SearchResult[] = []) {
       existing: vi.fn(async (value: string) => path.isAbsolute(value) ? value : path.join(projectPath, value))
     },
     tree,
-    read: vi.fn(async () => ({ content: 'REFERENCED_FILE', modifiedAt: 1 }))
+    read: vi.fn(async (value: string) => ({
+      path: path.isAbsolute(value) ? value : path.join(projectPath, value),
+      name: path.basename(value),
+      kind: 'markdown' as const,
+      content: 'REFERENCED_FILE',
+      size: 15,
+      modifiedAt: 1
+    }))
   } as unknown as ProjectService
   const ai = new AiService(
     {} as SettingsStore,
@@ -150,6 +157,20 @@ describe('AI context scope boundaries', () => {
     expect(result.text).toContain('闪卡模式')
     expect(result.text).toContain('RAG uses retrieval.')
     expect(result.sources).toEqual([expect.objectContaining({ path: resultPath, line: 3 })])
+  })
+
+  it('loads the fixed literature matrix as project-scoped evidence', async () => {
+    const { exposed, retrieve, tree } = service()
+    const result = await exposed.validatedContext(snapshot('project'), 'compare methods', 'generate-literature-matrix')
+
+    expect(tree).toHaveBeenCalledOnce()
+    expect(retrieve).toHaveBeenCalledWith('compare methods', 10)
+    expect(result.text).toContain('文献矩阵模式')
+    expect(result.text).toContain('研究/文献综述矩阵.md')
+    expect(result.text).toContain('现有文献综述矩阵')
+    expect(result.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'markdown' })
+    ]))
   })
 
   it('keeps extracted PPTX text and source type in document context', async () => {

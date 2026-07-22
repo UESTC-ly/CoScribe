@@ -1,6 +1,6 @@
 {
   "name": "coscribe",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "CoScribe：以本地项目为核心的 AI 学习与内容工作台",
   "private": true,
   "type": "module",
@@ -34,10 +34,12 @@
     "verify:package:win": "node scripts/verify-packaged-windows.mjs release/win-unpacked"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "chokidar": "^4.0.3",
     "mammoth": "^1.12.0",
     "pdfjs-dist": "^6.1.200",
-    "sherpa-onnx-node": "1.12.40"
+    "sherpa-onnx-node": "1.12.40",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.8.1",
@@ -75,6 +77,9 @@
     "vite-plugin-static-copy": "^3.1.2",
     "vitest": "^4.1.10",
     "zustand": "^5.0.8"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.11"
   },
   "build": {
     "appId": "com.coscribe.app",

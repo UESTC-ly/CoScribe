@@ -1,4 +1,4 @@
-import { Activity, ArrowUpRight, BookOpenText, Brain, CalendarDays, Check, Link2, LockKeyhole, Power } from 'lucide-react'
+import { Activity, ArrowUpRight, BookOpenText, Brain, Cable, CalendarDays, Check, GitBranch, Globe2, Grid3X3, Library, Link2, LockKeyhole, Power } from 'lucide-react'
 
 import type { PluginPermission } from '../shared/types'
 import { PLUGIN_PERMISSION_LABELS, TRUSTED_PLUGIN_REGISTRY } from './registry'
@@ -12,15 +12,19 @@ interface PluginCatalogViewProps {
 }
 
 export function PluginCatalogView(props: PluginCatalogViewProps): React.JSX.Element {
-  const iconFor = (id: string): typeof CalendarDays => id === 'planner'
-    ? CalendarDays
-    : id === 'daily-notes'
-      ? BookOpenText
-      : id === 'flashcards'
-        ? Brain
-        : id === 'backlinks'
-          ? Link2
-          : Activity
+  const icons: Record<string, typeof CalendarDays> = {
+    planner: CalendarDays,
+    'daily-notes': BookOpenText,
+    flashcards: Brain,
+    backlinks: Link2,
+    diagnostics: Activity,
+    references: Library,
+    'review-matrix': Grid3X3,
+    'mcp-connectors': Cable,
+    'git-snapshots': GitBranch,
+    'web-tracker': Globe2
+  }
+  const iconFor = (id: string): typeof CalendarDays => icons[id] ?? Activity
   return (
     <div className="plugin-catalog">
       <div className="plugin-catalog__intro">

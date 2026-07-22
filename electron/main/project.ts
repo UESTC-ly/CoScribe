@@ -126,7 +126,9 @@ const TEXT_EXTENSIONS = new Set([
   '.go',
   '.rs',
   '.sh',
-  '.sql'
+  '.sql',
+  '.bib',
+  '.ris'
 ])
 
 export function fileKind(filePath: string, directory = false): FileKind {

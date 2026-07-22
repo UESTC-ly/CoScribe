@@ -9,9 +9,12 @@ import type {
   ChatSession,
   FileOperationProposal,
   ImageGenerationRequest,
+  McpInvocationRequest,
+  McpServerConfig,
   OcrResult,
   ResearchBrowserBounds,
   ResearchBrowserExtractMode,
+  WebTrackedSourceInput,
   WorkspaceState
 } from '../../src/shared/types'
 import type { PluginPermission } from '../../src/shared/types'
@@ -20,14 +23,18 @@ import { IPC } from '../ipc-channels'
 import { AiService } from './ai'
 import { CalendarService } from './calendar'
 import { DiagnosticsService } from './diagnostics'
+import { GitSnapshotService } from './git-snapshot'
 import { KnowledgeIndexService } from './knowledge-index'
+import { McpService } from './mcp'
 import { ResearchBrowserService } from './browser'
 import { PdfTextService } from './pdf'
 import { ProjectService } from './project'
 import { ProjectSearchService } from './search'
+import { ReferenceMetadataService } from './references'
 import { ScreenshotService } from './screenshot'
 import { SettingsStore } from './settings'
 import { SpeechRecognitionService } from './speech'
+import { WebTrackerService } from './web-tracker'
 
 interface Services {
   project: ProjectService
@@ -41,6 +48,10 @@ interface Services {
   knowledge: KnowledgeIndexService
   calendar: CalendarService
   diagnostics: DiagnosticsService
+  references: ReferenceMetadataService
+  mcp: McpService
+  gitSnapshots: GitSnapshotService
+  webTracker: WebTrackerService
 }
 
 function assertTrustedSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
@@ -73,7 +84,10 @@ function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1])
 }
 
 export function registerIpc(services: Services): void {
-  const { project, pdf, search, settings, ai, screenshot, browser, speech, knowledge, calendar, diagnostics } = services
+  const {
+    project, pdf, search, settings, ai, screenshot, browser, speech, knowledge, calendar, diagnostics,
+    references, mcp, gitSnapshots, webTracker
+  } = services
   const requirePlugin = async (pluginId: string, permission: PluginPermission): Promise<void> => {
     const manifest = trustedPlugin(pluginId)
     const preferences = await settings.get()
@@ -132,6 +146,54 @@ export function registerIpc(services: Services): void {
   handle(IPC.pluginSaveData, async (_event, pluginId: string, value: unknown) => { await requirePlugin(pluginId, 'project:write'); return project.savePluginData(pluginId, value) })
   handle(IPC.calendarSync, async (_event, request: CalendarSyncRequest) => { await requirePlugin('planner', 'calendar:write'); return calendar.sync(request) })
   handle(IPC.diagnosticsSnapshot, async () => { await requirePlugin('diagnostics', 'diagnostics:read'); return diagnostics.snapshot() })
+  handle(IPC.referencesLookupDoi, async (_event, doi: string) => {
+    await requirePlugin('references', 'network:read')
+    return references.lookupDoi(doi)
+  })
+  handle(IPC.mcpListServers, async () => { await requirePlugin('mcp-connectors', 'mcp:connect'); return mcp.listServers() })
+  handle(IPC.mcpSaveServer, async (_event, server: Partial<McpServerConfig>) => {
+    await requirePlugin('mcp-connectors', 'mcp:connect')
+    return mcp.saveServer(server)
+  })
+  handle(IPC.mcpRemoveServer, async (_event, serverId: string) => {
+    await requirePlugin('mcp-connectors', 'mcp:connect')
+    return mcp.removeServer(serverId)
+  })
+  handle(IPC.mcpInspect, async (_event, serverId: string) => {
+    await requirePlugin('mcp-connectors', 'mcp:connect')
+    return mcp.inspect(serverId)
+  })
+  handle(IPC.mcpInvoke, async (_event, request: McpInvocationRequest) => {
+    await requirePlugin('mcp-connectors', 'mcp:connect')
+    return mcp.invoke(request)
+  })
+  handle(IPC.gitSnapshotStatus, async () => { await requirePlugin('git-snapshots', 'git:snapshot'); return gitSnapshots.status() })
+  handle(IPC.gitSnapshotCreate, async (_event, message: string) => {
+    await requirePlugin('git-snapshots', 'git:snapshot')
+    return gitSnapshots.create(message)
+  })
+  handle(IPC.gitSnapshotHistory, async (_event, limit?: number) => {
+    await requirePlugin('git-snapshots', 'git:snapshot')
+    return gitSnapshots.history(limit)
+  })
+  handle(IPC.webTrackerList, async () => { await requirePlugin('web-tracker', 'project:read'); return webTracker.list() })
+  handle(IPC.webTrackerAdd, async (_event, input: WebTrackedSourceInput) => {
+    await requirePlugin('web-tracker', 'project:write')
+    return webTracker.add(input)
+  })
+  handle(IPC.webTrackerUpdate, async (_event, sourceId: string, input: WebTrackedSourceInput) => {
+    await requirePlugin('web-tracker', 'project:write')
+    return webTracker.update(sourceId, input)
+  })
+  handle(IPC.webTrackerRemove, async (_event, sourceId: string) => {
+    await requirePlugin('web-tracker', 'project:write')
+    return webTracker.remove(sourceId)
+  })
+  handle(IPC.webTrackerCheck, async (_event, sourceId?: string) => {
+    await requirePlugin('web-tracker', 'network:read')
+    await requirePlugin('web-tracker', 'project:write')
+    return webTracker.check(sourceId)
+  })
 
   handle(IPC.pdfPageText, (_event, filePath: string, page: number) => pdf.pageText(filePath, page))
   handle(IPC.pdfSearch, (_event, filePath: string, query: string) => pdf.search(filePath, query))

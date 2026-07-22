@@ -213,6 +213,42 @@ describe('AI Markdown operation mapping', () => {
     }, 'generate-flashcards')
     expect(prepareAiOperation).toHaveBeenCalledWith(expect.objectContaining({ targetPath: '闪卡/RAG.md' }))
   })
+
+  it('confines literature matrix proposals to the marked fixed file', async () => {
+    const prepareAiOperation = vi.fn().mockResolvedValue(undefined)
+    const ai = new AiService(
+      {} as SettingsStore,
+      { info: { path: '/project' }, prepareAiOperation } as unknown as ProjectService,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+    const exposed = ai as unknown as {
+      operationFromTool(tool: { name: string; arguments: string }, mode?: 'generate-literature-matrix'): Promise<unknown>
+    }
+    const content = [
+      '# 文献综述矩阵',
+      '<!-- coscribe:literature-matrix:start -->',
+      '| 文献 | 方法 |',
+      '| --- | --- |',
+      '<!-- coscribe:literature-matrix:end -->'
+    ].join('\n')
+
+    await expect(exposed.operationFromTool({
+      name: 'propose_markdown_operation',
+      arguments: JSON.stringify({ kind: 'replace', targetPath: '研究/别的文件.md', proposedContent: content })
+    }, 'generate-literature-matrix')).rejects.toThrow(/只能写入/u)
+
+    await expect(exposed.operationFromTool({
+      name: 'propose_markdown_operation',
+      arguments: JSON.stringify({ kind: 'replace', targetPath: '研究/文献综述矩阵.md', proposedContent: '# missing markers' })
+    }, 'generate-literature-matrix')).rejects.toThrow(/缺少 CoScribe 矩阵标记/u)
+
+    await exposed.operationFromTool({
+      name: 'propose_markdown_operation',
+      arguments: JSON.stringify({ kind: 'replace', targetPath: '研究/文献综述矩阵.md', proposedContent: content, summary: '更新矩阵' })
+    }, 'generate-literature-matrix')
+    expect(prepareAiOperation).toHaveBeenCalledWith(expect.objectContaining({ targetPath: '研究/文献综述矩阵.md' }))
+  })
 })
 
 describe('GPT-Image 2 request and response contract', () => {

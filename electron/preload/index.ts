@@ -95,6 +95,28 @@ const api: CoScribeAPI = {
   diagnostics: {
     snapshot: () => ipcRenderer.invoke(IPC.diagnosticsSnapshot)
   },
+  references: {
+    lookupDoi: (doi: string) => ipcRenderer.invoke(IPC.referencesLookupDoi, doi)
+  },
+  mcp: {
+    listServers: () => ipcRenderer.invoke(IPC.mcpListServers),
+    saveServer: (server) => ipcRenderer.invoke(IPC.mcpSaveServer, server),
+    removeServer: (serverId: string) => ipcRenderer.invoke(IPC.mcpRemoveServer, serverId),
+    inspect: (serverId: string) => ipcRenderer.invoke(IPC.mcpInspect, serverId),
+    invoke: (request) => ipcRenderer.invoke(IPC.mcpInvoke, request)
+  },
+  gitSnapshots: {
+    status: () => ipcRenderer.invoke(IPC.gitSnapshotStatus),
+    create: (message: string) => ipcRenderer.invoke(IPC.gitSnapshotCreate, message),
+    history: (limit?: number) => ipcRenderer.invoke(IPC.gitSnapshotHistory, limit)
+  },
+  webTracker: {
+    list: () => ipcRenderer.invoke(IPC.webTrackerList),
+    add: (input) => ipcRenderer.invoke(IPC.webTrackerAdd, input),
+    update: (sourceId: string, input) => ipcRenderer.invoke(IPC.webTrackerUpdate, sourceId, input),
+    remove: (sourceId: string) => ipcRenderer.invoke(IPC.webTrackerRemove, sourceId),
+    check: (sourceId?: string) => ipcRenderer.invoke(IPC.webTrackerCheck, sourceId)
+  },
   pdf: {
     pageText: (filePath: string, page: number) => ipcRenderer.invoke(IPC.pdfPageText, filePath, page),
     search: (filePath: string, query: string) => ipcRenderer.invoke(IPC.pdfSearch, filePath, query)

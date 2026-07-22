@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
+import { execFile } from 'node:child_process'
 import { access, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -64,6 +65,20 @@ async function launchProject(): Promise<void> {
   page.on('crash', () => process.stderr.write('[renderer crash]\n'))
   await page.waitForLoadState('domcontentloaded')
   await page.waitForFunction(() => Boolean(window.coscribe))
+}
+
+async function enableAndOpenPlugin(name: string, regionName: string): Promise<void> {
+  await page.getByRole('button', { name: '插件', exact: true }).click()
+  const card = page.locator('.plugin-card').filter({ has: page.locator('header strong').getByText(name, { exact: true }) })
+  await card.scrollIntoViewIfNeeded()
+  const open = card.locator('.plugin-card__open')
+  if (!(await open.isEnabled())) {
+    await card.getByRole('button', { name: `启用并授权${name}` }).click()
+    await expect(page.getByRole('dialog')).toContainText(name)
+    await page.getByRole('button', { name: '授权并启用' }).click()
+  }
+  await open.click()
+  await expect(page.getByRole('region', { name: regionName })).toBeVisible()
 }
 
 test.beforeEach(async () => {
@@ -207,6 +222,93 @@ test('lazy-loads flashcard, backlink, and diagnostics plugin views after explici
   await openPlugin('性能诊断', '性能诊断插件')
   await expect(page.getByText('进程资源')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('diagnostics-workspace.png') })
+})
+
+test('manages a reference and persists a Markdown literature review matrix', async ({}, testInfo) => {
+  test.setTimeout(90_000)
+  await enableAndOpenPlugin('文献与引用', '文献与引用插件')
+  await page.getByLabel('题名').fill('Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks')
+  await page.getByLabel('citekey').fill('Lewis2020RAG')
+  await page.getByLabel('作者（分号分隔）').fill('Patrick Lewis; Ethan Perez')
+  await page.getByLabel('年份').fill('2020')
+  await page.getByLabel('标签').fill('RAG, retrieval')
+  await page.getByRole('button', { name: '加入文献库' }).click()
+  await expect(page.getByText('文献元数据已保存在当前项目。')).toBeVisible()
+  await expect(page.locator('.research-list-items')).toContainText('Lewis2020RAG')
+  await page.screenshot({ path: testInfo.outputPath('references-workspace.png') })
+
+  await enableAndOpenPlugin('文献综述矩阵', '文献综述矩阵插件')
+  const matrix = page.locator('.matrix-table')
+  await expect(matrix).toContainText('Retrieval-Augmented Generation')
+  await page.getByLabel(/Retrieval-Augmented Generation.*研究问题/u).fill('如何结合参数化与非参数化知识？')
+  await page.getByLabel(/Retrieval-Augmented Generation.*阅读状态/u).selectOption('reading')
+  await page.getByRole('button', { name: '保存矩阵' }).click()
+  const matrixPath = path.join(projectPath, '研究', '文献综述矩阵.md')
+  await expect.poll(async () => readFile(matrixPath, 'utf8').catch(() => '')).toContain('如何结合参数化与非参数化知识？')
+  await expect.poll(async () => readFile(matrixPath, 'utf8').catch(() => '')).toContain('<!-- coscribe:literature-matrix:start -->')
+  await page.screenshot({ path: testInfo.outputPath('literature-review-matrix.png') })
+})
+
+test('discovers and explicitly invokes a local stdio MCP server', async ({}, testInfo) => {
+  await enableAndOpenPlugin('MCP 连接器', 'MCP 连接器插件')
+  await page.getByLabel('名称').fill('E2E MCP')
+  await page.getByLabel('启动命令（不经过 shell）').fill(process.execPath)
+  await page.getByLabel('参数（每行一个）').fill(path.join(appRoot, 'tests', 'fixtures', 'mcp-server.mjs'))
+  await page.getByLabel('环境变量 JSON').fill('{}')
+  await page.getByRole('button', { name: '保存配置' }).click()
+  await expect(page.getByText(/MCP 配置已用系统安全存储加密保存/u)).toBeVisible()
+  await page.getByRole('button', { name: '发现能力' }).click()
+  await expect(page.getByText(/已按需连接/u)).toBeVisible()
+  await expect(page.locator('.mcp-invoke-card')).toContainText('1 工具')
+  await page.getByLabel('参数 JSON').fill('{"message":"MCP_E2E_SENTINEL"}')
+  await page.getByRole('button', { name: '明确调用一次' }).click()
+  await expect(page.locator('.mcp-result')).toContainText('MCP_E2E_SENTINEL')
+  await page.screenshot({ path: testInfo.outputPath('mcp-explicit-call.png') })
+})
+
+test('creates a safe local Git snapshot without staging secrets', async ({}, testInfo) => {
+  await writeFile(path.join(projectPath, '.env'), 'SECRET_MUST_STAY_UNTRACKED=true\n')
+  await enableAndOpenPlugin('Git 快照', 'Git 快照插件')
+  await expect(page.locator('.git-safety-strip')).toContainText('.env')
+  await page.getByLabel('快照说明').fill('E2E research checkpoint')
+  await page.getByRole('button', { name: '创建本地快照' }).click()
+  await expect(page.getByText(/已创建本地快照/u)).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.git-history-card')).toContainText('E2E research checkpoint')
+  const tracked = await new Promise<string>((resolve, reject) => {
+    execFile('git', ['-C', projectPath, 'ls-files'], (error, stdout) => error ? reject(error) : resolve(stdout))
+  })
+  expect(tracked).not.toContain('.env')
+  await page.screenshot({ path: testInfo.outputPath('git-snapshot.png') })
+})
+
+test('tracks a webpage and writes only changed Markdown snapshots', async ({}, testInfo) => {
+  let version = 1
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ETag: `v${version}` })
+    response.end(`<html><title>Tracked Research</title><body><article><h1>Finding</h1><p>WEB_TRACKER_VERSION_${version}</p></article></body></html>`)
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const port = (server.address() as AddressInfo).port
+    await enableAndOpenPlugin('网页资料跟踪', '网页资料持续跟踪插件')
+    await page.getByLabel('网页地址').fill(`http://127.0.0.1:${port}/paper`)
+    await page.getByLabel('名称（可选）').fill('研究追踪')
+    await page.getByRole('button', { name: '加入跟踪' }).click()
+    await page.getByRole('button', { name: '立即检查' }).click()
+    await expect(page.getByText(/检查完成：1 项有变化/u)).toBeVisible()
+    const snapshotsRoot = path.join(projectPath, '研究', '网页跟踪', 'Tracked Research')
+    await expect.poll(async () => (await import('node:fs/promises')).readdir(snapshotsRoot).then((files) => files.length).catch(() => 0)).toBe(1)
+    await page.getByRole('button', { name: '立即检查' }).click()
+    await expect(page.getByText(/检查完成：0 项有变化/u)).toBeVisible()
+    await expect.poll(async () => (await import('node:fs/promises')).readdir(snapshotsRoot).then((files) => files.length)).toBe(1)
+    version = 2
+    await page.getByRole('button', { name: '立即检查' }).click()
+    await expect(page.getByText(/检查完成：1 项有变化/u)).toBeVisible()
+    await expect.poll(async () => (await import('node:fs/promises')).readdir(snapshotsRoot).then((files) => files.length)).toBe(2)
+    await page.screenshot({ path: testInfo.outputPath('web-tracker.png') })
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
 })
 
 test('renders Mermaid fenced blocks in Markdown preview', async ({}, testInfo) => {

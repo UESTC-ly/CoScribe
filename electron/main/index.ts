@@ -8,15 +8,19 @@ import { IPC } from '../ipc-channels'
 import { AiService } from './ai'
 import { CalendarService } from './calendar'
 import { DiagnosticsService } from './diagnostics'
+import { GitSnapshotService } from './git-snapshot'
 import { KnowledgeIndexService } from './knowledge-index'
+import { McpService } from './mcp'
 import { ResearchBrowserService } from './browser'
 import { registerIpc } from './ipc'
 import { PdfTextService } from './pdf'
 import { ProjectService } from './project'
 import { ProjectSearchService } from './search'
+import { ReferenceMetadataService } from './references'
 import { ScreenshotService } from './screenshot'
 import { SettingsStore } from './settings'
 import { SpeechRecognitionService } from './speech'
+import { WebTrackerService } from './web-tracker'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -117,6 +121,19 @@ const browser = new ResearchBrowserService(() => mainWindow, project)
 projectLifecycle.browser = browser
 const calendar = new CalendarService()
 const diagnostics = new DiagnosticsService(knowledge, settings, speech)
+const references = new ReferenceMetadataService()
+const mcp = new McpService()
+const gitSnapshots = new GitSnapshotService(project)
+const webTracker = new WebTrackerService(project, fetch, async () => {
+  const preferences = await settings.get()
+  const grants = preferences.pluginGrants['web-tracker'] ?? []
+  return (
+    preferences.enabledPlugins.includes('web-tracker') &&
+    grants.includes('project:read') &&
+    grants.includes('project:write') &&
+    grants.includes('network:read')
+  )
+})
 
 async function openExternalProject(projectPath: string): Promise<void> {
   await project.openPath(projectPath)
@@ -249,7 +266,11 @@ void app.whenReady().then(() => {
       trustedRendererUrl(webContents.getURL())
     )
   })
-  registerIpc({ project, pdf, search, settings, ai, screenshot, browser, speech, knowledge, calendar, diagnostics })
+  registerIpc({
+    project, pdf, search, settings, ai, screenshot, browser, speech, knowledge, calendar, diagnostics,
+    references, mcp, gitSnapshots, webTracker
+  })
+  webTracker.start()
   protocol.handle('coscribe-app', async (request) => {
     try {
       const parsed = new URL(request.url)
@@ -310,6 +331,7 @@ app.on('before-quit', () => {
   ai.stopAll()
   speech.stopAll()
   browser.destroy()
+  webTracker.stop()
   globalShortcut.unregisterAll()
 })
 

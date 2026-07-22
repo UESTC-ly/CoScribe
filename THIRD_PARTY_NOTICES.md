@@ -66,5 +66,26 @@ features. Copyright remains with the respective authors.
 - License selected for this distribution: MIT
 - Project: https://github.com/Stuk/jszip
 
+## Model Context Protocol TypeScript SDK
+
+- Component: `@modelcontextprotocol/sdk` 1.29.0
+- Copyright: Anthropic, PBC and Model Context Protocol contributors
+- License: MIT
+- Project: https://github.com/modelcontextprotocol/typescript-sdk
+
+## Zod
+
+- Component: `zod` 4.4.3
+- Copyright: Colin McDonnell and contributors
+- License: MIT
+- Project: https://github.com/colinhacks/zod
+
+## Hono Node Server
+
+- Component: `@hono/node-server` 2.0.11, used transitively by the MCP SDK
+- Copyright: Yusuke Wada and contributors
+- License: MIT
+- Project: https://github.com/honojs/node-server
+
 Electron's own license and Chromium third-party notices are included separately
 by electron-builder in each packaged application.

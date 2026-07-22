@@ -57,7 +57,7 @@
 .app-titlebar__project span { color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .app-titlebar__center { color: var(--text-muted); font-size: 10.5px; }
 .app-titlebar__actions { display: flex; justify-content: flex-end; gap: 2px; -webkit-app-region: no-drag; }
-.app-body { min-height: 0; display: flex; }
+.app-body { min-height: 0; display: flex; overflow: hidden; }
 .app-statusbar { min-width: 0; display: flex; align-items: center; gap: 16px; overflow: visible; border-top: 1px solid var(--border); background: var(--bg-panel); padding: 0 9px; color: var(--text-muted); font-size: 10.5px; }
 .app-statusbar__spacer { flex: 1; }
 .status-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; }
@@ -188,7 +188,7 @@
 .annotation-swatch.is-blue { background: #7aa6cf; }
 .annotation-swatch.is-rose { background: #d28b91; }
 
-.workspace { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; background: var(--bg-content); }
+.workspace { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; overflow: hidden; background: var(--bg-content); }
 .app-body > .ai-workspace { flex: 0 0 min(var(--ai-width, 360px), var(--ai-max-width, 800px)); width: min(var(--ai-width, 360px), var(--ai-max-width, 800px)); max-width: none; }
 .workspace-loading { width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--text-muted); font-size: 11px; }
 .ai-workspace-loading { min-height: 0; display: flex; align-items: center; justify-content: center; gap: 8px; border-left: 1px solid var(--border); background: var(--bg-panel); color: var(--text-muted); font-size: 10.5px; }

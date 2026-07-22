@@ -48,11 +48,13 @@ import type {
   FileNode,
   FileOperationProposal,
   FileReadResult,
+  LiteratureMatrixRow,
   OpenTab,
   PaneId,
   ProjectInfo,
   ResearchBrowserExtractResult,
   ResearchBrowserState,
+  ResearchReference,
   SearchResult,
   SourceRef
 } from './shared/types'
@@ -67,6 +69,11 @@ const DailyNotesWorkspace = lazy(() => import('./plugins/daily-notes/DailyNotesW
 const FlashcardsWorkspace = lazy(() => import('./plugins/flashcards/FlashcardsWorkspace'))
 const BacklinksWorkspace = lazy(() => import('./plugins/backlinks/BacklinksWorkspace'))
 const DiagnosticsWorkspace = lazy(() => import('./plugins/diagnostics/DiagnosticsWorkspace'))
+const ReferencesWorkspace = lazy(() => import('./plugins/references/ReferencesWorkspace'))
+const ReviewMatrixWorkspace = lazy(() => import('./plugins/review-matrix/ReviewMatrixWorkspace'))
+const McpWorkspace = lazy(() => import('./plugins/mcp/McpWorkspace'))
+const GitSnapshotsWorkspace = lazy(() => import('./plugins/git-snapshots/GitSnapshotsWorkspace'))
+const WebTrackerWorkspace = lazy(() => import('./plugins/web-tracker/WebTrackerWorkspace'))
 
 interface PromptState {
   title: string
@@ -878,6 +885,44 @@ export default function App(): React.JSX.Element {
     })
   }, [imageGenerationRequestId, sendAiMessage, streamingRequestId])
 
+  const generateLiteratureMatrix = useCallback(async (
+    references: ResearchReference[],
+    rows: LiteratureMatrixRow[]
+  ): Promise<void> => {
+    if (streamingRequestId || imageGenerationRequestId) throw new Error('请等待当前 AI 任务结束后再补全文献矩阵。')
+    const referenceContext = references.slice(0, 300).map((reference) => [
+      `- [${reference.citeKey}] ${reference.authors.join(', ') || '未知作者'} (${reference.year ?? 'n.d.'}). ${reference.title}`,
+      reference.doi ? `  DOI: ${reference.doi}` : '',
+      reference.abstract ? `  已录入摘要: ${reference.abstract.slice(0, 1_500)}` : '  摘要未录入；不得据题名猜测研究内容。',
+      reference.pdfPath ? `  本地 PDF: ${reference.pdfPath}` : ''
+    ].filter(Boolean).join('\n')).join('\n').slice(0, 70_000)
+    const existingEvidence = rows.filter((row) => row.researchQuestion || row.method || row.findings || row.evidence).slice(0, 300)
+      .map((row) => `${row.citeKey}: 研究问题=${row.researchQuestion}; 方法=${row.method}; 发现=${row.findings}; 证据=${row.evidence}`).join('\n').slice(0, 40_000)
+    setStore().setAiVisible(true)
+    await sendAiMessage({
+      content: [
+        '请基于当前项目中的真实文献资料，补全或整理文献综述矩阵。',
+        '只能写入固定文件 研究/文献综述矩阵.md；不存在时 create，存在时 replace 完整文档。',
+        '保留 <!-- coscribe:literature-matrix:start --> 与 <!-- coscribe:literature-matrix:end --> 标记，以及已有人工填写的有证据内容。',
+        '矩阵列包含：文献、年份、状态、研究问题、方法、样本/数据、主要发现、局限、证据位置、标签。',
+        '元数据与摘要只能支持有限判断；没有原文或项目证据的字段必须留空，不得猜测。证据位置应写具体文件、页码或章节。',
+        `文献库（${references.length} 条，本次最多附 300 条）：\n${referenceContext}`,
+        existingEvidence ? `已有矩阵证据摘要：\n${existingEvidence}` : '',
+        '必须调用 CoScribe 文件操作工具生成预览；用户确认前不要声称已经保存。'
+      ].filter(Boolean).join('\n\n'),
+      attachments: [],
+      scope: 'project',
+      referencedFiles: references.flatMap((reference) => reference.pdfPath ? [reference.pdfPath] : []).slice(0, 20),
+      operationMode: 'generate-literature-matrix'
+    })
+  }, [imageGenerationRequestId, sendAiMessage, streamingRequestId])
+
+  const sendPluginTextToAi = useCallback((value: string): void => {
+    setChatDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${value}` : value)
+    setChatDraftFocusToken((token) => token + 1)
+    setStore().setAiVisible(true)
+  }, [])
+
   const stopAi = useCallback(async (): Promise<void> => {
     if (streamingRequestId) await window.coscribe.ai.stop(streamingRequestId)
   }, [streamingRequestId])
@@ -1314,6 +1359,28 @@ export default function App(): React.JSX.Element {
               <BacklinksWorkspace activePath={activeTab?.kind === 'markdown' ? activeTab.path : undefined} onOpenMarkdown={(path) => openPath(path, 'markdown')} />
             ) : activePluginId === 'diagnostics' ? (
               <DiagnosticsWorkspace />
+            ) : activePluginId === 'references' ? (
+              <ReferencesWorkspace
+                files={pluginFiles}
+                networkGranted={(state.settings.pluginGrants.references ?? []).includes('network:read')}
+                onOpenFile={(path, kind) => openPath(path, kind ?? inferKind(path))}
+                onProjectChanged={refreshTree}
+                onSendToAi={sendPluginTextToAi}
+              />
+            ) : activePluginId === 'review-matrix' ? (
+              <ReviewMatrixWorkspace
+                aiConfigured={isConfigured}
+                onOpenMarkdown={(path) => openPath(path, 'markdown')}
+                onProjectChanged={refreshTree}
+                onGenerateWithAi={generateLiteratureMatrix}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
+            ) : activePluginId === 'mcp-connectors' ? (
+              <McpWorkspace onSendToAi={sendPluginTextToAi} />
+            ) : activePluginId === 'git-snapshots' ? (
+              <GitSnapshotsWorkspace />
+            ) : activePluginId === 'web-tracker' ? (
+              <WebTrackerWorkspace onOpenMarkdown={(path) => openPath(path, 'markdown')} onProjectChanged={refreshTree} onSendToAi={sendPluginTextToAi} />
             ) : (
               <div className="editor-workbench">
                 <EditorPane {...paneProps('primary', primaryTabs)} />
