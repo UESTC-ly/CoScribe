@@ -1,16 +1,22 @@
 import { randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
 import {
   copyFile,
   lstat,
+  mkdtemp,
   mkdir,
+  open,
   readFile,
   readdir,
   realpath,
   rename,
-  stat
+  rm,
+  stat,
+  unlink
 } from 'node:fs/promises'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import chokidar, { type FSWatcher } from 'chokidar'
 import { app, dialog, shell } from 'electron'
@@ -18,14 +24,17 @@ import { app, dialog, shell } from 'electron'
 import {
   DEFAULT_WORKSPACE_STATE,
   type Annotation,
+  type ChatImageAttachment,
   type ChatMessage,
   type ChatSession,
   type ContextSnapshot,
   type FileChangeEvent,
   type FileKind,
   type FileNode,
+  type FileOperationApplyResult,
   type FileOperationProposal,
   type FileReadResult,
+  type MarkdownFileOperation,
   type OcrLine,
   type OcrResult,
   type ProjectInfo,
@@ -33,7 +42,9 @@ import {
   type SourceRef,
   type WorkspaceState
 } from '../../src/shared/types'
+import { normalizeChatImageAttachments } from '../../src/shared/chat-images'
 import { DocxService } from './docx'
+import { extractPptxText } from './pptx'
 import { assertNotMetadataPath, assertSafeName, canonicalDirectory, isInside, ProjectPathGuard } from './security'
 import { SettingsStore } from './settings'
 import { atomicCreate, atomicWrite, atomicWriteJson, readJson } from './storage'
@@ -41,6 +52,12 @@ import { atomicCreate, atomicWrite, atomicWriteJson, readJson } from './storage'
 const METADATA_DIRECTORY = '.vibeknowledge'
 const MAX_RECENT_PROJECTS = 20
 const MAX_TEXT_FILE_SIZE = 32 * 1024 * 1024
+const MAX_POWERPOINT_FILE_SIZE = 128 * 1024 * 1024
+const MAX_WEB_ARCHIVE_SIZE = 256 * 1024 * 1024
+const MAX_WEB_CAPTURE_PDF_SIZE = 256 * 1024 * 1024
+const MAX_AI_FILE_OPERATIONS = 50
+const MAX_AI_OPERATION_CONTENT = 8 * 1024 * 1024
+const MAX_AI_OPERATION_TOTAL_CONTENT = 32 * 1024 * 1024
 const MAX_SESSIONS = 200
 const MAX_MESSAGES_PER_SESSION = 2_000
 const MAX_MESSAGE_CHARS = 2 * 1024 * 1024
@@ -61,6 +78,8 @@ const IGNORED_PROJECT_ENTRY_NAMES = new Set([
 ])
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.avif'])
+const WINDOWS_ABSOLUTE_PATH = /^[a-zA-Z]:[\\/]/u
+const UNC_PATH = /^(?:\\\\|\/\/)/u
 const TEXT_EXTENSIONS = new Set([
   '.txt',
   '.log',
@@ -95,6 +114,9 @@ export function fileKind(filePath: string, directory = false): FileKind {
   if (extension === '.md' || extension === '.markdown') return 'markdown'
   if (extension === '.pdf') return 'pdf'
   if (extension === '.docx') return 'docx'
+  if (extension === '.ppt') return 'ppt'
+  if (extension === '.pptx') return 'pptx'
+  if (extension === '.mhtml' || extension === '.mht') return 'webarchive'
   if (IMAGE_EXTENSIONS.has(extension)) return 'image'
   if (TEXT_EXTENSIONS.has(extension)) return 'text'
   return 'unsupported'
@@ -102,6 +124,35 @@ export function fileKind(filePath: string, directory = false): FileKind {
 
 function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT'
+}
+
+function officeCandidates(): string[] {
+  const candidates = [process.env.COSCRIBE_SOFFICE_PATH]
+  if (process.platform === 'darwin') {
+    candidates.push('/Applications/LibreOffice.app/Contents/MacOS/soffice', 'soffice')
+  } else if (process.platform === 'win32') {
+    candidates.push(
+      process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'LibreOffice', 'program', 'soffice.exe') : undefined,
+      process.env['ProgramFiles(x86)'] ? path.join(process.env['ProgramFiles(x86)'], 'LibreOffice', 'program', 'soffice.exe') : undefined,
+      'soffice.exe'
+    )
+  } else {
+    candidates.push('/usr/bin/soffice', '/usr/local/bin/soffice', 'soffice')
+  }
+  return [...new Set(candidates.filter((candidate): candidate is string => Boolean(candidate?.trim())))]
+}
+
+function runOffice(command: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout: 120_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (error, _stdout, stderr) => {
+      if (!error) {
+        resolve()
+        return
+      }
+      const detail = stderr.trim()
+      reject(Object.assign(new Error(detail || error.message), { code: (error as NodeJS.ErrnoException).code }))
+    })
+  })
 }
 
 function isIgnoredProjectPath(root: string, candidate: string): boolean {
@@ -117,6 +168,42 @@ async function assertAbsent(filePath: string): Promise<void> {
   } catch (error) {
     if (!isMissing(error)) throw error
   }
+}
+
+function hasTraversalSegment(value: string): boolean {
+  return value.split(/[\\/]+/u).some((segment) => segment === '..')
+}
+
+async function projectTargetAllowMissing(root: string, inputPath: string): Promise<string> {
+  if (
+    !inputPath ||
+    inputPath.includes('\0') ||
+    /[\u0001-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(inputPath) ||
+    hasTraversalSegment(inputPath) ||
+    (process.platform !== 'win32' && (WINDOWS_ABSOLUTE_PATH.test(inputPath) || UNC_PATH.test(inputPath)))
+  ) {
+    throw new Error('文件路径为空、包含越级目录或非法字符。')
+  }
+  const candidate = path.resolve(root, inputPath)
+  if (candidate === root || !isInside(root, candidate)) throw new Error('文件路径不在当前项目内。')
+  assertNotMetadataPath(root, candidate)
+  const relative = path.relative(root, candidate)
+  const segments = relative.split(path.sep).filter(Boolean)
+  let cursor = root
+  for (const [index, segment] of segments.entries()) {
+    cursor = path.join(cursor, segment)
+    try {
+      const info = await lstat(cursor)
+      if (info.isSymbolicLink()) throw new Error('文件路径包含符号链接，操作已拒绝。')
+      if (index < segments.length - 1 && !info.isDirectory()) {
+        throw new Error('文件路径的父路径不是文件夹。')
+      }
+    } catch (error) {
+      if (isMissing(error)) break
+      throw error
+    }
+  }
+  return candidate
 }
 
 function normalizedWorkspace(input: unknown, root: string): WorkspaceState {
@@ -180,10 +267,21 @@ function metadataProjectPath(value: unknown, root: string): string | undefined {
   return resolved
 }
 
+function metadataWebUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 8_000) return undefined
+  try {
+    const parsed = new URL(value)
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username || parsed.password) return undefined
+    return parsed.toString()
+  } catch {
+    return undefined
+  }
+}
+
 function normalizedContext(value: unknown, root: string): ContextSnapshot | undefined {
   if (!isRecord(value)) return undefined
   const scopes = new Set(['selection', 'visible', 'document', 'project', 'general'])
-  const kinds = new Set(['folder', 'markdown', 'pdf', 'docx', 'image', 'text', 'unsupported'])
+  const kinds = new Set(['folder', 'markdown', 'pdf', 'docx', 'ppt', 'pptx', 'webarchive', 'image', 'text', 'unsupported'])
   const scope = typeof value.scope === 'string' && scopes.has(value.scope) ? value.scope as ContextSnapshot['scope'] : undefined
   if (!scope) return undefined
   const documentPath = metadataProjectPath(value.documentPath, root)
@@ -196,6 +294,7 @@ function normalizedContext(value: unknown, root: string): ContextSnapshot | unde
     pane: value.pane === 'secondary' ? 'secondary' : 'primary',
     ...(documentPath ? { documentPath } : {}),
     ...(text(value.documentName, 1_000) ? { documentName: text(value.documentName, 1_000) } : {}),
+    ...(metadataWebUrl(value.webUrl) ? { webUrl: metadataWebUrl(value.webUrl) } : {}),
     ...(typeof value.kind === 'string' && kinds.has(value.kind) ? { kind: value.kind as ContextSnapshot['kind'] } : {}),
     ...(typeof value.pdfPage === 'number' && Number.isInteger(value.pdfPage) && value.pdfPage > 0 ? { pdfPage: value.pdfPage } : {}),
     ...(Array.isArray(value.visiblePages) ? { visiblePages: value.visiblePages.filter((page): page is number => typeof page === 'number' && Number.isInteger(page) && page > 0).slice(0, 20) } : {}),
@@ -212,10 +311,12 @@ function normalizedContext(value: unknown, root: string): ContextSnapshot | unde
 
 function normalizedSource(value: unknown, root: string): SourceRef | undefined {
   if (!isRecord(value)) return undefined
-  const kinds = new Set(['pdf', 'markdown', 'docx', 'image', 'text', 'session', 'general'])
+  const kinds = new Set(['pdf', 'markdown', 'docx', 'ppt', 'pptx', 'image', 'text', 'session', 'web', 'general'])
   if (typeof value.kind !== 'string' || !kinds.has(value.kind)) return undefined
   const kind = value.kind as SourceRef['kind']
-  const sourcePath = kind === 'session' || kind === 'general'
+  const sourcePath = kind === 'web'
+    ? metadataWebUrl(value.path)
+    : kind === 'session' || kind === 'general'
     ? text(value.path, 4_000) ?? ''
     : metadataProjectPath(value.path, root)
   if (sourcePath === undefined) return undefined
@@ -230,25 +331,69 @@ function normalizedSource(value: unknown, root: string): SourceRef | undefined {
   }
 }
 
+function normalizedMarkdownOperation(value: unknown, root: string): MarkdownFileOperation | undefined {
+  if (!isRecord(value) || (value.kind !== 'create' && value.kind !== 'append' && value.kind !== 'replace')) return undefined
+  const targetPath = metadataProjectPath(value.targetPath, root)
+  const proposedContent = text(value.proposedContent, MAX_AI_OPERATION_CONTENT)
+  if (!targetPath || !/\.(?:md|markdown)$/iu.test(targetPath) || proposedContent === undefined) return undefined
+  return {
+    kind: value.kind,
+    targetPath,
+    proposedContent,
+    ...(text(value.originalContent, MAX_AI_OPERATION_CONTENT) !== undefined
+      ? { originalContent: text(value.originalContent, MAX_AI_OPERATION_CONTENT) }
+      : {}),
+    ...(typeof value.expectedModifiedAt === 'number' && Number.isFinite(value.expectedModifiedAt)
+      ? { expectedModifiedAt: value.expectedModifiedAt }
+      : {})
+  }
+}
+
 function normalizedOperation(value: unknown, root: string): FileOperationProposal | undefined {
   if (!isRecord(value) || typeof value.id !== 'string' || !value.id.trim()) return undefined
-  if (value.kind !== 'create' && value.kind !== 'append' && value.kind !== 'replace') return undefined
-  const targetPath = metadataProjectPath(value.targetPath, root)
-  const proposedContent = text(value.proposedContent, 8 * 1024 * 1024)
-  if (!targetPath || !/\.(?:md|markdown)$/iu.test(targetPath) || proposedContent === undefined) return undefined
+  const single = normalizedMarkdownOperation(value, root)
+  if (!single) return undefined
+  let operations: MarkdownFileOperation[] | undefined
+  if (Array.isArray(value.operations)) {
+    if (value.operations.length < 1 || value.operations.length > MAX_AI_FILE_OPERATIONS) return undefined
+    const normalized = value.operations.map((item) => normalizedMarkdownOperation(item, root))
+    if (normalized.some((item) => !item)) return undefined
+    operations = normalized as MarkdownFileOperation[]
+  }
   const savedStatus = value.status === 'accepted' || value.status === 'rejected' || value.status === 'failed'
     ? value.status
     : 'failed'
   return {
     id: value.id.slice(0, 500),
-    kind: value.kind,
-    targetPath,
-    proposedContent,
-    ...(text(value.originalContent, 8 * 1024 * 1024) !== undefined ? { originalContent: text(value.originalContent, 8 * 1024 * 1024) } : {}),
-    ...(typeof value.expectedModifiedAt === 'number' && Number.isFinite(value.expectedModifiedAt) ? { expectedModifiedAt: value.expectedModifiedAt } : {}),
-    summary: text(value.summary, 500) ?? `${value.kind} ${path.basename(targetPath)}`,
+    ...single,
+    ...(operations ? { operations } : {}),
+    summary: text(value.summary, 500) ?? `${single.kind} ${path.basename(single.targetPath)}`,
     status: savedStatus,
     ...(savedStatus === 'failed' ? { error: text(value.error, 20_000) ?? '应用已重新启动，请重新生成这项文件建议。' } : {})
+  }
+}
+
+function normalizedAttachmentPaths(
+  value: unknown,
+  attachment: ChatImageAttachment,
+  root: string
+): ChatImageAttachment {
+  if (!Array.isArray(value)) return attachment
+  const raw = value.find((candidate) => isRecord(candidate) && candidate.id === attachment.id)
+  if (!isRecord(raw)) return attachment
+  const fromRelative = typeof raw.projectRelativePath === 'string'
+    ? metadataProjectPath(raw.projectRelativePath, root)
+    : undefined
+  const fromAbsolute = typeof raw.absolutePath === 'string'
+    ? metadataProjectPath(raw.absolutePath, root)
+    : undefined
+  // The relative path remains valid when a project folder is moved; a persisted absolute path may be stale.
+  const canonical = fromRelative ?? fromAbsolute
+  if (!canonical || fileKind(canonical) !== 'image') return attachment
+  return {
+    ...attachment,
+    projectRelativePath: path.relative(root, canonical).split(path.sep).join('/'),
+    absolutePath: canonical
   }
 }
 
@@ -262,11 +407,15 @@ function normalizedMessage(value: unknown, root: string): ChatMessage | undefine
     ? value.sources.map((source) => normalizedSource(source, root)).filter((source): source is SourceRef => Boolean(source)).slice(0, 100)
     : undefined
   const operation = normalizedOperation(value.operation, root)
+  const attachments = value.role !== 'system'
+    ? normalizeChatImageAttachments(value.attachments).map((attachment) => normalizedAttachmentPaths(value.attachments, attachment, root))
+    : []
   return {
     id: value.id.slice(0, 500),
     role: value.role,
     content,
     createdAt: timestamp(value.createdAt, Date.now()),
+    ...(attachments.length ? { attachments } : {}),
     ...(context ? { context } : {}),
     ...(sources?.length ? { sources } : {}),
     ...(operation ? { operation } : {}),
@@ -318,15 +467,41 @@ export function normalizeAnnotationsForProject(value: unknown, root: string): An
 }
 
 interface OperationInput {
-  kind: unknown
-  targetPath: unknown
-  proposedContent: unknown
+  kind?: unknown
+  targetPath?: unknown
+  proposedContent?: unknown
+  operations?: unknown
   summary?: unknown
 }
 
 interface PendingOperation {
   proposal: FileOperationProposal
   createdAt: number
+}
+
+export interface ProjectWriteScope {
+  root: string
+  revision: number
+}
+
+function proposalOperations(proposal: FileOperationProposal): MarkdownFileOperation[] {
+  return proposal.operations?.length
+    ? proposal.operations
+    : [{
+        kind: proposal.kind,
+        targetPath: proposal.targetPath,
+        proposedContent: proposal.proposedContent,
+        ...(proposal.originalContent !== undefined ? { originalContent: proposal.originalContent } : {}),
+        ...(proposal.expectedModifiedAt !== undefined ? { expectedModifiedAt: proposal.expectedModifiedAt } : {})
+      }]
+}
+
+function sameMarkdownOperation(left: MarkdownFileOperation, right: MarkdownFileOperation): boolean {
+  return left.kind === right.kind &&
+    left.targetPath === right.targetPath &&
+    left.proposedContent === right.proposedContent &&
+    left.originalContent === right.originalContent &&
+    left.expectedModifiedAt === right.expectedModifiedAt
 }
 
 interface StoredOcrResult extends Omit<OcrResult, 'path'> {
@@ -363,6 +538,7 @@ function normalizedOcrWarnings(value: unknown): string[] | undefined {
 
 export class ProjectService {
   private guardValue: ProjectPathGuard | null = null
+  private projectRevision = 0
   private currentInfo: ProjectInfo | null = null
   private watcher: FSWatcher | null = null
   private watcherTimer: NodeJS.Timeout | null = null
@@ -374,12 +550,26 @@ export class ProjectService {
   constructor(
     private readonly settings: SettingsStore,
     private readonly emitFilesChanged: (events: FileChangeEvent[]) => void,
-    private readonly onFileChanged: (filePath?: string) => void
+    private readonly onFileChanged: (filePath?: string) => void,
+    private readonly beforeProjectChange: () => void | Promise<void> = () => undefined
   ) {}
 
   get guard(): ProjectPathGuard {
     if (!this.guardValue) throw new Error('请先打开一个项目。')
     return this.guardValue
+  }
+
+  captureWriteScope(): ProjectWriteScope {
+    const guard = this.guard
+    return { root: guard.root, revision: this.projectRevision }
+  }
+
+  private guardForWriteScope(scope: ProjectWriteScope): ProjectPathGuard {
+    const guard = this.guardValue
+    if (!guard || scope.revision !== this.projectRevision || scope.root !== guard.root) {
+      throw new Error('项目已切换，本次文件写入已取消。')
+    }
+    return guard
   }
 
   get info(): ProjectInfo {
@@ -493,6 +683,8 @@ export class ProjectService {
   async openPath(inputPath: string, createdAt?: number): Promise<ProjectInfo> {
     const root = await canonicalDirectory(inputPath)
     await this.ensureMetadata(root)
+    this.projectRevision += 1
+    await this.beforeProjectChange()
     await this.stopWatcher()
     this.guardValue = new ProjectPathGuard(root)
     const rootInfo = await stat(root)
@@ -523,6 +715,8 @@ export class ProjectService {
   }
 
   async close(): Promise<void> {
+    this.projectRevision += 1
+    await this.beforeProjectChange()
     await this.stopWatcher()
     this.guardValue = null
     this.currentInfo = null
@@ -658,6 +852,113 @@ export class ProjectService {
     return `coscribe-file://project/${encoded}`
   }
 
+  private async ensureProjectDirectories(
+    directory: string,
+    guard = this.guard,
+    verify?: () => void
+  ): Promise<void> {
+    verify?.()
+    const root = guard.root
+    const canonicalDirectory = path.resolve(directory)
+    if (!isInside(root, canonicalDirectory)) throw new Error('目标文件夹不在当前项目内。')
+    assertNotMetadataPath(root, canonicalDirectory)
+    let cursor = root
+    for (const segment of path.relative(root, canonicalDirectory).split(path.sep).filter(Boolean)) {
+      const parent = cursor
+      cursor = path.join(cursor, segment)
+      try {
+        const info = await lstat(cursor)
+        if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('目标父路径不是普通文件夹。')
+        continue
+      } catch (error) {
+        if (!isMissing(error)) throw error
+      }
+      const parentIdentity = await guard.identity(parent, 'directory')
+      verify?.()
+      try {
+        await mkdir(cursor, { mode: 0o700 })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+      verify?.()
+      await guard.verifyIdentity(parentIdentity)
+      await guard.existing(cursor, 'directory')
+      verify?.()
+    }
+  }
+
+  async verifiedChatImageAttachments(value: unknown): Promise<ChatImageAttachment[]> {
+    const normalized = normalizeChatImageAttachments(value, { strict: true })
+    return Promise.all(normalized.map(async (attachment) => {
+      const withPaths = normalizedAttachmentPaths(value, attachment, this.guard.root)
+      const candidate = withPaths.absolutePath ?? withPaths.projectRelativePath
+      if (!candidate) return attachment
+      try {
+        const canonical = await this.guard.existing(candidate, 'file')
+        assertNotMetadataPath(this.guard.root, canonical)
+        if (fileKind(canonical) !== 'image') return attachment
+        return {
+          ...attachment,
+          projectRelativePath: path.relative(this.guard.root, canonical).split(path.sep).join('/'),
+          absolutePath: canonical
+        }
+      } catch {
+        return attachment
+      }
+    }))
+  }
+
+  async persistGeneratedImage(input: ChatImageAttachment): Promise<ChatImageAttachment> {
+    const [attachment] = normalizeChatImageAttachments([input], { strict: true })
+    if (!attachment) throw new Error('生成图片数据无效。')
+    const extension = attachment.mimeType === 'image/jpeg' ? 'jpg' : attachment.mimeType.slice('image/'.length)
+    const stem = path.parse(assertSafeName(attachment.name, '图片文件名')).name.slice(0, 180) || 'gpt-image-2'
+    const fileName = `${stem}-${randomUUID().slice(0, 8)}.${extension}`
+    const requested = path.join('assets', 'ai-images', fileName)
+    const unchecked = await projectTargetAllowMissing(this.guard.root, requested)
+    await this.ensureProjectDirectories(path.dirname(unchecked))
+    const canonical = await this.guard.target(unchecked)
+    assertNotMetadataPath(this.guard.root, canonical)
+    await assertAbsent(canonical)
+    const parentIdentity = await this.guard.identity(path.dirname(canonical), 'directory')
+    await this.guard.verifyIdentity(parentIdentity)
+
+    const prefix = `data:${attachment.mimeType};base64,`
+    const bytes = Buffer.from(attachment.dataUrl.slice(prefix.length), 'base64')
+    let created = false
+    try {
+      const descriptor = await open(
+        canonical,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0),
+        0o600
+      )
+      created = true
+      try {
+        await descriptor.writeFile(bytes)
+        await descriptor.sync()
+      } finally {
+        await descriptor.close()
+      }
+      await this.guard.verifyIdentity(parentIdentity)
+      await this.guard.existing(canonical, 'file')
+    } catch (error) {
+      if (created) {
+        const stillSafe = await this.guard.verifyIdentity(parentIdentity)
+          .then(() => this.guard.existing(canonical, 'file'))
+          .then((verified) => verified === canonical)
+          .catch(() => false)
+        if (stillSafe) await unlink(canonical).catch(() => undefined)
+      }
+      throw error
+    }
+    return {
+      ...attachment,
+      name: fileName,
+      projectRelativePath: path.relative(this.guard.root, canonical).split(path.sep).join('/'),
+      absolutePath: canonical
+    }
+  }
+
   async pathFromProtocol(url: string): Promise<string> {
     const parsed = new URL(url)
     if (parsed.protocol !== 'coscribe-file:' || parsed.hostname !== 'project') throw new Error('无效的项目文件 URL。')
@@ -774,6 +1075,20 @@ export class ProjectService {
       } finally {
         await descriptor.close()
       }
+    } else if (kind === 'pptx') {
+      if (info.size > MAX_POWERPOINT_FILE_SIZE) throw new Error('PPTX 文件超过 128 MB，无法直接打开。')
+      const descriptor = await this.guard.openReadOnly(canonical)
+      try {
+        const extracted = extractPptxText(await descriptor.readFile())
+        content = extracted.text
+        warnings = extracted.warnings
+      } catch (error) {
+        warnings = [error instanceof Error ? error.message : '无法提取 PPTX 中的文字。']
+      } finally {
+        await descriptor.close()
+      }
+    } else if (kind === 'ppt') {
+      warnings = ['旧版 .ppt 是二进制格式；需要本机 LibreOffice 或 PowerPoint 转换为 PDF/PPTX 后才能完整预览和提取文字。']
     }
     const ocrResults = kind === 'image' || kind === 'pdf' ? await this.ocrResults(canonical) : []
     return {
@@ -782,7 +1097,7 @@ export class ProjectService {
       content,
       modifiedAt: info.mtimeMs,
       size: info.size,
-      ...(kind === 'pdf' || kind === 'image' ? { url: this.urlFor(canonical) } : {}),
+      ...(kind === 'pdf' || kind === 'image' || kind === 'ppt' || kind === 'pptx' ? { url: this.urlFor(canonical) } : {}),
       ...(html !== undefined ? { html } : {}),
       ...(warnings?.length ? { warnings } : {}),
       ...(ocrResults.length ? { ocrResults } : {})
@@ -816,21 +1131,123 @@ export class ProjectService {
     return this.read(canonical)
   }
 
-  async createMarkdown(inputPath: string, content = ''): Promise<FileReadResult> {
+  async createMarkdown(
+    inputPath: string,
+    content = '',
+    scope: ProjectWriteScope = this.captureWriteScope()
+  ): Promise<FileReadResult> {
     if (typeof content !== 'string') throw new Error('Markdown 内容格式无效。')
-    const canonical = await this.guard.assertMarkdown(inputPath, false)
-    assertNotMetadataPath(this.guard.root, canonical)
+    const guard = this.guardForWriteScope(scope)
+    const verifyScope = (): void => { this.guardForWriteScope(scope) }
+    const unchecked = await projectTargetAllowMissing(guard.root, inputPath)
+    verifyScope()
+    if (!/\.(?:md|markdown)$/iu.test(unchecked)) throw new Error('只能创建 .md 或 .markdown 文件。')
+    await assertAbsent(unchecked)
+    verifyScope()
+    await this.ensureProjectDirectories(path.dirname(unchecked), guard, verifyScope)
+    const canonical = await guard.assertMarkdown(unchecked, false)
+    verifyScope()
+    assertNotMetadataPath(guard.root, canonical)
     await assertAbsent(canonical)
-    const parentIdentity = await this.guard.identity(path.dirname(canonical), 'directory')
+    verifyScope()
+    const parentIdentity = await guard.identity(path.dirname(canonical), 'directory')
     const verify = async () => {
-      await this.guard.verifyIdentity(parentIdentity)
-      const checked = await this.guard.assertMarkdown(canonical, false)
+      verifyScope()
+      await guard.verifyIdentity(parentIdentity)
+      const checked = await guard.assertMarkdown(canonical, false)
       if (checked !== canonical) throw new Error('写入目标在校验后发生变化。')
       await assertAbsent(canonical)
+      verifyScope()
     }
     await atomicCreate(canonical, content, verify)
-    await this.guard.existing(canonical, 'file')
-    return this.read(canonical)
+    verifyScope()
+    await guard.existing(canonical, 'file')
+    const result = await this.read(canonical)
+    verifyScope()
+    return result
+  }
+
+  async createWebPdf(
+    inputPath: string,
+    content: Uint8Array,
+    scope: ProjectWriteScope = this.captureWriteScope()
+  ): Promise<FileReadResult> {
+    if (!(content instanceof Uint8Array) || content.byteLength < 5 || content.byteLength > MAX_WEB_CAPTURE_PDF_SIZE) {
+      throw new Error('网页 PDF 内容为空或超过 256 MB 限制。')
+    }
+    if (Buffer.from(content.subarray(0, 5)).toString('ascii') !== '%PDF-') {
+      throw new Error('Chromium 没有生成有效的 PDF。')
+    }
+    const guard = this.guardForWriteScope(scope)
+    const verifyScope = (): void => { this.guardForWriteScope(scope) }
+    const unchecked = await projectTargetAllowMissing(guard.root, inputPath)
+    verifyScope()
+    if (path.extname(unchecked).toLocaleLowerCase() !== '.pdf') throw new Error('网页打印结果只能保存为 .pdf。')
+    await assertAbsent(unchecked)
+    verifyScope()
+    await this.ensureProjectDirectories(path.dirname(unchecked), guard, verifyScope)
+    const canonical = await guard.target(unchecked)
+    verifyScope()
+    assertNotMetadataPath(guard.root, canonical)
+    await assertAbsent(canonical)
+    verifyScope()
+    const parentIdentity = await guard.identity(path.dirname(canonical), 'directory')
+    const verify = async () => {
+      verifyScope()
+      await guard.verifyIdentity(parentIdentity)
+      const checked = await guard.target(canonical)
+      if (checked !== canonical) throw new Error('网页 PDF 目标在校验后发生变化。')
+      await assertAbsent(canonical)
+      verifyScope()
+    }
+    await atomicCreate(canonical, content, verify)
+    verifyScope()
+    await guard.existing(canonical, 'file')
+    const result = await this.read(canonical)
+    verifyScope()
+    return result
+  }
+
+  async createWebArchive(
+    inputPath: string,
+    content: Uint8Array,
+    scope: ProjectWriteScope = this.captureWriteScope()
+  ): Promise<FileReadResult> {
+    if (!(content instanceof Uint8Array) || content.byteLength < 64 || content.byteLength > MAX_WEB_ARCHIVE_SIZE) {
+      throw new Error('完整网页归档为空或超过 256 MB 限制。')
+    }
+    const header = Buffer.from(content.subarray(0, Math.min(content.byteLength, 64 * 1024))).toString('latin1')
+    if (!/^From: <Saved by Blink>/mu.test(header) || !/^MIME-Version: 1\.0\s*$/imu.test(header) || !/^Content-Type: multipart\/related;/imu.test(header)) {
+      throw new Error('Chromium 没有生成有效的 MHTML 网页归档。')
+    }
+    const guard = this.guardForWriteScope(scope)
+    const verifyScope = (): void => { this.guardForWriteScope(scope) }
+    const unchecked = await projectTargetAllowMissing(guard.root, inputPath)
+    verifyScope()
+    if (!/\.mhtml?$/iu.test(unchecked)) throw new Error('完整网页归档只能保存为 .mhtml 或 .mht。')
+    await assertAbsent(unchecked)
+    verifyScope()
+    await this.ensureProjectDirectories(path.dirname(unchecked), guard, verifyScope)
+    const canonical = await guard.target(unchecked)
+    verifyScope()
+    assertNotMetadataPath(guard.root, canonical)
+    await assertAbsent(canonical)
+    verifyScope()
+    const parentIdentity = await guard.identity(path.dirname(canonical), 'directory')
+    const verify = async () => {
+      verifyScope()
+      await guard.verifyIdentity(parentIdentity)
+      const checked = await guard.target(canonical)
+      if (checked !== canonical) throw new Error('完整网页归档目标在校验后发生变化。')
+      await assertAbsent(canonical)
+      verifyScope()
+    }
+    await atomicCreate(canonical, content, verify)
+    verifyScope()
+    await guard.existing(canonical, 'file')
+    const result = await this.read(canonical)
+    verifyScope()
+    return result
   }
 
   async createFolder(inputPath: string): Promise<void> {
@@ -932,49 +1349,144 @@ export class ProjectService {
     shell.showItemInFolder(canonical)
   }
 
+  async openExternal(inputPath: string): Promise<void> {
+    const canonical = await this.guard.existing(inputPath, 'file')
+    assertNotMetadataPath(this.guard.root, canonical)
+    const error = await shell.openPath(canonical)
+    if (error) throw new Error(`系统无法打开这个文件：${error}`)
+  }
+
   async url(inputPath: string): Promise<string> {
     const canonical = await this.guard.existing(inputPath, 'file')
     assertNotMetadataPath(this.guard.root, canonical)
     return this.urlFor(canonical)
   }
 
+  async convertPowerPointToPdf(inputPath: string): Promise<FileReadResult> {
+    const canonical = await this.guard.existing(inputPath, 'file')
+    assertNotMetadataPath(this.guard.root, canonical)
+    const kind = fileKind(canonical)
+    if (kind !== 'ppt' && kind !== 'pptx') throw new Error('只能把 .ppt 或 .pptx 演示文稿转换为 PDF。')
+
+    const temporary = await mkdtemp(path.join(app.getPath('temp'), 'coscribe-ppt-'))
+    try {
+      const profile = path.join(temporary, 'libreoffice-profile')
+      const args = [
+        `-env:UserInstallation=${pathToFileURL(profile).href}`,
+        '--headless',
+        '--convert-to',
+        'pdf',
+        '--outdir',
+        temporary,
+        canonical
+      ]
+      let conversionError: Error | null = null
+      let converted = false
+      for (const candidate of officeCandidates()) {
+        try {
+          await runOffice(candidate, args)
+          converted = true
+          break
+        } catch (error) {
+          conversionError = error instanceof Error ? error : new Error('PowerPoint 转换失败。')
+        }
+      }
+      if (!converted) {
+        throw new Error(`未找到可用的 LibreOffice。请先安装 LibreOffice 后重试。${conversionError?.message ? ` ${conversionError.message}` : ''}`)
+      }
+
+      const convertedName = (await readdir(temporary)).find((name) => path.extname(name).toLocaleLowerCase() === '.pdf')
+      if (!convertedName) throw new Error('LibreOffice 没有生成 PDF 文件。演示文稿可能已损坏或受密码保护。')
+      const convertedPath = path.join(temporary, convertedName)
+      const convertedInfo = await lstat(convertedPath)
+      if (!convertedInfo.isFile() || convertedInfo.isSymbolicLink()) throw new Error('转换结果不是普通 PDF 文件。')
+
+      const parsed = path.parse(canonical)
+      let counter = 0
+      let target: string
+      while (true) {
+        const suffix = counter === 0 ? '' : ` (${counter})`
+        target = await this.guard.target(path.join(parsed.dir, `${parsed.name}${suffix}.pdf`))
+        const exists = await lstat(target).then(() => true).catch((error) => isMissing(error) ? false : Promise.reject(error))
+        if (!exists) break
+        counter += 1
+      }
+      const parentIdentity = await this.guard.identity(path.dirname(target), 'directory')
+      await this.guard.verifyIdentity(parentIdentity)
+      await copyFile(convertedPath, target, constants.COPYFILE_EXCL)
+      await this.guard.verifyIdentity(parentIdentity)
+      return this.read(await this.guard.existing(target, 'file'))
+    } finally {
+      await rm(temporary, { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
+
   async prepareAiOperation(input: OperationInput): Promise<FileOperationProposal> {
-    if (input.kind !== 'create' && input.kind !== 'append' && input.kind !== 'replace') {
-      throw new Error('AI 返回了不支持的文件操作。')
+    const rawOperations = Array.isArray(input.operations) ? input.operations : [input]
+    if (!rawOperations.length || rawOperations.length > MAX_AI_FILE_OPERATIONS) {
+      throw new Error(`AI 每次只能建议 1-${MAX_AI_FILE_OPERATIONS} 个 Markdown 文件操作。`)
     }
-    if (typeof input.targetPath !== 'string' || typeof input.proposedContent !== 'string') {
-      throw new Error('AI 文件操作缺少目标路径或内容。')
-    }
-    if (input.proposedContent.length > 8 * 1024 * 1024) throw new Error('AI 建议内容过大，已拒绝。')
+    const prepared: MarkdownFileOperation[] = []
+    let totalContent = 0
+    for (const raw of rawOperations) {
+      if (!isRecord(raw) || (raw.kind !== 'create' && raw.kind !== 'append' && raw.kind !== 'replace')) {
+        throw new Error('AI 返回了不支持的文件操作。')
+      }
+      if (typeof raw.targetPath !== 'string' || typeof raw.proposedContent !== 'string') {
+        throw new Error('AI 文件操作缺少目标路径或内容。')
+      }
+      if (raw.proposedContent.length > MAX_AI_OPERATION_CONTENT) throw new Error('单个 AI 建议内容过大，已拒绝。')
+      totalContent += raw.proposedContent.length
+      if (totalContent > MAX_AI_OPERATION_TOTAL_CONTENT) throw new Error('AI 批量建议总内容过大，已拒绝。')
 
-    const mustExist = input.kind !== 'create'
-    const target = await this.guard.assertMarkdown(input.targetPath, mustExist)
-    assertNotMetadataPath(this.guard.root, target)
-    let originalContent: string | undefined
-    let expectedModifiedAt: number | undefined
-    if (mustExist) {
-      const current = await this.read(target)
-      originalContent = current.content
-      expectedModifiedAt = current.modifiedAt
-    } else {
-      await assertAbsent(target)
+      const mustExist = raw.kind !== 'create'
+      const target = mustExist
+        ? await this.guard.assertMarkdown(raw.targetPath, true)
+        : await projectTargetAllowMissing(this.guard.root, raw.targetPath)
+      if (!/\.(?:md|markdown)$/iu.test(target)) throw new Error('AI 只能写入 .md 或 .markdown 文件。')
+      assertNotMetadataPath(this.guard.root, target)
+      let originalContent: string | undefined
+      let expectedModifiedAt: number | undefined
+      if (mustExist) {
+        const current = await this.read(target)
+        totalContent += current.content.length
+        if (totalContent > MAX_AI_OPERATION_TOTAL_CONTENT) throw new Error('AI 批量建议的预览内容过大，已拒绝。')
+        originalContent = current.content
+        expectedModifiedAt = current.modifiedAt
+      } else {
+        await assertAbsent(target)
+      }
+      prepared.push({
+        kind: raw.kind,
+        targetPath: target,
+        proposedContent: raw.proposedContent,
+        ...(originalContent !== undefined ? { originalContent } : {}),
+        ...(expectedModifiedAt !== undefined ? { expectedModifiedAt } : {})
+      })
     }
 
+    const uniqueTargets = new Set(prepared.map((operation) => operation.targetPath))
+    if (uniqueTargets.size !== prepared.length) throw new Error('AI 批量建议包含重复的目标文件。')
+    for (const operation of prepared) {
+      if (prepared.some((other) => other !== operation && isInside(operation.targetPath, other.targetPath))) {
+        throw new Error('AI 批量建议把一个 Markdown 文件同时作为另一个文件的父目录。')
+      }
+    }
+    const first = prepared[0]
     const proposal: FileOperationProposal = {
       id: randomUUID(),
-      kind: input.kind,
-      targetPath: target,
-      proposedContent: input.proposedContent,
-      ...(originalContent !== undefined ? { originalContent } : {}),
-      ...(expectedModifiedAt !== undefined ? { expectedModifiedAt } : {}),
+      ...first,
+      ...(prepared.length > 1 ? { operations: prepared } : {}),
       summary:
         typeof input.summary === 'string' && input.summary.trim()
           ? input.summary.trim().slice(0, 500)
-          : input.kind === 'create'
-            ? `创建 ${path.basename(target)}`
-            : input.kind === 'append'
-              ? `追加到 ${path.basename(target)}`
-              : `修改 ${path.basename(target)}`,
+          : prepared.length > 1
+            ? `写入 ${prepared.length} 个 Markdown 文件`
+            : first.kind === 'create'
+              ? `创建 ${path.basename(first.targetPath)}`
+              : first.kind === 'append'
+                ? `追加到 ${path.basename(first.targetPath)}`
+                : `修改 ${path.basename(first.targetPath)}`,
       status: 'pending'
     }
     this.pendingOperations.set(proposal.id, { proposal, createdAt: Date.now() })
@@ -984,37 +1496,91 @@ export class ProjectService {
     return proposal
   }
 
-  async applyAiOperation(input: FileOperationProposal): Promise<FileReadResult> {
+  async applyAiOperation(input: FileOperationProposal): Promise<FileOperationApplyResult> {
     if (!input || input.status !== 'accepted') throw new Error('只有用户明确接受的 AI 文件建议才可以写入。')
     const pending = this.pendingOperations.get(input.id)
     if (!pending) throw new Error('AI 文件建议已失效，请重新生成预览。')
     const proposal = pending.proposal
+    const expectedOperations = proposalOperations(proposal)
+    const receivedOperations = proposalOperations(input)
     if (
       input.kind !== proposal.kind ||
       input.targetPath !== proposal.targetPath ||
-      input.proposedContent !== proposal.proposedContent
+      input.proposedContent !== proposal.proposedContent ||
+      receivedOperations.length !== expectedOperations.length ||
+      !receivedOperations.every((operation, index) => sameMarkdownOperation(operation, expectedOperations[index]))
     ) {
       throw new Error('AI 文件建议在确认前发生变化，操作已拒绝。')
     }
 
-    let result: FileReadResult
-    if (proposal.kind === 'create') {
-      result = await this.createMarkdown(proposal.targetPath, proposal.proposedContent)
-    } else {
-      const current = await this.read(proposal.targetPath)
+    for (const operation of expectedOperations) {
+      if (operation.kind === 'create') {
+        await assertAbsent(await projectTargetAllowMissing(this.guard.root, operation.targetPath))
+        continue
+      }
+      const current = await this.read(operation.targetPath)
       if (
-        current.modifiedAt !== proposal.expectedModifiedAt ||
-        current.content !== proposal.originalContent
+        current.modifiedAt !== operation.expectedModifiedAt ||
+        current.content !== operation.originalContent
       ) {
         throw new Error('文件在预览后已被修改。请重新加载并生成新的修改建议。')
       }
-      const nextContent =
-        proposal.kind === 'append'
-          ? `${current.content}${current.content && !current.content.endsWith('\n') ? '\n' : ''}${proposal.proposedContent}`
-          : proposal.proposedContent
-      result = await this.saveMarkdown(proposal.targetPath, nextContent, proposal.expectedModifiedAt)
     }
-    this.pendingOperations.delete(proposal.id)
-    return result
+
+    const files: FileReadResult[] = []
+    const applied: Array<{ operation: MarkdownFileOperation; result: FileReadResult }> = []
+    try {
+      for (const operation of expectedOperations) {
+        let result: FileReadResult
+        if (operation.kind === 'create') {
+          result = await this.createMarkdown(operation.targetPath, operation.proposedContent)
+        } else {
+          const current = await this.read(operation.targetPath)
+          if (current.modifiedAt !== operation.expectedModifiedAt || current.content !== operation.originalContent) {
+            throw new Error('文件在批量写入期间发生变化，剩余操作已停止。')
+          }
+          const nextContent =
+            operation.kind === 'append'
+              ? `${current.content}${current.content && !current.content.endsWith('\n') ? '\n' : ''}${operation.proposedContent}`
+              : operation.proposedContent
+          result = await this.saveMarkdown(operation.targetPath, nextContent, operation.expectedModifiedAt)
+        }
+        files.push(result)
+        applied.push({ operation, result })
+      }
+      const first = files[0]
+      return { ...first, files }
+    } catch (error) {
+      const rollbackFailures: string[] = []
+      for (const completed of [...applied].reverse()) {
+        try {
+          const current = await this.read(completed.result.path)
+          if (
+            Math.abs(current.modifiedAt - completed.result.modifiedAt) > 1 ||
+            current.content !== completed.result.content
+          ) {
+            throw new Error('文件在回滚前又被外部修改')
+          }
+          if (completed.operation.kind === 'create') {
+            await unlink(await this.guard.existing(completed.result.path, 'file'))
+          } else {
+            await this.saveMarkdown(
+              completed.result.path,
+              completed.operation.originalContent ?? '',
+              completed.result.modifiedAt
+            )
+          }
+        } catch (rollbackError) {
+          rollbackFailures.push(`${path.basename(completed.result.path)}：${rollbackError instanceof Error ? rollbackError.message : '未知错误'}`)
+        }
+      }
+      const reason = error instanceof Error ? error.message : '批量写入失败。'
+      if (rollbackFailures.length) {
+        throw new Error(`${reason} 已尝试回滚，但以下文件需要人工检查：${rollbackFailures.join('；')}`)
+      }
+      throw new Error(`${reason} 已完成写入均已回滚。`)
+    } finally {
+      this.pendingOperations.delete(proposal.id)
+    }
   }
 }

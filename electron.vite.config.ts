@@ -10,12 +10,14 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      sourcemap: false,
       lib: { entry: resolve(rootDir, 'electron/main/index.ts') }
     }
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      sourcemap: false,
       lib: { entry: resolve(rootDir, 'electron/preload/index.ts') },
       rollupOptions: {
         output: { format: 'cjs', entryFileNames: 'index.cjs' }
@@ -40,6 +42,7 @@ export default defineConfig({
       })
     ],
     build: {
+      sourcemap: false,
       rollupOptions: { input: resolve(rootDir, 'index.html') }
     }
   }

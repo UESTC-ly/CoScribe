@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, File, FileImage, FileText, FileType2, Folder, FolderOpen, MoreHorizontal } from 'lucide-react'
+import { ChevronRight, File, FileImage, FileText, FileType2, Folder, FolderOpen, Globe2, MoreHorizontal, Presentation } from 'lucide-react'
 import type { FileNode } from '../../shared/types'
 
 interface FileTreeProps {
@@ -18,6 +18,8 @@ function FileIcon({ node, expanded }: { node: FileNode; expanded: boolean }): Re
   if (node.kind === 'folder') return expanded ? <FolderOpen size={15} /> : <Folder size={15} />
   if (node.kind === 'image') return <FileImage size={15} />
   if (node.kind === 'docx') return <FileType2 size={15} />
+  if (node.kind === 'ppt' || node.kind === 'pptx') return <Presentation size={15} />
+  if (node.kind === 'webarchive') return <Globe2 size={15} />
   if (node.kind === 'markdown' || node.kind === 'text') return <FileText size={15} />
   return <File size={15} />
 }

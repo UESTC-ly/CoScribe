@@ -1,5 +1,5 @@
 export { AiWorkspace } from './AiWorkspace'
-export type { AiProjectFileOption, AiSendPayload, AiWorkspaceProps } from './AiWorkspace'
+export type { AiProjectFileOption, AiSendPayload, AiWorkspaceProps, ImageGenerationPayload } from './AiWorkspace'
 export { MarkdownContent, MarkdownMessage } from './MarkdownMessage'
 export type { MarkdownMessageProps } from './MarkdownMessage'
 export { MarkdownOperationCard } from './MarkdownOperationCard'

@@ -32,6 +32,7 @@ import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 import { cx, IconButton, ToolbarDivider } from './ViewerChrome'
 import { MermaidDiagram } from './MermaidDiagram'
+import { SyntaxCodeBlock } from './SyntaxCodeBlock'
 import type {
   MarkdownExternalChange,
   MarkdownOutlineItem,
@@ -46,6 +47,12 @@ type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
 interface SearchMatch {
   from: number
   to: number
+}
+
+interface OutlineRow {
+  item: MarkdownOutlineItem
+  hasChildren: boolean
+  active: boolean
 }
 
 function slugify(value: string): string {
@@ -132,6 +139,40 @@ function headingAt(outline: readonly MarkdownOutlineItem[], cursor: number): Mar
   return current
 }
 
+function visibleOutlineRows(
+  outline: readonly MarkdownOutlineItem[],
+  collapsedIds: ReadonlySet<string>,
+  currentHeading: MarkdownOutlineItem | undefined,
+): OutlineRow[] {
+  const rows: OutlineRow[] = []
+  const ancestors: MarkdownOutlineItem[] = []
+  const currentIndex = currentHeading
+    ? outline.findIndex((item) => item.offset === currentHeading.offset)
+    : -1
+
+  for (const [index, item] of outline.entries()) {
+    while (ancestors.at(-1)?.level && ancestors.at(-1)!.level >= item.level) ancestors.pop()
+    const hidden = ancestors.some((ancestor) => collapsedIds.has(ancestor.id))
+    const hasChildren = (outline[index + 1]?.level ?? 0) > item.level
+    const nextPeerIndex = outline
+      .slice(index + 1)
+      .findIndex((candidate) => candidate.level <= item.level)
+    const branchEnd = nextPeerIndex === -1 ? outline.length : index + nextPeerIndex + 1
+    const containsCurrent = currentIndex > index && currentIndex < branchEnd
+
+    if (!hidden) {
+      rows.push({
+        item,
+        hasChildren,
+        active: currentHeading?.offset === item.offset || (collapsedIds.has(item.id) && containsCurrent),
+      })
+    }
+    ancestors.push(item)
+  }
+
+  return rows
+}
+
 function sectionAt(
   content: string,
   outline: readonly MarkdownOutlineItem[],
@@ -169,7 +210,7 @@ export function MarkdownViewer({
   className,
   readOnly = false,
   mode,
-  defaultMode = 'both',
+  defaultMode = 'preview',
   autoSave = true,
   autoSaveDelayMs = 900,
   modifiedAt,
@@ -187,6 +228,7 @@ export function MarkdownViewer({
   const [draft, setDraft] = useState(value)
   const [internalMode, setInternalMode] = useState<MarkdownViewMode>(defaultMode)
   const [outlineOpen, setOutlineOpen] = useState(true)
+  const [collapsedOutlineIds, setCollapsedOutlineIds] = useState<Set<string>>(() => new Set())
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchIndex, setSearchIndex] = useState(0)
@@ -222,6 +264,10 @@ export function MarkdownViewer({
   onReadingStateChangeRef.current = onReadingStateChange
 
   const outline = useMemo(() => parseOutline(draft), [draft])
+  const outlineRows = useMemo(
+    () => visibleOutlineRows(outline, collapsedOutlineIds, currentHeading),
+    [collapsedOutlineIds, currentHeading, outline],
+  )
   const searchMatches = useMemo(() => findMatches(draft, searchQuery.trim()), [draft, searchQuery])
   const pendingConflict = externalChange ?? detectedConflict
   const activeConflict =
@@ -244,6 +290,7 @@ export function MarkdownViewer({
     setSavedAt(null)
     setCursor(0)
     setEditorScrollTop(0)
+    setCollapsedOutlineIds(new Set())
     setDetectedConflict(null)
     setDismissedConflictKey(null)
     setCompareOpen(false)
@@ -278,6 +325,18 @@ export function MarkdownViewer({
     if (searchMatches.length === 0) setSearchIndex(0)
     else if (searchIndex >= searchMatches.length) setSearchIndex(searchMatches.length - 1)
   }, [searchIndex, searchMatches.length])
+
+  useEffect(() => {
+    const branchIds = new Set(
+      outline
+        .filter((item, index) => (outline[index + 1]?.level ?? 0) > item.level)
+        .map((item) => item.id),
+    )
+    setCollapsedOutlineIds((current) => {
+      const retained = new Set([...current].filter((id) => branchIds.has(id)))
+      return retained.size === current.size ? current : retained
+    })
+  }, [outline])
 
   const setViewMode = useCallback(
     (nextMode: MarkdownViewMode) => {
@@ -317,7 +376,7 @@ export function MarkdownViewer({
       sectionText: sectionAt(draft, outline, heading),
       documentText: draft,
     })
-  }, []) // Initial context is emitted once; live updates are emitted by editor/preview events.
+  }, [cursor, documentIdentity, draft, effectiveMode, outline])
 
   const performSave = useCallback(
     async (
@@ -386,6 +445,15 @@ export function MarkdownViewer({
       `[data-markdown-offset="${offset}"]`,
     )
     headingElement?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
+  const toggleOutlineBranch = useCallback((id: string) => {
+    setCollapsedOutlineIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }, [])
 
   const jumpToSearchMatch = useCallback(
@@ -498,14 +566,23 @@ export function MarkdownViewer({
         if (codeNode?.type === 'element' && codeNode.tagName === 'code') {
           const classNames = codeNode.properties?.className
           const languages = Array.isArray(classNames) ? classNames.map(String) : [String(classNames ?? '')]
-          if (languages.includes('language-mermaid')) {
-            const source = codeNode.children
-              .filter((child) => child.type === 'text')
-              .map((child) => child.value)
-              .join('')
-              .replace(/\n$/, '')
-            return <MermaidDiagram code={source} />
-          }
+          const languageClass = languages.find((candidate) => candidate.startsWith('language-'))
+          const language = languageClass?.slice('language-'.length)
+          const source = codeNode.children
+            .filter((child) => child.type === 'text')
+            .map((child) => child.value)
+            .join('')
+            .replace(/\n$/u, '')
+
+          if (language?.toLowerCase() === 'mermaid') return <MermaidDiagram code={source} />
+          return (
+            <SyntaxCodeBlock
+              code={source}
+              language={language}
+              autoDetect
+              className="vk-markdown-code-block"
+            />
+          )
         }
         return <pre {...props}>{children}</pre>
       },
@@ -691,17 +768,36 @@ export function MarkdownViewer({
             </div>
             <nav>
               {outline.length === 0 && <p className="vk-viewer-muted">添加标题后，大纲会显示在这里。</p>}
-              {outline.map((item) => (
-                <button
-                  type="button"
+              {outlineRows.map(({ item, hasChildren, active }) => (
+                <div
                   key={`${item.id}-${item.offset}`}
-                  className={cx(currentHeading?.offset === item.offset && 'is-active')}
-                  style={{ paddingInlineStart: 12 + (item.level - 1) * 12 }}
-                  onClick={() => jumpToOffset(item.offset)}
+                  className="vk-markdown-outline-item"
+                  style={{ paddingInlineStart: 4 + (item.level - 1) * 12 }}
                 >
-                  <span>{item.text}</span>
-                  <small>H{item.level}</small>
-                </button>
+                  {hasChildren ? (
+                    <button
+                      type="button"
+                      className="vk-markdown-outline-toggle"
+                      aria-expanded={!collapsedOutlineIds.has(item.id)}
+                      aria-label={`${collapsedOutlineIds.has(item.id) ? '展开' : '折叠'}“${item.text}”下的标题`}
+                      title={collapsedOutlineIds.has(item.id) ? '展开子标题' : '折叠子标题'}
+                      onClick={() => toggleOutlineBranch(item.id)}
+                    >
+                      {collapsedOutlineIds.has(item.id) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                    </button>
+                  ) : (
+                    <span className="vk-markdown-outline-toggle-placeholder" aria-hidden="true" />
+                  )}
+                  <button
+                    type="button"
+                    className={cx('vk-markdown-outline-link', active && 'is-active')}
+                    aria-current={active ? 'location' : undefined}
+                    onClick={() => jumpToOffset(item.offset)}
+                  >
+                    <span>{item.text}</span>
+                    <small>H{item.level}</small>
+                  </button>
+                </div>
               ))}
             </nav>
           </aside>

@@ -2,14 +2,16 @@ import { statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { app, BrowserWindow, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, globalShortcut, net, protocol, shell } from 'electron'
 
 import { IPC } from '../ipc-channels'
 import { AiService } from './ai'
+import { ResearchBrowserService } from './browser'
 import { registerIpc } from './ipc'
 import { PdfTextService } from './pdf'
 import { ProjectService } from './project'
 import { ProjectSearchService } from './search'
+import { ScreenshotService } from './screenshot'
 import { SettingsStore } from './settings'
 
 protocol.registerSchemesAsPrivileged([
@@ -66,16 +68,33 @@ function allowedExternalUrl(url: string): boolean {
 
 const settings = new SettingsStore()
 let pdf: PdfTextService
+const projectLifecycle = {
+  ai: null as AiService | null,
+  browser: null as ResearchBrowserService | null
+}
 const project = new ProjectService(
   settings,
   (events) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.projectFilesChanged, events)
   },
-  (filePath) => pdf?.invalidate(filePath)
+  (filePath) => pdf?.invalidate(filePath),
+  () => {
+    projectLifecycle.ai?.stopAll()
+    projectLifecycle.browser?.close()
+  }
 )
 pdf = new PdfTextService(() => project.guard)
 const search = new ProjectSearchService(project, pdf)
 const ai = new AiService(settings, project, pdf, search)
+projectLifecycle.ai = ai
+const screenshot = new ScreenshotService(() => mainWindow)
+const browser = new ResearchBrowserService(() => mainWindow, project)
+projectLifecycle.browser = browser
+
+async function openExternalProject(projectPath: string): Promise<void> {
+  await project.openPath(projectPath)
+  mainWindow?.webContents.reload()
+}
 
 function directoryArgument(argv: string[]): string | null {
   const explicit: string[] = []
@@ -149,6 +168,7 @@ function createWindow(): BrowserWindow {
     if (allowedExternalUrl(url)) void shell.openExternal(url)
   })
   window.on('closed', () => {
+    browser.detachWindow(window)
     if (mainWindow === window) mainWindow = null
   })
 
@@ -161,10 +181,7 @@ function createWindow(): BrowserWindow {
 app.on('second-instance', (_event, argv) => {
   const candidate = directoryArgument(argv.slice(1))
   if (candidate) {
-    void project
-      .openPath(candidate)
-      .then(() => mainWindow?.webContents.reload())
-      .catch(() => undefined)
+    void openExternalProject(candidate).catch(() => undefined)
   }
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore()
@@ -180,10 +197,7 @@ app.on('open-file', (event, filePath) => {
     return
   }
   if (app.isReady()) {
-    void project
-      .openPath(filePath)
-      .then(() => mainWindow?.webContents.reload())
-      .catch(() => undefined)
+    void openExternalProject(filePath).catch(() => undefined)
   } else {
     project.setInitialPath(filePath)
   }
@@ -191,7 +205,7 @@ app.on('open-file', (event, filePath) => {
 
 void app.whenReady().then(() => {
   app.setAppUserModelId('com.coscribe.app')
-  registerIpc({ project, pdf, search, settings, ai })
+  registerIpc({ project, pdf, search, settings, ai, screenshot, browser })
   protocol.handle('coscribe-app', async (request) => {
     try {
       const parsed = new URL(request.url)
@@ -223,6 +237,23 @@ void app.whenReady().then(() => {
     }
   })
   mainWindow = createWindow()
+  const screenshotShortcutRegistered = globalShortcut.register('CommandOrControl+Shift+8', () => {
+    void screenshot.capture().then(
+      (attachment) => mainWindow?.webContents.send(IPC.screenshotResult, { type: 'captured', attachment }),
+      (error: unknown) => mainWindow?.webContents.send(IPC.screenshotResult, {
+        type: 'error',
+        message: error instanceof Error ? error.message : '截图失败。'
+      })
+    )
+  })
+  if (!screenshotShortcutRegistered && mainWindow) {
+    mainWindow.once('ready-to-show', () => {
+      mainWindow?.webContents.send(IPC.screenshotResult, {
+        type: 'error',
+        message: '截图快捷键 Cmd/Ctrl+Shift+8 已被其他应用占用；仍可点击聊天窗口中的截图按钮。'
+      })
+    })
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow()
@@ -231,6 +262,8 @@ void app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   ai.stopAll()
+  browser.destroy()
+  globalShortcut.unregisterAll()
 })
 
 app.on('window-all-closed', () => {

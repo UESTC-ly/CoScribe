@@ -1,4 +1,4 @@
-export type FileKind = 'folder' | 'markdown' | 'pdf' | 'docx' | 'image' | 'text' | 'unsupported'
+export type FileKind = 'folder' | 'markdown' | 'pdf' | 'docx' | 'ppt' | 'pptx' | 'webarchive' | 'image' | 'text' | 'unsupported'
 
 export interface FileNode {
   name: string
@@ -71,6 +71,8 @@ export interface ContextSnapshot {
   pane: PaneId
   documentPath?: string
   documentName?: string
+  /** Verified http(s) URL captured by the isolated research browser. */
+  webUrl?: string
   kind?: FileKind
   pdfPage?: number
   visiblePages?: number[]
@@ -87,7 +89,7 @@ export interface ContextSnapshot {
 export interface SourceRef {
   path: string
   label: string
-  kind: 'pdf' | 'markdown' | 'docx' | 'image' | 'text' | 'session' | 'general'
+  kind: 'pdf' | 'markdown' | 'docx' | 'ppt' | 'pptx' | 'image' | 'text' | 'session' | 'web' | 'general'
   page?: number
   heading?: string
   line?: number
@@ -96,23 +98,77 @@ export interface SourceRef {
 
 export type FileOperationKind = 'create' | 'append' | 'replace'
 
-export interface FileOperationProposal {
-  id: string
+export interface MarkdownFileOperation {
   kind: FileOperationKind
   targetPath: string
   proposedContent: string
   originalContent?: string
   expectedModifiedAt?: number
+}
+
+export interface FileOperationProposal extends MarkdownFileOperation {
+  id: string
+  /** Present for a multi-file proposal; legacy single-file fields above mirror the first item. */
+  operations?: MarkdownFileOperation[]
   summary: string
   status: 'pending' | 'accepted' | 'rejected' | 'failed'
   error?: string
 }
+
+export interface ChatImageAttachment {
+  id: string
+  name: string
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+  dataUrl: string
+  size: number
+  /** Slash-separated path relative to the current project root. */
+  projectRelativePath?: string
+  /** Canonical local path. Main-process validation is required before this is trusted. */
+  absolutePath?: string
+}
+
+export type ScreenshotCaptureEvent =
+  | { type: 'captured'; attachment: ChatImageAttachment }
+  | { type: 'error'; message: string }
+
+export interface ResearchBrowserBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface ResearchBrowserState {
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  secure: boolean
+  error?: string
+  notice?: string
+}
+
+export type ResearchBrowserExtractMode = 'selection' | 'article'
+
+export interface ResearchBrowserExtractResult {
+  mode: ResearchBrowserExtractMode
+  title: string
+  url: string
+  text: string
+  markdown: string
+}
+
+export type ResearchBrowserSelectionEvent =
+  | { type: 'captured'; result: ResearchBrowserExtractResult }
+  | { type: 'error'; message: string }
 
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   createdAt: number
+  attachments?: ChatImageAttachment[]
   context?: ContextSnapshot
   sources?: SourceRef[]
   operation?: FileOperationProposal
@@ -173,6 +229,11 @@ export interface FileReadResult {
   ocrResults?: OcrResult[]
 }
 
+export interface FileOperationApplyResult extends FileReadResult {
+  /** All affected files. The inherited fields mirror the first file for compatibility. */
+  files: FileReadResult[]
+}
+
 export type OcrEngine = 'paddleocr-v6' | 'ai-vision'
 
 export interface OcrPoint {
@@ -206,6 +267,24 @@ export interface AiOcrRequest {
   imageDataUrl: string
 }
 
+export type ImageGenerationSize = '1024x1024' | '1536x1024' | '1024x1536'
+export type ImageGenerationQuality = 'low' | 'medium' | 'high'
+
+export interface ImageGenerationRequest {
+  requestId: string
+  prompt: string
+  size: ImageGenerationSize
+  quality: ImageGenerationQuality
+}
+
+export interface ImageGenerationResult {
+  attachment: ChatImageAttachment
+  model: 'gpt-image-2'
+  size: ImageGenerationSize
+  quality: ImageGenerationQuality
+  createdAt: number
+}
+
 export interface FileChangeEvent {
   type: 'add' | 'change' | 'unlink' | 'addDir' | 'unlinkDir'
   path: string
@@ -229,6 +308,9 @@ export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
 
 export interface AppSettings extends AiSettings {
   apiKey?: string
+  imageBaseUrl: string
+  imageApiKey?: string
+  hasImageApiKey: boolean
   theme: 'light' | 'dark' | 'system'
   fontSize: number
   defaultProjectPath: string
@@ -242,7 +324,7 @@ export interface AppSettings extends AiSettings {
 export interface AiRequest {
   requestId: string
   sessionId: string
-  messages: Pick<ChatMessage, 'role' | 'content'>[]
+  messages: Pick<ChatMessage, 'role' | 'content' | 'attachments'>[]
   context: ContextSnapshot
   settings?: Partial<Pick<AppSettings, 'allowGeneralKnowledge'>>
 }
@@ -294,9 +376,11 @@ export interface CoScribeAPI {
     trash: (path: string) => Promise<void>
     importFiles: (sourcePaths: string[], targetFolder: string) => Promise<string[]>
     reveal: (path: string) => Promise<void>
+    openExternal: (path: string) => Promise<void>
     url: (path: string) => Promise<string>
+    convertPowerPointToPdf: (path: string) => Promise<FileReadResult>
     pathForDroppedFile: (file: File) => string
-    applyAiOperation: (operation: FileOperationProposal) => Promise<FileReadResult>
+    applyAiOperation: (operation: FileOperationProposal) => Promise<FileOperationApplyResult>
   }
   sessions: {
     list: () => Promise<ChatSession[]>
@@ -319,6 +403,33 @@ export interface CoScribeAPI {
     get: (path: string, page?: number) => Promise<OcrResult | null>
     save: (result: OcrResult) => Promise<OcrResult>
     enhance: (request: AiOcrRequest) => Promise<OcrResult>
+    stop: (requestId: string) => Promise<void>
+  }
+  screenshot: {
+    capture: () => Promise<ChatImageAttachment>
+    onResult: (listener: (event: ScreenshotCaptureEvent) => void) => () => void
+  }
+  browser: {
+    open: (url?: string) => Promise<ResearchBrowserState>
+    navigate: (url: string) => Promise<ResearchBrowserState>
+    back: () => Promise<ResearchBrowserState>
+    forward: () => Promise<ResearchBrowserState>
+    reload: () => Promise<ResearchBrowserState>
+    stop: () => Promise<ResearchBrowserState>
+    state: () => Promise<ResearchBrowserState>
+    setBounds: (bounds: ResearchBrowserBounds) => Promise<void>
+    setVisible: (visible: boolean) => Promise<void>
+    extract: (mode: ResearchBrowserExtractMode) => Promise<ResearchBrowserExtractResult>
+    saveArchive: () => Promise<FileReadResult>
+    saveMarkdown: () => Promise<FileReadResult>
+    savePdf: () => Promise<FileReadResult>
+    openExternal: (url?: string) => Promise<void>
+    close: () => Promise<void>
+    onState: (listener: (state: ResearchBrowserState) => void) => () => void
+    onSelection: (listener: (event: ResearchBrowserSelectionEvent) => void) => () => void
+  }
+  images: {
+    generate: (request: ImageGenerationRequest) => Promise<ImageGenerationResult>
     stop: (requestId: string) => Promise<void>
   }
   settings: {
@@ -356,6 +467,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiProtocol: 'auto',
   reasoningEffort: 'medium',
   hasApiKey: false,
+  imageBaseUrl: 'https://api.openai.com/v1',
+  hasImageApiKey: false,
   theme: 'system',
   fontSize: 15,
   defaultProjectPath: '',

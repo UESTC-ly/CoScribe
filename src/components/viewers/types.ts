@@ -175,6 +175,22 @@ export interface DocxViewerProps {
   onOpenExternal?: () => void
 }
 
+export interface PptxViewerContext {
+  selection: string
+  visibleText: string
+  documentText: string
+  slide: number
+}
+
+export interface PptxViewerProps {
+  src: string
+  text: string
+  fileName?: string
+  onContextChange?: (context: PptxViewerContext) => void
+  onOpenExternal?: () => void
+  onError?: (error: Error) => void
+}
+
 export interface TextViewerContext {
   selection: string
   selectionStart: number
@@ -199,4 +215,5 @@ export interface UnsupportedViewerProps {
   detail?: ReactNode
   onReveal?: () => void
   onOpenExternal?: () => void
+  onConvertToPdf?: () => void | Promise<void>
 }

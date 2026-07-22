@@ -9,6 +9,11 @@ import type {
   ChatSession,
   FileChangeEvent,
   FileOperationProposal,
+  ScreenshotCaptureEvent,
+  ResearchBrowserBounds,
+  ResearchBrowserExtractMode,
+  ResearchBrowserSelectionEvent,
+  ResearchBrowserState,
   OcrResult,
   SearchProgress,
   CoScribeAPI,
@@ -51,7 +56,9 @@ const api: CoScribeAPI = {
     trash: (filePath: string) => ipcRenderer.invoke(IPC.fileTrash, filePath),
     importFiles: (sourcePaths: string[], targetFolder: string) => ipcRenderer.invoke(IPC.fileImportFiles, sourcePaths, targetFolder),
     reveal: (filePath: string) => ipcRenderer.invoke(IPC.fileReveal, filePath),
+    openExternal: (filePath: string) => ipcRenderer.invoke(IPC.fileOpenExternal, filePath),
     url: (filePath: string) => ipcRenderer.invoke(IPC.fileUrl, filePath),
+    convertPowerPointToPdf: (filePath: string) => ipcRenderer.invoke(IPC.fileConvertPowerPointToPdf, filePath),
     pathForDroppedFile: (file: File) => webUtils.getPathForFile(file),
     applyAiOperation: (operation: FileOperationProposal) => ipcRenderer.invoke(IPC.fileApplyAiOperation, operation)
   },
@@ -77,6 +84,33 @@ const api: CoScribeAPI = {
     save: (result: OcrResult) => ipcRenderer.invoke(IPC.ocrSave, result),
     enhance: (request: AiOcrRequest) => ipcRenderer.invoke(IPC.ocrEnhance, request),
     stop: (requestId: string) => ipcRenderer.invoke(IPC.ocrStop, requestId)
+  },
+  screenshot: {
+    capture: () => ipcRenderer.invoke(IPC.screenshotCapture),
+    onResult: (listener: (event: ScreenshotCaptureEvent) => void) => subscribe(IPC.screenshotResult, listener)
+  },
+  browser: {
+    open: (url?: string) => ipcRenderer.invoke(IPC.browserOpen, url),
+    navigate: (url: string) => ipcRenderer.invoke(IPC.browserNavigate, url),
+    back: () => ipcRenderer.invoke(IPC.browserBack),
+    forward: () => ipcRenderer.invoke(IPC.browserForward),
+    reload: () => ipcRenderer.invoke(IPC.browserReload),
+    stop: () => ipcRenderer.invoke(IPC.browserStop),
+    state: () => ipcRenderer.invoke(IPC.browserStateGet),
+    setBounds: (bounds: ResearchBrowserBounds) => ipcRenderer.invoke(IPC.browserSetBounds, bounds),
+    setVisible: (visible: boolean) => ipcRenderer.invoke(IPC.browserSetVisible, visible),
+    extract: (mode: ResearchBrowserExtractMode) => ipcRenderer.invoke(IPC.browserExtract, mode),
+    saveArchive: () => ipcRenderer.invoke(IPC.browserSaveArchive),
+    saveMarkdown: () => ipcRenderer.invoke(IPC.browserSaveMarkdown),
+    savePdf: () => ipcRenderer.invoke(IPC.browserSavePdf),
+    openExternal: (url?: string) => ipcRenderer.invoke(IPC.browserOpenExternal, url),
+    close: () => ipcRenderer.invoke(IPC.browserClose),
+    onState: (listener: (state: ResearchBrowserState) => void) => subscribe(IPC.browserState, listener),
+    onSelection: (listener: (event: ResearchBrowserSelectionEvent) => void) => subscribe(IPC.browserSelection, listener)
+  },
+  images: {
+    generate: (request) => ipcRenderer.invoke(IPC.imagesGenerate, request),
+    stop: (requestId: string) => ipcRenderer.invoke(IPC.imagesStop, requestId)
   },
   settings: {
     get: () => ipcRenderer.invoke(IPC.settingsGet),

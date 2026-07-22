@@ -76,6 +76,9 @@ function hasHeading(content: string, heading: string): boolean {
 }
 
 function sameLocator(left: SourceRef, right: SourceRef, projectPath: string): boolean {
+  if (left.kind === 'web' || right.kind === 'web') {
+    return left.kind === 'web' && right.kind === 'web' && left.path === right.path
+  }
   const leftPath = left.kind === 'session' ? sessionIdFromPath(left.path) : resolveProjectPath(projectPath, left.path)
   const rightPath = right.kind === 'session' ? sessionIdFromPath(right.path) : resolveProjectPath(projectPath, right.path)
   return left.kind === right.kind &&
@@ -110,6 +113,22 @@ export function validateSources(
     // Once a locator is allowlisted, use the app-owned copy rather than any
     // AI-supplied label or excerpt attached to the same locator.
     const source = allowedSource ? { ...allowedSource } : rawSource
+
+    if (source.kind === 'web') {
+      try {
+        const url = new URL(source.path)
+        if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) throw new Error()
+        const canonical = url.toString()
+        const key = `web:${canonical}`
+        if (!seen.has(key)) {
+          seen.add(key)
+          validSources.push({ ...source, path: canonical, label: source.label || url.hostname })
+        }
+      } catch {
+        reject(rejectedSources, source, '网页来源不是安全的 HTTP(S) 地址。')
+      }
+      continue
+    }
 
     if (source.kind === 'general') {
       if (!options.allowGeneralKnowledge) {

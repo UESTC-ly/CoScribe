@@ -7,14 +7,19 @@ import type {
   AppSettings,
   ChatSession,
   FileOperationProposal,
+  ImageGenerationRequest,
   OcrResult,
+  ResearchBrowserBounds,
+  ResearchBrowserExtractMode,
   WorkspaceState
 } from '../../src/shared/types'
 import { IPC } from '../ipc-channels'
 import { AiService } from './ai'
+import { ResearchBrowserService } from './browser'
 import { PdfTextService } from './pdf'
 import { ProjectService } from './project'
 import { ProjectSearchService } from './search'
+import { ScreenshotService } from './screenshot'
 import { SettingsStore } from './settings'
 
 interface Services {
@@ -23,6 +28,8 @@ interface Services {
   search: ProjectSearchService
   settings: SettingsStore
   ai: AiService
+  screenshot: ScreenshotService
+  browser: ResearchBrowserService
 }
 
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
@@ -55,7 +62,7 @@ function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1])
 }
 
 export function registerIpc(services: Services): void {
-  const { project, pdf, search, settings, ai } = services
+  const { project, pdf, search, settings, ai, screenshot, browser } = services
 
   handle(IPC.appVersion, () => app.getVersion())
 
@@ -66,7 +73,6 @@ export function registerIpc(services: Services): void {
   handle(IPC.projectOpenPath, (_event, projectPath: string) => project.openPath(projectPath))
   handle(IPC.projectInitial, () => project.initial())
   handle(IPC.projectClose, async () => {
-    ai.stopAll()
     await project.close()
   })
   handle(IPC.projectTree, () => project.tree())
@@ -84,7 +90,9 @@ export function registerIpc(services: Services): void {
   handle(IPC.fileTrash, (_event, filePath: string) => project.trash(filePath))
   handle(IPC.fileImportFiles, (_event, sourcePaths: string[], targetFolder: string) => project.importFiles(sourcePaths, targetFolder))
   handle(IPC.fileReveal, (_event, filePath: string) => project.reveal(filePath))
+  handle(IPC.fileOpenExternal, (_event, filePath: string) => project.openExternal(filePath))
   handle(IPC.fileUrl, (_event, filePath: string) => project.url(filePath))
+  handle(IPC.fileConvertPowerPointToPdf, (_event, filePath: string) => project.convertPowerPointToPdf(filePath))
   handle(IPC.fileApplyAiOperation, (_event, operation: FileOperationProposal) => project.applyAiOperation(operation))
 
   handle(IPC.sessionsList, () => project.listSessions())
@@ -102,6 +110,27 @@ export function registerIpc(services: Services): void {
   handle(IPC.ocrSave, (_event, result: OcrResult) => project.saveOcr(result))
   handle(IPC.ocrEnhance, (_event, request: AiOcrRequest) => ai.enhanceImage(request))
   handle(IPC.ocrStop, (_event, requestId: string) => ai.stopOcr(requestId))
+
+  handle(IPC.screenshotCapture, () => screenshot.capture())
+
+  handle(IPC.browserOpen, (_event, url?: string) => browser.open(url))
+  handle(IPC.browserNavigate, (_event, url: string) => browser.navigate(url))
+  handle(IPC.browserBack, () => browser.back())
+  handle(IPC.browserForward, () => browser.forward())
+  handle(IPC.browserReload, () => browser.reload())
+  handle(IPC.browserStop, () => browser.stop())
+  handle(IPC.browserStateGet, () => browser.state())
+  handle(IPC.browserSetBounds, (_event, bounds: ResearchBrowserBounds) => browser.setBounds(bounds))
+  handle(IPC.browserSetVisible, (_event, visible: boolean) => browser.setVisible(visible))
+  handle(IPC.browserExtract, (_event, mode: ResearchBrowserExtractMode) => browser.extract(mode))
+  handle(IPC.browserSaveArchive, () => browser.saveArchive())
+  handle(IPC.browserSaveMarkdown, () => browser.saveMarkdown())
+  handle(IPC.browserSavePdf, () => browser.savePdf())
+  handle(IPC.browserOpenExternal, (_event, url?: string) => browser.openExternal(url))
+  handle(IPC.browserClose, () => browser.close())
+
+  handle(IPC.imagesGenerate, (_event, request: ImageGenerationRequest) => ai.generateImage(request))
+  handle(IPC.imagesStop, (_event, requestId: string) => ai.stopImage(requestId))
 
   handle(IPC.settingsGet, () => settings.get())
   handle(IPC.settingsSave, (_event, value: AppSettings) => settings.save(value))

@@ -15,6 +15,7 @@ import {
   DocxViewer,
   MarkdownViewer,
   PdfViewer,
+  PptxViewer,
   TextViewer,
   UnsupportedViewer,
   type MarkdownConflictResolution,
@@ -49,7 +50,9 @@ interface EditorPaneProps {
   onDeleteAnnotation: (annotationId: string) => void
   onRequestComment: (path: string, selection: PdfTextSelection) => void
   onReveal: (path: string) => void
+  onOpenExternal: (path: string) => void
   onOpenProjectPath: (path: string) => void
+  onConvertPowerPoint: (path: string) => Promise<void>
   onResolveConflict: (path: string, resolution: MarkdownConflictResolution) => void
   onError: (message: string) => void
 }
@@ -73,7 +76,7 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
         <div className="editor-empty">
           <span className="editor-empty__mark"><BookOpenText size={27} strokeWidth={1.6} /></span>
           <strong>{props.pane === 'secondary' ? '第二个内容区域' : '打开项目内容'}</strong>
-          <p>{props.pane === 'secondary' ? '把标签拖到这里，或从来源跳转打开。' : '从左侧文件树选择 PDF、DOCX、Markdown、文本或图片。'}</p>
+          <p>{props.pane === 'secondary' ? '把标签拖到这里，或从来源跳转打开。' : '从左侧文件树选择 PDF、DOCX、PPTX、Markdown、文本或图片。'}</p>
         </div>
       )
     }
@@ -129,7 +132,7 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
           value={document.content}
           fileName={activeTab.name}
           modifiedAt={document.modifiedAt}
-          defaultMode={markdownState?.mode ?? 'edit'}
+          defaultMode={markdownState?.mode ?? 'preview'}
           mode={markdownState?.mode}
           autoSave={props.settings.autoSave}
           autoSaveDelayMs={props.settings.autoSaveDelay}
@@ -170,7 +173,7 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
             sectionText: text,
             documentText: text
           })}
-          onOpenExternal={() => props.onReveal(activeTab.path)}
+          onOpenExternal={() => props.onOpenExternal(activeTab.path)}
           onError={(error) => props.onError(`无法显示图片：${error.message}`)}
         />
       )
@@ -189,7 +192,50 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
             if (target) props.onOpenProjectPath(target)
             else if (/^(?:https?:|mailto:)/iu.test(url)) window.open(url, '_blank', 'noopener,noreferrer')
           }}
-          onOpenExternal={() => props.onReveal(activeTab.path)}
+          onOpenExternal={() => props.onOpenExternal(activeTab.path)}
+        />
+      )
+    }
+
+    if (activeTab.kind === 'pptx') {
+      return (
+        <PptxViewer
+          src={document.url ?? ''}
+          text={document.content}
+          fileName={activeTab.name}
+          onContextChange={(context) => props.onContext(activeTab.path, {
+            selection: context.selection,
+            visibleText: context.visibleText,
+            documentText: context.documentText,
+            sectionText: context.visibleText
+          })}
+          onOpenExternal={() => props.onOpenExternal(activeTab.path)}
+          onError={(error) => props.onError(`无法打开 PowerPoint：${error.message}`)}
+        />
+      )
+    }
+
+    if (activeTab.kind === 'ppt') {
+      return (
+        <UnsupportedViewer
+          fileName={activeTab.name}
+          extension="ppt"
+          detail={document.warnings?.[0] ?? '旧版二进制 PPT 需要先用 PowerPoint 或 LibreOffice 转换为 PPTX/PDF。'}
+          onReveal={() => props.onReveal(activeTab.path)}
+          onOpenExternal={() => props.onOpenExternal(activeTab.path)}
+          onConvertToPdf={() => props.onConvertPowerPoint(activeTab.path)}
+        />
+      )
+    }
+
+    if (activeTab.kind === 'webarchive') {
+      return (
+        <UnsupportedViewer
+          fileName={activeTab.name}
+          extension={extension(activeTab.path)}
+          detail={<>这是由 Chromium 保存的完整网页归档，保留原始 HTML、样式和已加载资源，不受 AI 正文长度限制。请使用系统浏览器或支持 MHTML 的应用查看。</>}
+          onReveal={() => props.onReveal(activeTab.path)}
+          onOpenExternal={() => props.onOpenExternal(activeTab.path)}
         />
       )
     }
@@ -198,7 +244,7 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
       return <TextViewer content={document.content} fileName={activeTab.name} onContextChange={(context) => props.onContext(activeTab.path, { selection: context.selection, visibleText: context.visibleText, documentText: document.content })} />
     }
 
-    return <UnsupportedViewer fileName={activeTab.name} extension={extension(activeTab.path)} onReveal={() => props.onReveal(activeTab.path)} />
+    return <UnsupportedViewer fileName={activeTab.name} extension={extension(activeTab.path)} onReveal={() => props.onReveal(activeTab.path)} onOpenExternal={() => props.onOpenExternal(activeTab.path)} />
   }
 
   return (

@@ -65,7 +65,7 @@ export async function atomicWriteJson(filePath: string, value: unknown, verify?:
   await atomicWrite(filePath, `${JSON.stringify(value, null, 2)}\n`, 0o600, verify)
 }
 
-export async function atomicCreate(filePath: string, content: string, verify?: WriteVerifier): Promise<void> {
+export async function atomicCreate(filePath: string, content: string | Uint8Array, verify?: WriteVerifier): Promise<void> {
   const directory = path.dirname(filePath)
   const temporary = path.join(directory, `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`)
   let temporaryExists = false
@@ -78,7 +78,8 @@ export async function atomicCreate(filePath: string, content: string, verify?: W
     )
     temporaryExists = true
     try {
-      await descriptor.writeFile(content, 'utf8')
+      if (typeof content === 'string') await descriptor.writeFile(content, 'utf8')
+      else await descriptor.writeFile(content)
       await descriptor.sync()
     } finally {
       await descriptor.close()

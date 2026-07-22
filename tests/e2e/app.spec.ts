@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import os from 'node:os'
@@ -48,6 +48,10 @@ test.beforeEach(async () => {
     path.join(appRoot, 'node_modules', 'mammoth', 'test', 'test-data', 'single-paragraph.docx'),
     path.join(projectPath, '示例文档.docx')
   )
+  await copyFile(
+    path.join(appRoot, 'tests', 'fixtures', 'coscribe-pptx-sample.pptx'),
+    path.join(projectPath, '示例演示.pptx')
+  )
   await writeFile(path.join(projectPath, 'OCR测试.svg'), [
     '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420">',
     '<rect width="1200" height="420" fill="white"/>',
@@ -56,7 +60,19 @@ test.beforeEach(async () => {
     '</svg>'
   ].join(''))
   await mkdir(path.join(projectPath, '教程', '章节'), { recursive: true })
-  await writeFile(path.join(projectPath, '教程', '章节', '流程.md'), '# 流程\n\n```mermaid\ngraph TD\n  A[开始] --> B[完成]\n```\n')
+  await writeFile(path.join(projectPath, '教程', '章节', '流程.md'), [
+    '# 流程',
+    '',
+    '```mermaid',
+    'graph TD',
+    '  A[开始] --> B[完成]',
+    '```',
+    '',
+    '```typescript',
+    'const answer: number = 42',
+    '```',
+    '',
+  ].join('\n'))
   await mkdir(path.join(projectPath, '.venv', 'lib'), { recursive: true })
   await writeFile(path.join(projectPath, '.venv', 'lib', 'dependency.py'), 'IGNORED_DEPENDENCY = True\n')
   await mkdir(path.join(projectPath, '.git'), { recursive: true })
@@ -84,7 +100,8 @@ test('opens a real local project, searches content, and creates a standard Markd
 
   await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
   await expect(page.getByLabel('README.md Markdown 编辑器')).toBeVisible()
-  await expect(page.locator('.cm-content')).toContainText('FastAPI 学习')
+  await expect(page.getByLabel('Markdown 预览')).toContainText('FastAPI 学习')
+  await expect(page.getByRole('button', { name: '预览', exact: true })).toHaveAttribute('aria-pressed', 'true')
 
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await page.getByLabel('搜索当前项目').fill('E2E_SENTINEL')
@@ -100,6 +117,7 @@ test('opens a real local project, searches content, and creates a standard Markd
   await expect.poll(async () => access(notePath).then(() => true).catch(() => false)).toBe(true)
   await expect(page.getByLabel('第一篇学习笔记.md Markdown 编辑器')).toBeVisible()
 
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
   const editor = page.locator('.cm-content').last()
   await editor.click()
   await editor.fill('# 第一篇笔记\n\n这是可被其他软件打开的标准 Markdown。')
@@ -115,6 +133,13 @@ test('renders Mermaid fenced blocks in Markdown preview', async ({}, testInfo) =
   await page.getByRole('button', { name: '预览', exact: true }).click()
   await expect(page.locator('.vk-mermaid-svg svg')).toBeVisible({ timeout: 15_000 })
   await expect(page.locator('.vk-mermaid-error')).toHaveCount(0)
+  const codeBlock = page.getByRole('region', { name: 'TypeScript 代码块' })
+  await expect(codeBlock).toBeVisible()
+  await expect(codeBlock.locator('.hljs-keyword')).toHaveText('const')
+  await expect(codeBlock.locator('.hljs-number')).toHaveText('42')
+  const lightCodeBackground = await codeBlock.locator('pre').evaluate(
+    (element) => window.getComputedStyle(element).backgroundColor,
+  )
   const lightSvg = await page.locator('.vk-mermaid-svg svg').evaluate((element) => element.outerHTML)
   await page.screenshot({ path: testInfo.outputPath('mermaid-preview.png') })
 
@@ -124,6 +149,10 @@ test('renders Mermaid fenced blocks in Markdown preview', async ({}, testInfo) =
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await expect.poll(async () => page.locator('.vk-mermaid-svg svg').evaluate((element) => element.outerHTML)).not.toBe(lightSvg)
   await expect(page.locator('.vk-mermaid-error')).toHaveCount(0)
+  await expect(codeBlock.locator('.hljs-keyword')).toHaveText('const')
+  await expect.poll(async () => codeBlock.locator('pre').evaluate(
+    (element) => window.getComputedStyle(element).backgroundColor,
+  )).not.toBe(lightCodeBackground)
   await page.screenshot({ path: testInfo.outputPath('mermaid-preview-dark.png') })
 })
 
@@ -133,6 +162,206 @@ test('opens DOCX files as a local semantic document', async () => {
   await expect(page.getByLabel('示例文档.docx DOCX 阅读器')).toBeVisible()
   await expect(page.locator('.vk-docx-page')).toContainText('Walking on imported air')
   await expect(page.getByRole('button', { name: '复制正文' })).toBeVisible()
+})
+
+test('renders PPTX slides locally and searches extracted slide text', async () => {
+  await page.locator('.tree-row').filter({ hasText: '示例演示.pptx' }).click()
+  const viewer = page.getByLabel('示例演示.pptx PowerPoint 阅读器')
+  await expect(viewer).toBeVisible()
+  await expect(viewer.locator('.vk-pptx-slide svg')).toBeVisible({ timeout: 15_000 })
+  await expect(viewer.locator('.vk-pptx-slide')).toContainText('CoScribe 可以直接阅读 PPTX')
+  await expect(viewer.locator('.vk-pptx-page')).toHaveText('1 / 1')
+
+  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await page.getByLabel('搜索当前项目').fill('PPTX_TEXT_SENTINEL')
+  await page.getByLabel('搜索当前项目').press('Enter')
+  await expect(page.locator('.search-result').filter({ hasText: '示例演示.pptx' })).toContainText('PPTX_TEXT_SENTINEL')
+})
+
+test('browses an original isolated webpage and saves complete MHTML, semantic Markdown, and PDF', async ({}, testInfo) => {
+  test.setTimeout(90_000)
+  const server = createServer((request, response) => {
+    if (request.url === '/pixel.png') {
+      response.writeHead(200, { 'Content-Type': 'image/png' })
+      response.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'))
+      return
+    }
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    response.end([
+      '<!doctype html>',
+      '<html><head><title>Isolated Research Page</title>',
+      '<style>body{font-family:system-ui;background:rgb(245,250,248)} article{max-width:720px;margin:40px auto} h1{color:rgb(20,90,70)}</style>',
+      '</head><body><article>',
+      '<h1>Original Web Layout</h1>',
+      '<p id="selection">WEB_SELECTION_SENTINEL remains in the live Chromium page.</p>',
+      '<h2>Research finding</h2>',
+      '<p>WEB_ARTICLE_SENTINEL is extracted from the semantic article body.</p>',
+      '<p><a href="/a_(b)?q=x">WEB_LINK_[LABEL]</a><a href="javascript:alert(1)">UNSAFE_LINK_LABEL</a></p>',
+      '<img src="/pixel.png" alt="WEB_IMAGE_[ALT]">',
+      '<pre><code class="language-js">const ticks = "```";</code></pre>',
+      `<p>${'archive body '.repeat(18_000)}</p>`,
+      '<p>WEB_ARCHIVE_TAIL_SENTINEL</p>',
+      '</article></body></html>'
+    ].join(''))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const port = (server.address() as AddressInfo).port
+    const url = `http://127.0.0.1:${port}/article`
+    await page.getByRole('button', { name: '资料浏览器', exact: true }).click()
+    await expect(page.getByRole('region', { name: '资料浏览器' })).toBeVisible()
+    await page.getByLabel('网址或搜索内容').fill(url)
+    await page.getByLabel('网址或搜索内容').press('Enter')
+
+    await expect.poll(async () => electronApp.evaluate(({ webContents }, expectedUrl) => {
+      return webContents.getAllWebContents().some((contents) => contents.getURL() === expectedUrl && !contents.isLoading())
+    }, url)).toBe(true)
+    await expect(page.locator('.research-browser__tabbar strong')).toHaveText('Isolated Research Page')
+
+    const nativeBounds = await electronApp.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      return window.contentView.children.map((child) => child.getBounds()).find((bounds) => bounds.width > 0 && bounds.height > 0)
+    })
+    expect(nativeBounds?.width).toBeGreaterThan(0)
+    expect(nativeBounds?.height).toBeGreaterThan(0)
+
+    const isolation = await electronApp.evaluate(async ({ webContents }, expectedUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === expectedUrl)
+      if (!contents) throw new Error('research WebContents not found')
+      return contents.executeJavaScript(`({
+        processType: typeof process,
+        requireType: typeof require,
+        coscribeType: typeof window.coscribe,
+        heading: document.querySelector('h1')?.textContent,
+        headingColor: getComputedStyle(document.querySelector('h1')).color,
+        background: getComputedStyle(document.body).backgroundColor
+      })`)
+    }, url)
+    expect(isolation).toEqual({
+      processType: 'undefined',
+      requireType: 'undefined',
+      coscribeType: 'undefined',
+      heading: 'Original Web Layout',
+      headingColor: 'rgb(20, 90, 70)',
+      background: 'rgb(245, 250, 248)'
+    })
+
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1050, 760))
+    await expect.poll(async () => {
+      const ai = await page.locator('.ai-workspace').boundingBox()
+      const navigator = await page.locator('.project-navigator').boundingBox()
+      const browserBounds = await electronApp.evaluate(({ BrowserWindow }) => (
+        BrowserWindow.getAllWindows()[0].contentView.children
+          .map((child) => child.getBounds())
+          .find((bounds) => bounds.width > 0 && bounds.height > 0)
+      ))
+      return Boolean(
+        ai && navigator && browserBounds &&
+        browserBounds.width > 0 && browserBounds.height > 0 &&
+        browserBounds.x >= Math.floor(navigator.x + navigator.width) - 1 &&
+        browserBounds.x + browserBounds.width <= Math.ceil(ai.x) + 1
+      )
+    }).toBe(true)
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 920))
+
+    await electronApp.evaluate(async ({ webContents }, expectedUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === expectedUrl)
+      if (!contents) throw new Error('research WebContents not found')
+      await contents.executeJavaScript(`(() => {
+        const node = document.querySelector('#selection').firstChild
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        const selection = window.getSelection()
+        selection.removeAllRanges()
+        selection.addRange(range)
+      })()`)
+      contents.focus()
+      contents.sendInputEvent({
+        type: 'keyDown',
+        keyCode: 'K',
+        modifiers: [process.platform === 'darwin' ? 'meta' : 'control', 'shift']
+      })
+    }, url)
+    await expect(page.getByLabel('向 AI 提问')).toContainText('WEB_SELECTION_SENTINEL')
+    await expect(page.getByLabel('基于')).toHaveValue('selection')
+    await expect(page.getByLabel('当前 AI 上下文')).toContainText('Isolated Research Page')
+
+    await page.getByRole('button', { name: '保存完整网页归档' }).click()
+    const archivePath = path.join(projectPath, '资料剪藏', 'Isolated Research Page.mhtml')
+    await expect.poll(async () => access(archivePath).then(() => true).catch(() => false)).toBe(true)
+    const archive = await readFile(archivePath, 'latin1')
+    expect(archive).toMatch(/^From: <Saved by Blink>/u)
+    expect(archive).toContain(`Snapshot-Content-Location: ${url}`)
+    expect(archive).toContain('WEB_ARTICLE_SENTINEL')
+    expect(archive).toContain('body { font-family: system-ui;')
+    expect(archive).toContain('Content-Type: multipart/related;')
+    expect(archive).toContain('WEB_ARCHIVE_TAIL_SENTINEL')
+    expect(archive).toContain('Original Web Layout')
+
+    await page.locator('.tree-row').filter({ hasText: '资料剪藏' }).click()
+    await page.locator('.tree-row').filter({ hasText: 'Isolated Research Page.mhtml' }).click()
+    await expect(page.getByText('这是由 Chromium 保存的完整网页归档')).toBeVisible()
+    await expect(page.getByRole('button', { name: '使用其他应用打开' })).toBeVisible()
+    await page.getByRole('button', { name: '资料浏览器', exact: true }).click()
+    await expect(page.locator('.research-browser__tabbar strong')).toHaveText('Isolated Research Page')
+
+    await page.getByRole('button', { name: '保存网页为 Markdown' }).click()
+    const markdownPath = path.join(projectPath, '资料剪藏', 'Isolated Research Page.md')
+    await expect.poll(async () => readFile(markdownPath, 'utf8').catch(() => '')).toContain('WEB\\_ARTICLE\\_SENTINEL')
+    const markdown = await readFile(markdownPath, 'utf8')
+    expect(markdown).toContain(`> 来源：[${url}](<${url}>)`)
+    expect(markdown).toContain('[WEB\\_LINK\\_\\[LABEL\\]](<')
+    expect(markdown).not.toContain('javascript:alert')
+    expect(markdown).toContain('````js\nconst ticks = "```";\n````')
+    expect(markdown).not.toContain('WEB_ARCHIVE_TAIL_SENTINEL')
+
+    await page.getByRole('button', { name: '保存原网页为 PDF' }).click()
+    const pdfPath = path.join(projectPath, '资料剪藏', 'Isolated Research Page.pdf')
+    await expect.poll(async () => access(pdfPath).then(() => true).catch(() => false)).toBe(true)
+    const pdf = await readFile(pdfPath)
+    expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+    expect(pdf.length).toBeGreaterThan(1_000)
+
+    await page.screenshot({ path: testInfo.outputPath('research-browser.png') })
+
+    const secondProject = path.join(projectPath, 'project-b')
+    await mkdir(secondProject)
+    await page.evaluate((nextProject) => window.coscribe.project.openPath(nextProject), secondProject)
+    await expect.poll(async () => electronApp.evaluate(({ webContents }, previousUrl) => (
+      webContents.getAllWebContents().some((contents) => contents.getURL() === previousUrl)
+    ), url)).toBe(false)
+    const saveAfterSwitch = await page.evaluate(() => window.coscribe.browser.saveArchive().then(
+      () => 'saved',
+      (error: unknown) => error instanceof Error ? error.message : String(error)
+    ))
+    expect(saveAfterSwitch).toContain('请先打开一个网页')
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+test('copies selected document text into the AI composer with a shortcut', async () => {
+  await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
+  const paragraph = page.locator('.vk-markdown-preview p').filter({ hasText: 'E2E_SENTINEL' })
+  await expect(paragraph).toBeVisible()
+  await paragraph.evaluate((element) => {
+    const textNode = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
+    if (!textNode) throw new Error('Markdown paragraph has no text node')
+    const text = textNode.textContent ?? ''
+    const start = text.indexOf('E2E_SENTINEL')
+    const range = document.createRange()
+    range.setStart(textNode, start)
+    range.setEnd(textNode, start + 'E2E_SENTINEL 路由'.length)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  })
+
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+K' : 'Control+Shift+K')
+  await expect(page.getByLabel('向 AI 提问')).toHaveValue('E2E_SENTINEL 路由')
+  await expect(page.getByLabel('基于')).toHaveValue('selection')
 })
 
 test('runs bundled local OCR from the packaged renderer origin', async () => {
@@ -312,6 +541,68 @@ test('keeps an AI-created note on preview until the user accepts it', async () =
   }
 })
 
+test('writes a multi-file note project immediately after the explicit quick-note action', async () => {
+  let requestCount = 0
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Consume the complete AI request before replying.
+    }
+    requestCount += 1
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify(requestCount === 1
+      ? {
+          output: [{
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: '这里有值得长期保留的学习结论。' }]
+          }]
+        }
+      : {
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: '已整理并保存多文件笔记。' }]
+            },
+            {
+              type: 'function_call',
+              name: 'propose_markdown_operation',
+              arguments: JSON.stringify({
+                operations: [
+                  { kind: 'create', targetPath: 'notes/index.md', proposedContent: '# 学习索引\n\n- [API 要点](topics/api.md)\n' },
+                  { kind: 'create', targetPath: 'notes/topics/api.md', proposedContent: '# API 要点\n\n自动保存的结构化内容。\n' }
+                ],
+                summary: '创建多文件学习笔记项目'
+              })
+            }
+          ]
+        }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const port = (server.address() as AddressInfo).port
+    await page.getByRole('button', { name: '配置', exact: true }).click()
+    await page.getByLabel('服务地址').fill(`http://127.0.0.1:${port}`)
+    await page.getByLabel('模型', { exact: true }).fill('local-e2e-model')
+    await page.getByRole('button', { name: '保存设置' }).click()
+
+    await page.getByLabel('向 AI 提问').fill('请解释今天的 API 学习内容')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect(page.getByText('这里有值得长期保留的学习结论。')).toBeVisible()
+    await page.getByRole('button', { name: '整理笔记', exact: true }).click()
+
+    const indexPath = path.join(projectPath, 'notes', 'index.md')
+    const topicPath = path.join(projectPath, 'notes', 'topics', 'api.md')
+    await expect.poll(async () => readFile(indexPath, 'utf8').catch(() => '')).toContain('[API 要点](topics/api.md)')
+    await expect.poll(async () => readFile(topicPath, 'utf8').catch(() => '')).toContain('自动保存的结构化内容')
+    await expect(page.getByRole('button', { name: '接受并写入' })).toHaveCount(0)
+    expect(requestCount).toBe(2)
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
 test('keeps current-document scope and gives note-taking the exact Markdown path', async () => {
   let requestBody: Record<string, unknown> | null = null
   const server = createServer(async (request, response) => {
@@ -366,7 +657,94 @@ test('keeps current-document scope and gives note-taking the exact Markdown path
     expect(serialized).toContain('上下文范围：document')
     expect(serialized).toContain('当前文档项目内相对路径：README.md')
     expect(serialized).toContain('当前笔记写入目标：README.md')
-    expect(serialized).toContain('必须直接把该相对路径作为 targetPath 并使用 append')
+    expect(serialized).toContain('必须直接把该相对路径放入 operations 并使用 append')
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+test('uses an independent third-party GPT-Image 2 endpoint and renders the downloadable result', async ({}, testInfo) => {
+  const imageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  let requestBody: Record<string, unknown> | null = null
+  let chatRequestBody: Record<string, unknown> | null = null
+  let requestPath: string | null = null
+  let authorization: string | null = null
+  const server = createServer(async (request, response) => {
+    const currentPath = request.url ?? null
+    const chunks: Buffer[] = []
+    for await (const chunk of request) chunks.push(Buffer.from(chunk))
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    if (currentPath === '/responses') {
+      chatRequestBody = body
+      response.end(JSON.stringify({
+        output: [{
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: '已读取生成图片的本地路径。' }]
+        }]
+      }))
+      return
+    }
+    requestPath = currentPath
+    authorization = request.headers.authorization ?? null
+    requestBody = body
+    response.end(JSON.stringify({ data: [{ b64_json: imageBase64 }] }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const port = (server.address() as AddressInfo).port
+    const endpoint = `http://127.0.0.1:${port}/third-party/v1/images/generations`
+    await page.getByRole('button', { name: '配置', exact: true }).click()
+    await page.getByLabel('服务地址').fill(`http://127.0.0.1:${port}`)
+    await page.getByLabel('模型', { exact: true }).fill('local-e2e-model')
+    await page.getByLabel('图片生成请求地址').fill(endpoint)
+    await page.getByRole('textbox', { name: /图片 API Key/ }).fill('image-e2e-secret')
+    await page.getByRole('button', { name: '保存设置' }).click()
+
+    await page.locator('.ai-composer__tool').filter({ hasText: '生成图片' }).click()
+    await page.getByLabel('图片尺寸').selectOption('1536x1024')
+    await page.getByLabel('图片质量').selectOption('high')
+    await page.getByLabel('向 AI 提问').fill('一张用于课程封面的极简知识网络图')
+    await page.locator('.ai-composer__send').click()
+
+    const generatedImages = page.getByLabel('生成的图片')
+    await expect(generatedImages).toBeVisible()
+    const image = generatedImages.getByRole('img')
+    await expect(image).toBeVisible()
+    await expect(image).toHaveAttribute('src', `data:image/png;base64,${imageBase64}`)
+    const download = generatedImages.getByRole('link', { name: /^下载 gpt-image-2-/ })
+    await expect(download).toBeVisible()
+    await expect(download).toHaveAttribute('download', /^gpt-image-2-\d+-[a-f0-9]{8}\.png$/)
+    await expect(download).toHaveAttribute('href', `data:image/png;base64,${imageBase64}`)
+    const generatedFilename = await download.getAttribute('download')
+    expect(generatedFilename).not.toBeNull()
+    await expect.poll(async () => access(
+      path.join(projectPath, 'assets', 'ai-images', generatedFilename!),
+    ).then(() => true).catch(() => false)).toBe(true)
+
+    expect(requestPath).toBe('/third-party/v1/images/generations')
+    expect(authorization).toBe('Bearer image-e2e-secret')
+    expect(requestBody).toMatchObject({
+      model: 'gpt-image-2',
+      prompt: '一张用于课程封面的极简知识网络图',
+      size: '1536x1024',
+      quality: 'high',
+      output_format: 'jpeg',
+      output_compression: 90,
+      n: 1
+    })
+
+    await page.locator('.ai-composer__tool').filter({ hasText: '生成图片' }).click()
+    await page.getByLabel('向 AI 提问').fill('把当前图片放到笔记中')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect(page.getByText('已读取生成图片的本地路径。')).toBeVisible()
+    const chatRequest = JSON.stringify(chatRequestBody)
+    expect(chatRequest).toContain(`项目相对路径：assets/ai-images/${generatedFilename}`)
+    expect(chatRequest).toContain(`Markdown 可用路径：/assets/ai-images/${generatedFilename}`)
+    expect(chatRequest).toContain(`本机绝对路径：${path.join(await realpath(projectPath), 'assets', 'ai-images', generatedFilename!)}`)
+    await generatedImages.screenshot({ path: testInfo.outputPath('third-party-gpt-image-2.png') })
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }

@@ -1,19 +1,43 @@
 import type { WebContents } from 'electron'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   AiService,
+  aiConversationMessages,
   chatEndpoint,
+  imageGenerationEndpoint,
+  imageGenerationRequestBody,
+  imageGenerationResult,
   parseAiJsonResponse,
   reasoningRequestFields,
   resolveAiRequestTarget,
   responsesEndpoint,
   responsesResult
 } from './ai'
+import type { ChatImageAttachment, ImageGenerationRequest } from '../../src/shared/types'
 import type { PdfTextService } from './pdf'
 import type { ProjectService } from './project'
 import type { ProjectSearchService } from './search'
 import type { SettingsStore } from './settings'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+const tinyPng: ChatImageAttachment = {
+  id: 'image-1',
+  name: 'diagram.png',
+  mimeType: 'image/png',
+  dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+  size: 8
+}
+
+const imageRequest: ImageGenerationRequest = {
+  requestId: 'image-request-1',
+  prompt: '  一张适合学习笔记的系统架构图  ',
+  size: '1536x1024',
+  quality: 'high'
+}
 
 describe('AI endpoint resolution', () => {
   it('adds the OpenAI v1 chat path to a bare host', () => {
@@ -50,6 +74,234 @@ describe('AI endpoint resolution', () => {
       protocol: 'responses',
       endpoint: 'https://example.com/v1/responses'
     })
+  })
+
+  it('builds the GPT-Image endpoint from a host or versioned third-party base', () => {
+    expect(imageGenerationEndpoint('https://images.example.com')).toBe(
+      'https://images.example.com/v1/images/generations'
+    )
+    expect(imageGenerationEndpoint('https://images.example.com/openai/v1')).toBe(
+      'https://images.example.com/openai/v1/images/generations'
+    )
+  })
+
+  it('keeps a complete third-party GPT-Image endpoint unchanged', () => {
+    expect(imageGenerationEndpoint('https://images.example.com/custom/v1/images/generations')).toBe(
+      'https://images.example.com/custom/v1/images/generations'
+    )
+  })
+})
+
+describe('AI conversation image mapping', () => {
+  it('maps user image attachments to Responses API input parts', () => {
+    expect(aiConversationMessages('responses', [{
+      role: 'user',
+      content: '解释这张图',
+      attachments: [tinyPng]
+    }])).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'input_text', text: '解释这张图' },
+        { type: 'input_image', image_url: tinyPng.dataUrl, detail: 'auto' }
+      ]
+    }])
+  })
+
+  it('maps user image attachments to Chat Completions content parts', () => {
+    expect(aiConversationMessages('chat-completions', [{
+      role: 'user',
+      content: '',
+      attachments: [tinyPng]
+    }])).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'text', text: '请分析我发送的图片。' },
+        { type: 'image_url', image_url: { url: tinyPng.dataUrl, detail: 'auto' } }
+      ]
+    }])
+  })
+
+  it('rejects malformed visual input but keeps assistant images out of visual input', () => {
+    expect(() => aiConversationMessages('responses', [{
+      role: 'user',
+      content: 'bad image',
+      attachments: [{ ...tinyPng, dataUrl: 'data:image/png;base64,not-base64!' }]
+    }])).toThrow('图片附件不是有效的 Base64 data URL')
+
+    expect(aiConversationMessages('chat-completions', [{
+      role: 'assistant',
+      content: 'generated image',
+      attachments: [tinyPng]
+    }])).toEqual([{ role: 'assistant', content: 'generated image' }])
+  })
+
+  it('adds verified generated-image paths to assistant history as text metadata', () => {
+    expect(aiConversationMessages('responses', [{
+      role: 'assistant',
+      content: '已生成图片。',
+      attachments: [{
+        ...tinyPng,
+        projectRelativePath: 'assets/ai-images/diagram.png',
+        absolutePath: '/tmp/project/assets/ai-images/diagram.png'
+      }]
+    }])).toEqual([{
+      role: 'assistant',
+      content: [
+        '已生成图片。',
+        '',
+        '[CoScribe 已验证的生成图片路径]',
+        '图片：diagram.png',
+        '项目相对路径：assets/ai-images/diagram.png',
+        'Markdown 可用路径：/assets/ai-images/diagram.png',
+        '本机绝对路径：/tmp/project/assets/ai-images/diagram.png'
+      ].join('\n')
+    }])
+  })
+})
+
+describe('AI Markdown operation mapping', () => {
+  it('passes a multi-file tool proposal to the project safety boundary', async () => {
+    const prepareAiOperation = vi.fn().mockResolvedValue(undefined)
+    const ai = new AiService(
+      {} as SettingsStore,
+      { prepareAiOperation } as unknown as ProjectService,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+    const exposed = ai as unknown as {
+      operationFromTool(tool: { name: string; arguments: string }): Promise<unknown>
+    }
+    const operations = [
+      { kind: 'create', targetPath: 'notes/index.md', proposedContent: '# Index' },
+      { kind: 'create', targetPath: 'notes/topic.md', proposedContent: '# Topic' }
+    ]
+
+    await exposed.operationFromTool({
+      name: 'propose_markdown_operation',
+      arguments: JSON.stringify({ operations, summary: 'Create notes' })
+    })
+
+    expect(prepareAiOperation).toHaveBeenCalledWith({
+      kind: undefined,
+      targetPath: undefined,
+      proposedContent: undefined,
+      operations,
+      summary: 'Create notes'
+    })
+  })
+})
+
+describe('GPT-Image 2 request and response contract', () => {
+  it('uses the OpenAI-compatible GPT-Image 2 request body', () => {
+    expect(imageGenerationRequestBody(imageRequest)).toEqual({
+      model: 'gpt-image-2',
+      prompt: '一张适合学习笔记的系统架构图',
+      size: '1536x1024',
+      quality: 'high',
+      output_format: 'jpeg',
+      output_compression: 90,
+      n: 1
+    })
+  })
+
+  it('parses a base64 image response into a persistent chat attachment', () => {
+    const jpegBase64 = Buffer.from([0xff, 0xd8, 0xff, 0x00]).toString('base64')
+
+    expect(imageGenerationResult({ data: [{ b64_json: jpegBase64 }] }, imageRequest, 1234)).toMatchObject({
+      attachment: {
+        name: 'gpt-image-2-1234.jpg',
+        mimeType: 'image/jpeg',
+        dataUrl: `data:image/jpeg;base64,${jpegBase64}`,
+        size: 4
+      },
+      model: 'gpt-image-2',
+      size: '1536x1024',
+      quality: 'high',
+      createdAt: 1234
+    })
+  })
+
+  it('rejects missing, malformed, and unsupported base64 image results', () => {
+    expect(() => imageGenerationResult({ data: [{}] }, imageRequest)).toThrow(
+      '图片生成服务没有返回有效的 Base64 图片'
+    )
+    expect(() => imageGenerationResult({ data: [{ b64_json: 'not-base64!' }] }, imageRequest)).toThrow(
+      '图片生成服务没有返回有效的 Base64 图片'
+    )
+    expect(() => imageGenerationResult({ data: [{ b64_json: Buffer.from('plain text').toString('base64') }] }, imageRequest)).toThrow(
+      '图片生成服务返回了不支持的图片格式'
+    )
+  })
+
+  it('posts to an exact third-party endpoint with the independent image API key', async () => {
+    const endpoint = 'https://images.example.com/vendor/v1/images/generations'
+    const jpegBase64 = Buffer.from([0xff, 0xd8, 0xff, 0x00]).toString('base64')
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: jpegBase64 }]
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    }))
+    const settings = {
+      get: vi.fn().mockResolvedValue({ imageBaseUrl: endpoint }),
+      imageApiKey: vi.fn().mockResolvedValue('third-party-image-key')
+    } as unknown as SettingsStore
+    const persistGeneratedImage = vi.fn(async (attachment: ChatImageAttachment) => ({
+      ...attachment,
+      projectRelativePath: `assets/ai-images/${attachment.name}`,
+      absolutePath: `/tmp/project/assets/ai-images/${attachment.name}`
+    }))
+    const ai = new AiService(
+      settings,
+      { persistGeneratedImage } as unknown as ProjectService,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+
+    await expect(ai.generateImage(imageRequest)).resolves.toMatchObject({
+      model: 'gpt-image-2',
+      size: imageRequest.size,
+      quality: imageRequest.quality
+    })
+    expect(settings.imageApiKey).toHaveBeenCalledOnce()
+    expect(persistGeneratedImage).toHaveBeenCalledOnce()
+    expect(fetchSpy).toHaveBeenCalledWith(endpoint, expect.objectContaining({
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer third-party-image-key'
+      },
+      body: JSON.stringify(imageGenerationRequestBody(imageRequest)),
+      redirect: 'error'
+    }))
+  })
+
+  it('surfaces a third-party image error with the exact endpoint context', async () => {
+    const endpoint = 'https://images.example.com/vendor/v1/images/generations'
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error: { message: 'Image quota exhausted' }
+    }), {
+      status: 429,
+      headers: { 'content-type': 'application/json' }
+    }))
+    const settings = {
+      get: vi.fn().mockResolvedValue({ imageBaseUrl: endpoint }),
+      imageApiKey: vi.fn().mockResolvedValue('third-party-image-key'),
+      apiKey: vi.fn()
+    } as unknown as SettingsStore
+    const ai = new AiService(
+      settings,
+      {} as ProjectService,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+
+    await expect(ai.generateImage(imageRequest)).rejects.toThrow(
+      `AI 请求失败（HTTP 429，请求地址：${endpoint}）：Image quota exhausted`
+    )
+    expect(settings.imageApiKey).toHaveBeenCalledOnce()
+    expect(settings.apiKey).not.toHaveBeenCalled()
   })
 })
 

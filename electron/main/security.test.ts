@@ -108,4 +108,11 @@ describe('atomicCreate', () => {
     await expect(atomicCreate(target, 'second')).rejects.toMatchObject({ code: 'EEXIST' })
     await expect(readFile(target, 'utf8')).resolves.toBe('first')
   })
+
+  it('atomically creates binary data without text conversion', async () => {
+    const target = path.join(fixture, 'capture.pdf')
+    const bytes = Buffer.from('%PDF-1.7\n\u0000\u0001binary')
+    await atomicCreate(target, bytes)
+    await expect(readFile(target)).resolves.toEqual(bytes)
+  })
 })

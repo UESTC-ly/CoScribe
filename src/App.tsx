@@ -9,7 +9,8 @@ import {
   Save,
   Settings as SettingsIcon
 } from 'lucide-react'
-import { AiWorkspace, type AiSendPayload } from './components/ai'
+import { AiWorkspace, type AiSendPayload, type ImageGenerationPayload } from './components/ai'
+import { BrowserWorkspace } from './components/browser'
 import {
   ActivityRail,
   ConfirmDialog,
@@ -39,15 +40,19 @@ import type {
   AiStreamEvent,
   Annotation,
   AppSettings,
+  ChatImageAttachment,
   ChatMessage,
   ContextScope,
   ContextSnapshot,
   FileKind,
   FileNode,
   FileOperationProposal,
+  FileReadResult,
   OpenTab,
   PaneId,
   ProjectInfo,
+  ResearchBrowserExtractResult,
+  ResearchBrowserState,
   SearchResult,
   SourceRef
 } from './shared/types'
@@ -76,6 +81,7 @@ interface ActiveAiRequest {
   requestId: string
   sessionId: string
   assistantMessageId: string
+  autoApplyOperation?: boolean
 }
 
 function makeId(prefix: string): string {
@@ -86,11 +92,20 @@ function fileName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path
 }
 
+function projectRelativePath(projectPath: string, filePath: string): string {
+  const root = projectPath.replace(/\\/gu, '/').replace(/\/+$/u, '')
+  const candidate = filePath.replace(/\\/gu, '/')
+  return candidate.startsWith(`${root}/`) ? candidate.slice(root.length + 1) : candidate
+}
+
 function inferKind(path: string): Exclude<FileKind, 'folder'> {
   const ext = path.split('.').pop()?.toLowerCase()
   if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'markdown'
   if (ext === 'pdf') return 'pdf'
   if (ext === 'docx') return 'docx'
+  if (ext === 'pptx') return 'pptx'
+  if (ext === 'ppt') return 'ppt'
+  if (ext === 'mhtml' || ext === 'mht') return 'webarchive'
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif'].includes(ext ?? '')) return 'image'
   if (['txt', 'log', 'csv', 'json', 'yaml', 'yml', 'toml', 'xml'].includes(ext ?? '')) return 'text'
   return 'unsupported'
@@ -119,14 +134,24 @@ function findNode(nodes: readonly FileNode[], path: string): FileNode | undefine
   return undefined
 }
 
-function isAiConfigured(settings: AppSettings): boolean {
-  if (!settings.baseUrl.trim() || !settings.model.trim()) return false
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '[::1]' || hostname === '::1' || /^127(?:\.\d{1,3}){3}$/u.test(hostname)
+}
+
+function hasRemoteCredential(url: string, hasApiKey: boolean): boolean {
   try {
-    const host = new URL(settings.baseUrl).hostname
-    return settings.hasApiKey || host === 'localhost' || host === '127.0.0.1' || host === '::1'
+    return hasApiKey || isLoopbackHostname(new URL(url).hostname)
   } catch {
     return false
   }
+}
+
+function isAiConfigured(settings: AppSettings): boolean {
+  return Boolean(settings.baseUrl.trim() && settings.model.trim()) && hasRemoteCredential(settings.baseUrl, settings.hasApiKey)
+}
+
+function isImageConfigured(settings: AppSettings): boolean {
+  return Boolean(settings.imageBaseUrl.trim()) && hasRemoteCredential(settings.imageBaseUrl, settings.hasImageApiKey)
 }
 
 function resolvedTheme(settings: AppSettings): 'light' | 'dark' {
@@ -144,12 +169,19 @@ export default function App(): React.JSX.Element {
   const [promptValue, setPromptValue] = useState('')
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
   const [streamingRequestId, setStreamingRequestId] = useState<string | null>(null)
+  const [imageGenerationRequestId, setImageGenerationRequestId] = useState<string | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
   const [applyingOperationId, setApplyingOperationId] = useState<string | null>(null)
+  const [capturedImage, setCapturedImage] = useState<ChatImageAttachment | null>(null)
+  const [chatDraft, setChatDraft] = useState('')
+  const [chatDraftFocusToken, setChatDraftFocusToken] = useState(0)
   const [contextScope, setContextScope] = useState<ContextScope>(DEFAULT_SETTINGS.defaultContextScope)
+  const [browserActive, setBrowserActive] = useState(false)
+  const [pendingWebContext, setPendingWebContext] = useState<ContextSnapshot | null>(null)
   const [resizing, setResizing] = useState<'left' | 'ai' | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const activeRequests = useRef(new Map<string, ActiveAiRequest>())
+  const stoppedImageRequests = useRef(new Set<string>())
   const hydratedProjectPath = useRef<string | null>(null)
   const refreshTimer = useRef<number | null>(null)
 
@@ -282,6 +314,38 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => window.coscribe.search.onProgress((progress) => setStore().setSearchProgress(progress)), [])
 
+  useEffect(() => window.coscribe.screenshot.onResult((event) => {
+    if (event.type === 'captured') {
+      setCapturedImage(event.attachment)
+      setStore().setAiVisible(true)
+      return
+    }
+    setAiError(event.message)
+    setStore().setAiVisible(true)
+  }), [])
+
+  useEffect(() => {
+    const copySelectionToChat = (event: KeyboardEvent): void => {
+      if (!(event.shiftKey && (event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'k')) return
+      const target = event.target instanceof Element ? event.target : null
+      if (target?.closest('.ai-workspace, .project-navigator, .app-titlebar, .app-statusbar')) return
+      event.preventDefault()
+      const selection = appStore.getState().captureActiveContext('selection')?.selection?.trim()
+      if (!selection) {
+        setAiError('请先在当前文档中选中文字，再按 Command/Ctrl + Shift + K。')
+        setStore().setAiVisible(true)
+        return
+      }
+      setChatDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${selection}` : selection)
+      setContextScope('selection')
+      setStore().setAiVisible(true)
+      setChatDraftFocusToken((token) => token + 1)
+      setAiError(null)
+    }
+    window.addEventListener('keydown', copySelectionToChat)
+    return () => window.removeEventListener('keydown', copySelectionToChat)
+  }, [])
+
   useEffect(() => window.coscribe.ai.onStream((event: AiStreamEvent) => {
     const request = activeRequests.current.get(event.requestId)
     if (!request) return
@@ -294,8 +358,35 @@ export default function App(): React.JSX.Element {
       store.updateMessage(request.sessionId, request.assistantMessageId, { sources: event.sources, operation: event.operation })
       const session = appStore.getState().sessions.find((item) => item.id === request.sessionId)
       if (session?.title === '新会话' && appStore.getState().settings.autoTitle) {
-        const firstQuestion = session.messages.find((message) => message.role === 'user')?.content ?? '学习会话'
+        const firstMessage = session.messages.find((message) => message.role === 'user')
+        const firstQuestion = firstMessage?.content.trim() || firstMessage?.attachments?.[0]?.name || '图片提问'
         store.renameSession(session.id, firstQuestion.replace(/[#*_`]/g, '').slice(0, 20))
+      }
+      if (request.autoApplyOperation) {
+        if (!event.operation) {
+          const message = 'AI 没有返回可写入的笔记文件，请重试“整理笔记”。'
+          store.updateMessage(request.sessionId, request.assistantMessageId, { error: message })
+          setAiError(message)
+        } else {
+          const operation = event.operation
+          setApplyingOperationId(operation.id)
+          void window.coscribe.file.applyAiOperation({ ...operation, status: 'accepted' }).then(async (result) => {
+            store.updateMessage(request.sessionId, request.assistantMessageId, {
+              operation: { ...operation, status: 'accepted' }
+            })
+            const files = result.files.length ? result.files : [result]
+            for (const file of files) store.markDocumentSaved(file)
+            store.setFileTree(await window.coscribe.project.tree())
+            const first = files[0]
+            if (first) store.openTab({ id: `tab:${first.path}`, path: first.path, name: fileName(first.path), kind: 'markdown' })
+          }).catch((reason: unknown) => {
+            const message = reason instanceof Error ? reason.message : '整理后的笔记无法写入本地。'
+            store.updateMessage(request.sessionId, request.assistantMessageId, {
+              operation: { ...operation, status: 'failed', error: message }
+            })
+            setAiError(message)
+          }).finally(() => setApplyingOperationId(null))
+        }
       }
     } else if (event.type === 'stopped') {
       store.updateMessage(request.sessionId, request.assistantMessageId, { stopped: true })
@@ -336,6 +427,8 @@ export default function App(): React.JSX.Element {
 
   const openNode = useCallback((node: FileNode, location?: { page?: number; line?: number }): void => {
     if (node.kind === 'folder') return
+    setBrowserActive(false)
+    setPendingWebContext(null)
     const tab: OpenTab = { id: `tab:${node.path}`, path: node.path, name: node.name, kind: node.kind }
     setStore().openTab(tab)
     if (node.kind === 'pdf' && location?.page) setStore().updatePdfState(node.path, { page: location.page })
@@ -354,6 +447,13 @@ export default function App(): React.JSX.Element {
     openNode(node ?? { name: fileName(path), path, kind: kind ?? inferKind(path), size: 0, modifiedAt: 0 }, location)
   }, [openNode])
 
+  const convertPowerPoint = useCallback(async (inputPath: string): Promise<void> => {
+    const result = await window.coscribe.file.convertPowerPointToPdf(inputPath)
+    setStore().markDocumentSaved(result)
+    await refreshTree()
+    openPath(result.path, 'pdf')
+  }, [openPath, refreshTree])
+
   const runPrompt = useCallback((config: PromptState): void => {
     setPromptValue(config.initialValue ?? '')
     setPrompt(config)
@@ -366,8 +466,11 @@ export default function App(): React.JSX.Element {
         window.coscribe.sessions.save(appStore.getState().sessions),
         window.coscribe.annotations.save(appStore.getState().annotations)
       ])
+      await window.coscribe.browser.close()
       await window.coscribe.project.close()
       setStore().closeProject()
+      setBrowserActive(false)
+      setPendingWebContext(null)
       hydratedProjectPath.current = null
       setHydrated(false)
       setStore().setRecentProjects(await window.coscribe.project.recent())
@@ -498,9 +601,14 @@ export default function App(): React.JSX.Element {
   const openSource = (source: SourceRef): void => {
     if (source.kind === 'session') return
     if (source.kind === 'general') return
+    if (source.kind === 'web') {
+      setBrowserActive(true)
+      void window.coscribe.browser.navigate(source.path).catch((reason) => setError(reason instanceof Error ? reason.message : '无法重新打开网页来源'))
+      return
+    }
     openPath(
       source.path,
-      source.kind === 'pdf' || source.kind === 'markdown' || source.kind === 'docx' || source.kind === 'image'
+      source.kind === 'pdf' || source.kind === 'markdown' || source.kind === 'docx' || source.kind === 'ppt' || source.kind === 'pptx' || source.kind === 'image'
         ? source.kind
         : 'text',
       { page: source.page, line: source.line }
@@ -508,32 +616,103 @@ export default function App(): React.JSX.Element {
   }
 
   const openContext = (context: ContextSnapshot): void => {
+    if (context.webUrl) {
+      setBrowserActive(true)
+      void window.coscribe.browser.navigate(context.webUrl).catch((reason) => setError(reason instanceof Error ? reason.message : '无法重新打开网页上下文'))
+      return
+    }
     if (!context.documentPath) return
     openPath(context.documentPath, context.kind === 'folder' ? undefined : context.kind, { page: context.pdfPage })
   }
+
+  const sendWebCaptureToAi = useCallback((capture: ResearchBrowserExtractResult): void => {
+    const store = appStore.getState()
+    if (!store.project) return
+    const scope: ContextScope = capture.mode === 'selection' ? 'selection' : 'document'
+    const context: ContextSnapshot = {
+      projectName: store.project.name,
+      projectPath: store.project.path,
+      pane: store.workspace.activePane,
+      documentName: capture.title || new URL(capture.url).hostname,
+      webUrl: capture.url,
+      ...(capture.mode === 'selection'
+        ? { selection: capture.text, visibleText: capture.text }
+        : { visibleText: capture.text.slice(0, 20_000), sectionText: capture.text, documentText: capture.text }),
+      scope,
+      referencedFiles: [...store.referencedFiles],
+      capturedAt: Date.now()
+    }
+    const draft = capture.mode === 'selection'
+      ? [`网页选中内容：[${context.documentName}](${capture.url})`, '', capture.text].join('\n')
+      : `请基于这篇网页的完整正文回答：\n\n[${context.documentName}](${capture.url})`
+    setPendingWebContext(context)
+    setContextScope(scope)
+    setChatDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft)
+    setStore().setAiVisible(true)
+    setChatDraftFocusToken((token) => token + 1)
+    setAiError(null)
+  }, [])
+
+  const citeWebSource = useCallback((browserState: ResearchBrowserState): void => {
+    if (!browserState.url) return
+    const title = browserState.title || new URL(browserState.url).hostname
+    const citation = `[${title}](${browserState.url})（访问于 ${new Intl.DateTimeFormat('zh-CN').format(new Date())}）`
+    setChatDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${citation}` : citation)
+    setStore().setAiVisible(true)
+    setChatDraftFocusToken((token) => token + 1)
+    setAiError(null)
+  }, [])
+
+  const browserFileSaved = useCallback(async (result: FileReadResult): Promise<void> => {
+    setStore().markDocumentSaved(result)
+    await refreshTree()
+  }, [refreshTree])
 
   const sendAiMessage = useCallback(async (payload: AiSendPayload): Promise<void> => {
     const store = setStore()
     let sessionId = store.workspace.currentSessionId
     if (!sessionId) sessionId = store.createSession()
     store.setReferencedFiles(payload.referencedFiles)
-    const context = setStore().captureActiveContext(payload.scope)
+    const context = pendingWebContext && pendingWebContext.projectPath === state.project?.path
+      ? { ...pendingWebContext, referencedFiles: [...pendingWebContext.referencedFiles] }
+      : setStore().captureActiveContext(payload.scope)
     if (!context || !state.project) return
     context.referencedFiles = [...payload.referencedFiles]
     const requestId = makeId('ai')
-    const userMessage: ChatMessage = { id: makeId('message'), role: 'user', content: payload.content, createdAt: Date.now(), context }
+    const userMessage: ChatMessage = {
+      id: makeId('message'),
+      role: 'user',
+      content: payload.content,
+      createdAt: Date.now(),
+      ...(payload.attachments.length ? { attachments: payload.attachments.map((attachment) => ({ ...attachment })) } : {}),
+      context
+    }
     const assistantMessage: ChatMessage = { id: makeId('message'), role: 'assistant', content: '', createdAt: Date.now() + 1 }
     const history = appStore.getState().sessions.find((session) => session.id === sessionId)?.messages ?? []
     store.addMessage(sessionId, userMessage)
     store.addMessage(sessionId, assistantMessage)
-    activeRequests.current.set(requestId, { requestId, sessionId, assistantMessageId: assistantMessage.id })
+    setPendingWebContext(null)
+    activeRequests.current.set(requestId, {
+      requestId,
+      sessionId,
+      assistantMessageId: assistantMessage.id,
+      ...(payload.autoApplyOperation ? { autoApplyOperation: true } : {})
+    })
     setStreamingRequestId(requestId)
     setAiError(null)
     try {
       await window.coscribe.ai.start({
         requestId,
         sessionId,
-        messages: [...history, userMessage].filter((message) => message.role !== 'system').map(({ role, content }) => ({ role, content })),
+        messages: [...history, userMessage]
+          .filter((message) => message.role !== 'system')
+          .map(({ role, content, attachments }) => ({
+            role,
+            content,
+            ...(attachments?.length
+              ? { attachments: attachments.map((attachment) => ({ ...attachment })) }
+              : {})
+          })),
         context,
         settings: { allowGeneralKnowledge: state.settings.allowGeneralKnowledge }
       })
@@ -544,14 +723,99 @@ export default function App(): React.JSX.Element {
       setStreamingRequestId(null)
       setAiError(message)
     }
-  }, [state.project, state.settings.allowGeneralKnowledge])
+  }, [pendingWebContext, state.project, state.settings.allowGeneralKnowledge])
+
+  const captureScreenshot = useCallback(async (): Promise<void> => {
+    try {
+      setAiError(null)
+      setCapturedImage(await window.coscribe.screenshot.capture())
+      setStore().setAiVisible(true)
+    } catch (reason) {
+      setAiError(reason instanceof Error ? reason.message : '截图失败。')
+    }
+  }, [])
+
+  const quickNote = useCallback(async (): Promise<void> => {
+    const store = appStore.getState()
+    const activeTab = selectActiveTab(store)
+    const currentTarget = activeTab?.kind === 'markdown' && store.project
+      ? projectRelativePath(store.project.path, activeTab.path)
+      : null
+    const targetInstruction = currentTarget
+      ? `将笔记追加到当前 Markdown 文档：${currentTarget}`
+      : '在项目的 notes 文件夹中新建一份名称清晰、不会覆盖现有文件的 Markdown 笔记。'
+    await sendAiMessage({
+      content: [
+        '请把本次会话中有长期价值的知识整理为结构化 Markdown 笔记，并立即保存到本地项目。',
+        targetInstruction,
+        '保留关键结论、解释、步骤、代码和来源；去掉寒暄、重复内容和过程性指令。',
+        '必须调用 CoScribe 文件操作工具，不要只在聊天中返回笔记正文。'
+      ].join('\n'),
+      attachments: [],
+      scope: contextScope,
+      referencedFiles: [...store.referencedFiles],
+      autoApplyOperation: true
+    })
+  }, [contextScope, sendAiMessage])
 
   const stopAi = useCallback(async (): Promise<void> => {
     if (streamingRequestId) await window.coscribe.ai.stop(streamingRequestId)
   }, [streamingRequestId])
 
+  const generateImage = useCallback(async (payload: ImageGenerationPayload): Promise<void> => {
+    if (streamingRequestId || imageGenerationRequestId) return
+    const store = setStore()
+    let sessionId = store.workspace.currentSessionId
+    if (!sessionId) sessionId = store.createSession()
+    const requestId = makeId('image')
+    const userMessage: ChatMessage = {
+      id: makeId('message'),
+      role: 'user',
+      content: payload.prompt,
+      createdAt: Date.now()
+    }
+    const assistantMessage: ChatMessage = {
+      id: makeId('message'),
+      role: 'assistant',
+      content: '',
+      createdAt: Date.now() + 1
+    }
+    store.addMessage(sessionId, userMessage)
+    store.addMessage(sessionId, assistantMessage)
+    setImageGenerationRequestId(requestId)
+    setAiError(null)
+
+    try {
+      const result = await window.coscribe.images.generate({ requestId, ...payload })
+      store.updateMessage(sessionId, assistantMessage.id, {
+        attachments: [{ ...result.attachment }]
+      })
+      const session = appStore.getState().sessions.find((item) => item.id === sessionId)
+      if (session?.title === '新会话' && appStore.getState().settings.autoTitle) {
+        store.renameSession(sessionId, payload.prompt.replace(/[#*_`]/g, '').slice(0, 20) || '图片生成')
+      }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : '图片生成失败'
+      if (stoppedImageRequests.current.has(requestId) || message.includes('已停止')) {
+        store.updateMessage(sessionId, assistantMessage.id, { stopped: true })
+      } else {
+        store.updateMessage(sessionId, assistantMessage.id, { error: message })
+        setAiError(message)
+      }
+    } finally {
+      stoppedImageRequests.current.delete(requestId)
+      setImageGenerationRequestId((current) => current === requestId ? null : current)
+    }
+  }, [imageGenerationRequestId, streamingRequestId])
+
+  const stopImage = useCallback(async (): Promise<void> => {
+    if (!imageGenerationRequestId) return
+    stoppedImageRequests.current.add(imageGenerationRequestId)
+    await window.coscribe.images.stop(imageGenerationRequestId)
+  }, [imageGenerationRequestId])
+
   const regenerateAiMessage = useCallback(async (message: ChatMessage): Promise<void> => {
-    if (streamingRequestId) return
+    if (streamingRequestId || imageGenerationRequestId) return
     const store = setStore()
     const session = appStore.getState().sessions.find((item) => item.messages.some((candidate) => candidate.id === message.id))
     if (!session) return
@@ -580,7 +844,13 @@ export default function App(): React.JSX.Element {
         sessionId: session.id,
         messages: history
           .filter((candidate) => candidate.role !== 'system')
-          .map(({ role, content }) => ({ role, content })),
+          .map(({ role, content, attachments }) => ({
+            role,
+            content,
+            ...(attachments?.length
+              ? { attachments: attachments.map((attachment) => ({ ...attachment })) }
+              : {})
+          })),
         context: question.context,
         settings: { allowGeneralKnowledge: appStore.getState().settings.allowGeneralKnowledge }
       })
@@ -591,7 +861,7 @@ export default function App(): React.JSX.Element {
       setStreamingRequestId(null)
       setAiError(errorMessage)
     }
-  }, [streamingRequestId])
+  }, [imageGenerationRequestId, streamingRequestId])
 
   const updateOperation = useCallback((operationId: string, patch: Partial<FileOperationProposal>): void => {
     const store = appStore.getState()
@@ -609,9 +879,10 @@ export default function App(): React.JSX.Element {
     try {
       const result = await window.coscribe.file.applyAiOperation({ ...operation, status: 'accepted' })
       updateOperation(operation.id, { status: 'accepted' })
-      setStore().markDocumentSaved(result)
+      const files = result.files.length ? result.files : [result]
+      for (const file of files) setStore().markDocumentSaved(file)
       await refreshTree()
-      openPath(result.path, 'markdown')
+      openPath(files[0]?.path ?? result.path, 'markdown')
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '无法应用文件修改'
       updateOperation(operation.id, { status: 'failed', error: message })
@@ -711,12 +982,13 @@ export default function App(): React.JSX.Element {
   const activeDocument = selectActiveDocument(state)
   const currentSession = selectCurrentSession(state)
   const dirtyPaths = new Set(selectDirtyDocuments(state).map((document) => document.path))
-  const activeContext = state.captureActiveContext(contextScope)
+  const activeContext = pendingWebContext ?? state.captureActiveContext(contextScope)
   const projectFiles = flattenFiles(state.fileTree)
   const visibleLeftWidth = clampProjectNavigatorWidth(state.workspace.leftWidth)
   const aiMaximumWidth = maximumAiPanelWidth(viewportWidth, visibleLeftWidth)
   const visibleAiWidth = clampAiPanelWidth(state.workspace.aiWidth, aiMaximumWidth)
   const isConfigured = isAiConfigured(state.settings)
+  const imageConfigured = isImageConfigured(state.settings)
 
   const paneProps = (pane: PaneId, tabs: OpenTab[]) => ({
     projectPath: state.project!.path,
@@ -743,7 +1015,9 @@ export default function App(): React.JSX.Element {
     onDeleteAnnotation: state.deleteAnnotation,
     onRequestComment: requestPdfComment,
     onReveal: (path: string) => void window.coscribe.file.reveal(path),
+    onOpenExternal: (path: string) => void window.coscribe.file.openExternal(path).catch((reason) => setError(reason instanceof Error ? reason.message : '系统无法打开文件')),
     onOpenProjectPath: (path: string) => openPath(path),
+    onConvertPowerPoint: convertPowerPoint,
     onResolveConflict: (path: string, resolution: 'use-external' | 'keep-local') => state.resolveDocumentConflict(path, resolution === 'use-external' ? 'reload' : 'keep'),
     onError: setError
   })
@@ -758,16 +1032,16 @@ export default function App(): React.JSX.Element {
       } as React.CSSProperties}
     >
       <header className="app-titlebar">
-        <div className="app-titlebar__project"><strong>{state.project.name}</strong><span>{activeTab?.path ?? state.project.path}</span></div>
-        <div className="app-titlebar__center">{activeDocument?.dirty ? '未保存' : activeTab ? '本地文件' : '项目工作区'}</div>
+        <div className="app-titlebar__project"><strong>{state.project.name}</strong><span>{browserActive ? '资料浏览器 · 原网页' : activeTab?.path ?? state.project.path}</span></div>
+        <div className="app-titlebar__center">{browserActive ? '单标签资料浏览器' : activeDocument?.dirty ? '未保存' : activeTab ? '本地文件' : '项目工作区'}</div>
         <div className="app-titlebar__actions">
-          <button className={`icon-button ${state.workspace.split ? 'is-active' : ''}`} onClick={toggleSplit} title={state.workspace.split ? '关闭分屏' : '左右分屏'} aria-label={state.workspace.split ? '关闭分屏' : '左右分屏'}>{state.workspace.split ? <Columns3 size={16} /> : <Columns2 size={16} />}</button>
+          <button className={`icon-button ${state.workspace.split ? 'is-active' : ''}`} disabled={browserActive} onClick={toggleSplit} title={browserActive ? '资料浏览器使用单工作区' : state.workspace.split ? '关闭分屏' : '左右分屏'} aria-label={state.workspace.split ? '关闭分屏' : '左右分屏'}>{state.workspace.split ? <Columns3 size={16} /> : <Columns2 size={16} />}</button>
           <button className={`icon-button ${state.workspace.aiVisible ? 'is-active' : ''}`} onClick={() => state.setAiVisible(!state.workspace.aiVisible)} title={state.workspace.aiVisible ? '隐藏 AI' : '显示 AI'} aria-label={state.workspace.aiVisible ? '隐藏 AI' : '显示 AI'}>{state.workspace.aiVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}</button>
           <button className="icon-button" onClick={() => setSettingsOpen(true)} title="设置" aria-label="设置"><SettingsIcon size={16} /></button>
         </div>
       </header>
       <div className="app-body">
-        <ActivityRail active={state.workspace.navSection} aiVisible={state.workspace.aiVisible} onChange={state.setNavSection} onToggleAi={() => state.setAiVisible(!state.workspace.aiVisible)} onSettings={() => setSettingsOpen(true)} />
+        <ActivityRail active={state.workspace.navSection} aiVisible={state.workspace.aiVisible} browserActive={browserActive} onChange={state.setNavSection} onToggleBrowser={() => setBrowserActive((active) => !active)} onToggleAi={() => state.setAiVisible(!state.workspace.aiVisible)} onSettings={() => setSettingsOpen(true)} />
         <ProjectNavigator
           section={state.workspace.navSection}
           projectName={state.project.name}
@@ -802,10 +1076,21 @@ export default function App(): React.JSX.Element {
         />
         <div className={`resize-handle ${resizing === 'left' ? 'is-resizing' : ''}`} onPointerDown={(event) => beginResize('left', event)} role="separator" aria-orientation="vertical" aria-label="调整项目导航宽度" />
         <main className="workspace">
-          <div className="editor-workbench">
-            <EditorPane {...paneProps('primary', primaryTabs)} />
-            {state.workspace.split && <EditorPane {...paneProps('secondary', secondaryTabs)} />}
-          </div>
+          {browserActive ? (
+            <BrowserWorkspace
+              suspended={settingsOpen || Boolean(prompt) || Boolean(confirm)}
+              onClose={() => setBrowserActive(false)}
+              onSendToAi={sendWebCaptureToAi}
+              onCiteSource={citeWebSource}
+              onSaved={browserFileSaved}
+              onError={setError}
+            />
+          ) : (
+            <div className="editor-workbench">
+              <EditorPane {...paneProps('primary', primaryTabs)} />
+              {state.workspace.split && <EditorPane {...paneProps('secondary', secondaryTabs)} />}
+            </div>
+          )}
         </main>
         {state.workspace.aiVisible && <>
           <div
@@ -831,16 +1116,33 @@ export default function App(): React.JSX.Element {
             referencedFiles={state.referencedFiles}
             availableFiles={projectFiles.map((file) => ({ path: file.path, name: file.name, kind: file.kind }))}
             isStreaming={Boolean(streamingRequestId)}
+            isGeneratingImage={Boolean(imageGenerationRequestId)}
             isConfigured={isConfigured}
+            isImageConfigured={imageConfigured}
             error={aiError}
             applyingOperationId={applyingOperationId}
+            capturedImage={capturedImage}
+            draft={chatDraft}
+            draftFocusToken={chatDraftFocusToken}
             onSelectSession={state.setCurrentSession}
             onNewSession={() => { state.createSession() }}
             onRenameSession={state.renameSession}
-            onContextScopeChange={setContextScope}
+            onContextScopeChange={(scope) => {
+              setContextScope(scope)
+              if (pendingWebContext && scope !== pendingWebContext.scope) setPendingWebContext(null)
+            }}
+            onDraftChange={(value) => {
+              setChatDraft(value)
+              if (!value.trim()) setPendingWebContext(null)
+            }}
             onReferencedFilesChange={state.setReferencedFiles}
             onSend={sendAiMessage}
             onStop={stopAi}
+            onGenerateImage={generateImage}
+            onStopImage={stopImage}
+            onCaptureScreenshot={captureScreenshot}
+            onCapturedImageHandled={() => setCapturedImage(null)}
+            onQuickNote={quickNote}
             onOpenSource={openSource}
             onOpenContext={openContext}
             onAcceptOperation={acceptOperation}

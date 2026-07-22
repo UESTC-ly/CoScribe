@@ -12,8 +12,9 @@ import {
 import { atomicWriteJson, readJson } from './storage'
 
 interface StoredSettings {
-  settings: Omit<AppSettings, 'apiKey' | 'hasApiKey'>
+  settings: Omit<AppSettings, 'apiKey' | 'hasApiKey' | 'imageApiKey' | 'hasImageApiKey'>
   encryptedApiKey?: string
+  encryptedImageApiKey?: string
 }
 
 const CONTEXT_SCOPES = new Set<ContextScope>(['selection', 'visible', 'document', 'project', 'general'])
@@ -34,16 +35,16 @@ function clampedInteger(value: unknown, fallback: number, minimum: number, maxim
   return Math.min(maximum, Math.max(minimum, numeric))
 }
 
-function sanitizeBaseUrl(value: unknown): string {
-  const candidate = typeof value === 'string' ? value.trim() : DEFAULT_SETTINGS.baseUrl
+function sanitizeBaseUrl(value: unknown, fallback: string, label: string): string {
+  const candidate = typeof value === 'string' ? value.trim() : fallback
   let parsed: URL
   try {
     parsed = new URL(candidate)
   } catch {
-    throw new Error('AI 服务地址不是有效 URL。')
+    throw new Error(`${label}不是有效 URL。`)
   }
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw new Error('AI 服务地址只支持 http:// 或 https://。')
+    throw new Error(`${label}只支持 http:// 或 https://。`)
   }
   const loopback = isLoopbackHost(parsed.hostname)
   if (parsed.protocol === 'http:' && !loopback) {
@@ -54,7 +55,9 @@ function sanitizeBaseUrl(value: unknown): string {
   return parsed.toString().replace(/\/$/u, '')
 }
 
-function sanitizeSettings(input: Partial<AppSettings>): Omit<AppSettings, 'apiKey' | 'hasApiKey'> {
+function sanitizeSettings(
+  input: Partial<AppSettings>
+): Omit<AppSettings, 'apiKey' | 'hasApiKey' | 'imageApiKey' | 'hasImageApiKey'> {
   const theme = input.theme === 'light' || input.theme === 'dark' || input.theme === 'system' ? input.theme : DEFAULT_SETTINGS.theme
   const context = CONTEXT_SCOPES.has(input.defaultContextScope as ContextScope)
     ? (input.defaultContextScope as ContextScope)
@@ -68,10 +71,11 @@ function sanitizeSettings(input: Partial<AppSettings>): Omit<AppSettings, 'apiKe
     : DEFAULT_SETTINGS.reasoningEffort
 
   return {
-    baseUrl: sanitizeBaseUrl(input.baseUrl),
+    baseUrl: sanitizeBaseUrl(input.baseUrl, DEFAULT_SETTINGS.baseUrl, 'AI 服务地址'),
     model,
     apiProtocol,
     reasoningEffort,
+    imageBaseUrl: sanitizeBaseUrl(input.imageBaseUrl, DEFAULT_SETTINGS.imageBaseUrl, '图片生成服务地址'),
     theme,
     fontSize: clampedInteger(input.fontSize, DEFAULT_SETTINGS.fontSize, 11, 28),
     defaultProjectPath: typeof input.defaultProjectPath === 'string' ? input.defaultProjectPath.trim() : '',
@@ -96,7 +100,8 @@ export class SettingsStore {
     try {
       return {
         settings: sanitizeSettings(value.settings),
-        encryptedApiKey: typeof value.encryptedApiKey === 'string' ? value.encryptedApiKey : undefined
+        encryptedApiKey: typeof value.encryptedApiKey === 'string' ? value.encryptedApiKey : undefined,
+        encryptedImageApiKey: typeof value.encryptedImageApiKey === 'string' ? value.encryptedImageApiKey : undefined
       }
     } catch {
       return fallback
@@ -107,7 +112,8 @@ export class SettingsStore {
     const stored = await this.stored()
     return {
       ...stored.settings,
-      hasApiKey: Boolean(stored.encryptedApiKey)
+      hasApiKey: Boolean(stored.encryptedApiKey),
+      hasImageApiKey: Boolean(stored.encryptedImageApiKey)
     }
   }
 
@@ -124,9 +130,23 @@ export class SettingsStore {
     }
   }
 
+  async imageApiKey(): Promise<string | null> {
+    const stored = await this.stored()
+    if (!stored.encryptedImageApiKey) return null
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('当前系统的安全存储暂不可用，无法读取图片生成 API Key。')
+    }
+    try {
+      return safeStorage.decryptString(Buffer.from(stored.encryptedImageApiKey, 'base64'))
+    } catch {
+      throw new Error('图片生成 API Key 无法解密，请在设置中重新保存。')
+    }
+  }
+
   async save(input: AppSettings): Promise<AppSettings> {
     const previous = await this.stored()
     let encryptedApiKey = previous.encryptedApiKey
+    let encryptedImageApiKey = previous.encryptedImageApiKey
     if (Object.prototype.hasOwnProperty.call(input, 'apiKey')) {
       const nextKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : ''
       if (!nextKey) {
@@ -138,10 +158,29 @@ export class SettingsStore {
         encryptedApiKey = safeStorage.encryptString(nextKey).toString('base64')
       }
     }
+    if (Object.prototype.hasOwnProperty.call(input, 'imageApiKey')) {
+      const nextKey = typeof input.imageApiKey === 'string' ? input.imageApiKey.trim() : ''
+      if (!nextKey) {
+        if (input.hasImageApiKey === false) encryptedImageApiKey = undefined
+      } else {
+        if (!safeStorage.isEncryptionAvailable()) {
+          throw new Error('当前系统的安全存储暂不可用，图片生成 API Key 未保存。')
+        }
+        encryptedImageApiKey = safeStorage.encryptString(nextKey).toString('base64')
+      }
+    }
 
     const settings = sanitizeSettings(input)
-    const value: StoredSettings = { settings, ...(encryptedApiKey ? { encryptedApiKey } : {}) }
+    const value: StoredSettings = {
+      settings,
+      ...(encryptedApiKey ? { encryptedApiKey } : {}),
+      ...(encryptedImageApiKey ? { encryptedImageApiKey } : {})
+    }
     await atomicWriteJson(this.filePath, value)
-    return { ...settings, hasApiKey: Boolean(encryptedApiKey) }
+    return {
+      ...settings,
+      hasApiKey: Boolean(encryptedApiKey),
+      hasImageApiKey: Boolean(encryptedImageApiKey)
+    }
   }
 }

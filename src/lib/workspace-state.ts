@@ -11,7 +11,7 @@ import { normalizePortablePath, samePortablePath } from './path-utils'
 import { PANEL_LAYOUT } from './panel-layout'
 
 const PANE_IDS: PaneId[] = ['primary', 'secondary']
-const TAB_KINDS = new Set(['markdown', 'pdf', 'docx', 'image', 'text', 'unsupported'])
+const TAB_KINDS = new Set(['markdown', 'pdf', 'docx', 'ppt', 'pptx', 'webarchive', 'image', 'text', 'unsupported'])
 const NAV_SECTIONS = new Set(['files', 'sessions', 'search', 'annotations'])
 
 export interface WorkspaceRestoreOptions {

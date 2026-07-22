@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MarkdownContent } from './MarkdownMessage'
+import { MarkdownContent, MarkdownMessage } from './MarkdownMessage'
 
 afterEach(() => {
   cleanup()
@@ -46,5 +46,37 @@ describe('MarkdownContent', () => {
     expect(block).toHaveTextContent('<tag>& raw')
     expect(block.querySelector('[class^="hljs-"]')).toBeNull()
     expect(block.querySelector('tag')).toBeNull()
+  })
+})
+
+describe('MarkdownMessage images', () => {
+  it('keeps a generated image downloadable from the conversation', () => {
+    const dataUrl = 'data:image/jpeg;base64,ZmFrZS1pbWFnZQ=='
+    render(
+      <MarkdownMessage
+        message={{
+          id: 'generated-image',
+          role: 'assistant',
+          content: '',
+          createdAt: Date.now(),
+          attachments: [{
+            id: 'image-1',
+            name: 'coscribe-image.jpg',
+            mimeType: 'image/jpeg',
+            dataUrl,
+            size: 10,
+          }],
+        }}
+        onOpenSource={vi.fn()}
+        onOpenContext={vi.fn()}
+        onAcceptOperation={vi.fn()}
+        onRejectOperation={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('img', { name: 'coscribe-image.jpg' })).toHaveAttribute('src', dataUrl)
+    const download = screen.getByRole('link', { name: '下载 coscribe-image.jpg' })
+    expect(download).toHaveAttribute('href', dataUrl)
+    expect(download).toHaveAttribute('download', 'coscribe-image.jpg')
   })
 })

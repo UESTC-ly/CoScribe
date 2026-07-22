@@ -101,7 +101,7 @@ export class ProjectSearchService {
     const results: SearchResult[] = []
 
     for (const file of files) {
-      if (file.kind === 'markdown' || file.kind === 'text' || file.kind === 'docx') {
+      if (file.kind === 'markdown' || file.kind === 'text' || file.kind === 'docx' || file.kind === 'pptx' || file.kind === 'ppt') {
         try {
           const value = await this.project.read(file.path)
           const match = retrievalScore(`${file.name}\n${value.content}`, tokens)
@@ -234,7 +234,7 @@ export class ProjectSearchService {
           })
         }
 
-        if (file.kind === 'markdown' || file.kind === 'text' || file.kind === 'docx') {
+        if (file.kind === 'markdown' || file.kind === 'text' || file.kind === 'docx' || file.kind === 'pptx' || file.kind === 'ppt') {
           try {
             const value = await this.project.read(file.path)
             const haystack = value.content.toLocaleLowerCase()

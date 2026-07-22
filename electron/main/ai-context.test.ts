@@ -81,6 +81,46 @@ describe('AI context scope boundaries', () => {
     expect(result.text).toContain('默认对此文件使用 append')
   })
 
+  it('keeps extracted PPTX text and source type in document context', async () => {
+    const slidesPath = path.join(projectPath, 'slides.pptx')
+    const { exposed } = service()
+    const result = await exposed.validatedContext(snapshot('document', {
+      documentPath: slidesPath,
+      documentName: 'slides.pptx',
+      kind: 'pptx',
+      selection: '',
+      visibleText: '',
+      sectionText: '',
+      documentText: '[幻灯片 1]\nPPTX_EXTRACTED_TEXT'
+    }), '总结演示文稿')
+
+    expect(result.text).toContain('PPTX_EXTRACTED_TEXT')
+    expect(result.sources).toEqual([expect.objectContaining({ path: slidesPath, kind: 'pptx' })])
+  })
+
+  it('keeps isolated browser text and the verified web source without treating it as a project file', async () => {
+    const { exposed } = service()
+    const result = await exposed.validatedContext(snapshot('selection', {
+      documentPath: undefined,
+      documentName: 'Electron security guide',
+      kind: undefined,
+      webUrl: 'https://example.com/security',
+      selection: 'WEB_SELECTION',
+      visibleText: '',
+      sectionText: '',
+      documentText: ''
+    }), 'explain the selection')
+
+    expect(result.text).toContain('当前网页：Electron security guide')
+    expect(result.text).toContain('网页来源：https://example.com/security')
+    expect(result.text).toContain('WEB_SELECTION')
+    expect(result.sources).toEqual([expect.objectContaining({
+      path: 'https://example.com/security',
+      kind: 'web',
+      label: 'Electron security guide'
+    })])
+  })
+
   it('uses app-owned retrieval only for explicit project scope', async () => {
     const resultPath = path.join(projectPath, 'retrieved.md')
     const { exposed, retrieve } = service([{

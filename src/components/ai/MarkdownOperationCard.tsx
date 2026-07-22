@@ -1,5 +1,5 @@
-import { AlertCircle, Check, FileDiff, FilePlus2, FileText, Loader2, RotateCcw, X } from 'lucide-react'
-import type { FileOperationProposal } from '../../shared/types'
+import { AlertCircle, Check, FileDiff, FilePlus2, FileText, FolderTree, Loader2, RotateCcw, X } from 'lucide-react'
+import type { FileOperationProposal, MarkdownFileOperation } from '../../shared/types'
 
 export interface MarkdownOperationCardProps {
   operation: FileOperationProposal
@@ -120,6 +120,18 @@ function OperationIcon({ kind }: Pick<FileOperationProposal, 'kind'>): React.JSX
   return <FileDiff aria-hidden="true" />
 }
 
+function operationItems(operation: FileOperationProposal): MarkdownFileOperation[] {
+  return operation.operations?.length
+    ? operation.operations
+    : [{
+        kind: operation.kind,
+        targetPath: operation.targetPath,
+        proposedContent: operation.proposedContent,
+        ...(operation.originalContent !== undefined ? { originalContent: operation.originalContent } : {}),
+        ...(operation.expectedModifiedAt !== undefined ? { expectedModifiedAt: operation.expectedModifiedAt } : {})
+      }]
+}
+
 const operationLabels: Record<FileOperationProposal['kind'], string> = {
   create: '创建 Markdown',
   append: '追加内容',
@@ -138,6 +150,8 @@ export function MarkdownOperationCard({
       : []
   const visibleDiff = diff.slice(0, MAX_VISIBLE_DIFF_LINES)
   const isPending = operation.status === 'pending'
+  const items = operationItems(operation)
+  const isBatch = items.length > 1
 
   return (
     <section
@@ -146,11 +160,11 @@ export function MarkdownOperationCard({
     >
       <header className="ai-operation__header">
         <span className="ai-operation__icon">
-          <OperationIcon kind={operation.kind} />
+          {isBatch ? <FolderTree aria-hidden="true" /> : <OperationIcon kind={operation.kind} />}
         </span>
         <span className="ai-operation__heading">
           <span className="ai-operation__eyebrow">文件操作建议</span>
-          <strong>{operationLabels[operation.kind]}</strong>
+          <strong>{isBatch ? `创建笔记项目 · ${items.length} 个文件` : operationLabels[operation.kind]}</strong>
         </span>
         {operation.status !== 'pending' && (
           <span className={`ai-operation__status ai-operation__status--${operation.status}`}>
@@ -162,15 +176,30 @@ export function MarkdownOperationCard({
         )}
       </header>
 
-      <div className="ai-operation__target">
-        <span>目标</span>
-        <strong title={operation.targetPath}>{getFileName(operation.targetPath)}</strong>
-        <code title={operation.targetPath}>{operation.targetPath}</code>
-      </div>
+      {isBatch ? (
+        <div className="ai-operation__batch" aria-label="批量 Markdown 文件预览">
+          {items.map((item, index) => (
+            <details key={`${item.targetPath}-${index}`} open={index === 0}>
+              <summary>
+                <span><FilePlus2 aria-hidden="true" /><strong>{getFileName(item.targetPath)}</strong></span>
+                <code title={item.targetPath}>{item.targetPath}</code>
+                <em>{item.proposedContent.split(/\r?\n/u).length} 行</em>
+              </summary>
+              <pre tabIndex={0}><code>{item.proposedContent}</code></pre>
+            </details>
+          ))}
+        </div>
+      ) : (
+        <div className="ai-operation__target">
+          <span>目标</span>
+          <strong title={operation.targetPath}>{getFileName(operation.targetPath)}</strong>
+          <code title={operation.targetPath}>{operation.targetPath}</code>
+        </div>
+      )}
 
       {operation.summary && <p className="ai-operation__summary">{operation.summary}</p>}
 
-      {operation.kind === 'replace' ? (
+      {!isBatch && operation.kind === 'replace' ? (
         <div className="ai-operation__preview">
           <div className="ai-operation__preview-title">
             <span>原文 / 新文差异</span>
@@ -197,7 +226,7 @@ export function MarkdownOperationCard({
             </p>
           )}
         </div>
-      ) : (
+      ) : !isBatch ? (
         <div className="ai-operation__preview">
           <div className="ai-operation__preview-title">
             <span>{operation.kind === 'create' ? '完整文件内容' : '将追加的内容'}</span>
@@ -207,7 +236,7 @@ export function MarkdownOperationCard({
             <code>{operation.proposedContent}</code>
           </pre>
         </div>
-      )}
+      ) : null}
 
       {operation.status === 'failed' && operation.error && (
         <div className="ai-operation__error" role="alert">
@@ -225,7 +254,7 @@ export function MarkdownOperationCard({
 
       {(isPending || operation.status === 'failed') && (
         <footer className="ai-operation__actions">
-          <span className="ai-operation__safety">确认前不会修改磁盘文件</span>
+          <span className="ai-operation__safety">{isBatch ? '一次确认后写入整组文件' : '确认前不会修改磁盘文件'}</span>
           <button
             className="ai-button ai-button--quiet"
             type="button"

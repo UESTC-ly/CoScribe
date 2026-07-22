@@ -4,21 +4,27 @@ import {
   AtSign,
   ChevronDown,
   FileText,
+  Image as ImageIcon,
+  ImagePlus,
   KeyRound,
   Loader2,
   MessageSquarePlus,
+  NotebookPen,
   Pencil,
   Plus,
+  ScanLine,
   Search,
   Send,
   Settings2,
   Sparkles,
   Square,
+  WandSparkles,
   X
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ChatMessage,
+  ChatImageAttachment,
   ChatSession,
   ContextScope,
   ContextSnapshot,
@@ -26,6 +32,14 @@ import type {
   FileOperationProposal,
   SourceRef
 } from '../../shared/types'
+import {
+  CHAT_IMAGE_MIME_TYPES,
+  MAX_CHAT_IMAGE_BYTES,
+  MAX_CHAT_IMAGES_PER_MESSAGE,
+  MAX_CHAT_IMAGE_TOTAL_BYTES,
+  isChatImageMimeType,
+  normalizeChatImageAttachments
+} from '../../shared/chat-images'
 import { MarkdownMessage } from './MarkdownMessage'
 import '../../styles/ai.css'
 
@@ -37,8 +51,16 @@ export interface AiProjectFileOption {
 
 export interface AiSendPayload {
   content: string
+  attachments: ChatImageAttachment[]
   scope: ContextScope
   referencedFiles: string[]
+  autoApplyOperation?: boolean
+}
+
+export interface ImageGenerationPayload {
+  prompt: string
+  size: '1024x1024' | '1536x1024' | '1024x1536'
+  quality: 'low' | 'medium' | 'high'
 }
 
 export interface AiWorkspaceProps {
@@ -50,9 +72,13 @@ export interface AiWorkspaceProps {
   referencedFiles: readonly string[]
   availableFiles: readonly AiProjectFileOption[]
   isStreaming: boolean
+  isGeneratingImage?: boolean
   isConfigured: boolean
+  isImageConfigured?: boolean
   error?: string | null
   applyingOperationId?: string | null
+  capturedImage?: ChatImageAttachment | null
+  draftFocusToken?: number
   draft?: string
   disabled?: boolean
   className?: string
@@ -64,6 +90,11 @@ export interface AiWorkspaceProps {
   onReferencedFilesChange: (paths: string[]) => void
   onSend: (payload: AiSendPayload) => void | Promise<void>
   onStop: () => void | Promise<void>
+  onGenerateImage?: (payload: ImageGenerationPayload) => void | Promise<void>
+  onStopImage?: () => void | Promise<void>
+  onCaptureScreenshot?: () => void | Promise<void>
+  onCapturedImageHandled?: () => void
+  onQuickNote?: () => void | Promise<void>
   onOpenSource: (source: SourceRef) => void
   onOpenContext: (context: ContextSnapshot) => void
   onAcceptOperation: (operation: FileOperationProposal) => void | Promise<void>
@@ -71,6 +102,43 @@ export interface AiWorkspaceProps {
   onOpenSettings?: () => void
   onDismissError?: () => void
   onRegenerateMessage?: (message: ChatMessage) => void | Promise<void>
+}
+
+function attachmentId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function extensionForMime(mimeType: ChatImageAttachment['mimeType']): string {
+  if (mimeType === 'image/jpeg') return 'jpg'
+  return mimeType.slice('image/'.length)
+}
+
+function fileAsAttachment(file: File, index: number): Promise<ChatImageAttachment> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error(`无法读取图片 ${file.name || index + 1}。`))
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error(`无法读取图片 ${file.name || index + 1}。`))
+        return
+      }
+      const mimeType = file.type as ChatImageAttachment['mimeType']
+      const name = file.name.trim() || `粘贴图片-${index + 1}.${extensionForMime(mimeType)}`
+      try {
+        const [attachment] = normalizeChatImageAttachments([{
+          id: attachmentId(),
+          name,
+          mimeType,
+          dataUrl: reader.result,
+          size: file.size
+        }], { strict: true })
+        resolve(attachment)
+      } catch (error) {
+        reject(error)
+      }
+    }
+    reader.readAsDataURL(file)
+  })
 }
 
 const scopeOptions: Array<{
@@ -165,9 +233,13 @@ export function AiWorkspace({
   referencedFiles,
   availableFiles,
   isStreaming,
+  isGeneratingImage = false,
   isConfigured,
+  isImageConfigured = false,
   error = null,
   applyingOperationId = null,
+  capturedImage = null,
+  draftFocusToken = 0,
   draft,
   disabled = false,
   className,
@@ -179,6 +251,11 @@ export function AiWorkspace({
   onReferencedFilesChange,
   onSend,
   onStop,
+  onGenerateImage,
+  onStopImage,
+  onCaptureScreenshot,
+  onCapturedImageHandled,
+  onQuickNote,
   onOpenSource,
   onOpenContext,
   onAcceptOperation,
@@ -193,13 +270,20 @@ export function AiWorkspace({
   const [renameDraft, setRenameDraft] = useState('')
   const [referenceMenuOpen, setReferenceMenuOpen] = useState(false)
   const [referenceQuery, setReferenceQuery] = useState('')
+  const [pendingImages, setPendingImages] = useState<ChatImageAttachment[]>([])
+  const [composerError, setComposerError] = useState<string | null>(null)
+  const [composerMode, setComposerMode] = useState<'chat' | 'image'>('chat')
+  const [imageSize, setImageSize] = useState<ImageGenerationPayload['size']>('1024x1024')
+  const [imageQuality, setImageQuality] = useState<ImageGenerationPayload['quality']>('medium')
   const sessionMenuRef = useRef<HTMLDivElement>(null)
   const referenceMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const activeSession = sessions.find((session) => session.id === currentSessionId) ?? null
   const currentDraft = draft ?? localDraft
+  const isBusy = isStreaming || isGeneratingImage
 
   useOutsideClose(sessionMenuOpen, sessionMenuRef, () => setSessionMenuOpen(false))
   useOutsideClose(referenceMenuOpen, referenceMenuRef, () => setReferenceMenuOpen(false))
@@ -232,6 +316,33 @@ export function AiWorkspace({
   }, [currentDraft])
 
   useEffect(() => {
+    if (draftFocusToken > 0) textareaRef.current?.focus()
+  }, [draftFocusToken])
+
+  useEffect(() => {
+    setPendingImages([])
+    setComposerError(null)
+    setComposerMode('chat')
+  }, [currentSessionId])
+
+  useEffect(() => {
+    if (!capturedImage) return
+    try {
+      const next = normalizeChatImageAttachments([...pendingImages, capturedImage], { strict: true })
+      setPendingImages(next)
+      setComposerMode('chat')
+      setComposerError(null)
+      textareaRef.current?.focus()
+    } catch (reason) {
+      setComposerError(reason instanceof Error ? reason.message : '截图无法加入聊天。')
+    } finally {
+      onCapturedImageHandled?.()
+    }
+  // The parent clears capturedImage after delivery; pendingImages is intentionally a snapshot here.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capturedImage?.id, onCapturedImageHandled])
+
+  useEffect(() => {
     if (typeof bottomRef.current?.scrollIntoView === 'function') {
       bottomRef.current.scrollIntoView({ block: 'end' })
     }
@@ -240,18 +351,97 @@ export function AiWorkspace({
   const lastMessage = activeSession?.messages.at(-1)
   useEffect(() => {
     const container = messagesRef.current
-    if (!container || !isStreaming) return
+    if (!container || !isBusy) return
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
     if (distanceFromBottom < 160 && typeof bottomRef.current?.scrollIntoView === 'function') {
       bottomRef.current.scrollIntoView({ block: 'end' })
     }
-  }, [isStreaming, lastMessage?.content])
+  }, [isBusy, lastMessage?.attachments?.length, lastMessage?.content])
 
   const submit = (): void => {
     const content = currentDraft.trim()
-    if (!content || isStreaming || disabled || !isConfigured || !activeSession) return
+    if (isBusy || disabled || !activeSession) return
+    if (composerMode === 'image') {
+      if (!content || !isImageConfigured || !onGenerateImage) return
+      updateDraft('')
+      setComposerError(null)
+      void onGenerateImage({ prompt: content, size: imageSize, quality: imageQuality })
+      return
+    }
+    if ((!content && pendingImages.length === 0) || !isConfigured) return
+    const attachments = pendingImages.map((attachment) => ({ ...attachment }))
     updateDraft('')
-    void onSend({ content, scope: contextScope, referencedFiles: [...referencedFiles] })
+    setPendingImages([])
+    setComposerError(null)
+    void onSend({ content, attachments, scope: contextScope, referencedFiles: [...referencedFiles] })
+  }
+
+  const addImages = async (files: readonly File[]): Promise<void> => {
+    const imageFiles = files.filter((file) => isChatImageMimeType(file.type))
+    if (imageFiles.length !== files.length) {
+      setComposerError('仅支持 PNG、JPEG、WebP 和非动态 GIF 图片。')
+      return
+    }
+    if (pendingImages.length + imageFiles.length > MAX_CHAT_IMAGES_PER_MESSAGE) {
+      setComposerError(`每条消息最多发送 ${MAX_CHAT_IMAGES_PER_MESSAGE} 张图片。`)
+      return
+    }
+    const oversized = imageFiles.find((file) => file.size > MAX_CHAT_IMAGE_BYTES)
+    if (oversized) {
+      setComposerError(`单张图片不能超过 ${MAX_CHAT_IMAGE_BYTES / 1024 / 1024} MB：${oversized.name || '粘贴图片'}`)
+      return
+    }
+    try {
+      const attachments = await Promise.all(imageFiles.map(fileAsAttachment))
+      const nextImages = [...pendingImages, ...attachments]
+      const total = nextImages.reduce((sum, attachment) => sum + attachment.size, 0)
+      if (total > MAX_CHAT_IMAGE_TOTAL_BYTES) {
+        setComposerError(`每条消息的图片总大小不能超过 ${MAX_CHAT_IMAGE_TOTAL_BYTES / 1024 / 1024} MB。`)
+        return
+      }
+      setPendingImages(nextImages)
+      setComposerError(null)
+      setComposerMode('chat')
+      textareaRef.current?.focus()
+    } catch (error) {
+      setComposerError(error instanceof Error ? error.message : '图片读取失败。')
+    }
+  }
+
+  const pasteImages = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .flatMap((item) => item.getAsFile() ?? [])
+    if (!files.length) return
+    event.preventDefault()
+    const pastedText = event.clipboardData.getData('text/plain')
+    if (pastedText) {
+      const textarea = event.currentTarget
+      const start = textarea.selectionStart
+      const end = textarea.selectionEnd
+      updateDraft(`${currentDraft.slice(0, start)}${pastedText}${currentDraft.slice(end)}`)
+    }
+    void addImages(files)
+  }
+
+  const toggleImageMode = (): void => {
+    if (composerMode === 'image') {
+      setComposerMode('chat')
+      setComposerError(null)
+      return
+    }
+    if (!isImageConfigured || !onGenerateImage) {
+      setComposerError('请先在设置中配置 GPT-Image 2 的请求地址和 API Key。')
+      onOpenSettings?.()
+      return
+    }
+    if (pendingImages.length) {
+      setComposerError('请先发送或移除已粘贴的图片，再切换到生成图片模式。')
+      return
+    }
+    setComposerMode('image')
+    setComposerError(null)
+    textareaRef.current?.focus()
   }
 
   const beginRename = (session: ChatSession): void => {
@@ -380,7 +570,7 @@ export function AiWorkspace({
           <select
             id="ai-context-scope"
             value={contextScope}
-            disabled={disabled || isStreaming}
+            disabled={disabled || isBusy}
             onChange={(event) => onContextScopeChange(event.target.value as ContextScope)}
           >
             {scopeOptions.map((option) => (
@@ -433,7 +623,7 @@ export function AiWorkspace({
         </div>
       )}
 
-      <div className="ai-messages" ref={messagesRef} aria-live="polite" aria-busy={isStreaming}>
+      <div className="ai-messages" ref={messagesRef} aria-live="polite" aria-busy={isBusy}>
         {!activeSession ? (
           <div className="ai-empty">
             <span className="ai-empty__glyph"><MessageSquarePlus aria-hidden="true" /></span>
@@ -473,15 +663,39 @@ export function AiWorkspace({
             />
           ))
         )}
+        {isGeneratingImage && (
+          <div className="ai-stream-status" role="status">
+            <Loader2 className="ai-spin" aria-hidden="true" />
+            GPT-Image 2 正在生成图片…
+          </div>
+        )}
         {isStreaming && lastMessage?.role !== 'assistant' && (
           <div className="ai-stream-status" role="status">
-            <Loader2 className="ai-spin" aria-hidden="true" /> 正在读取上下文并组织回答…
+            <Loader2 className="ai-spin" aria-hidden="true" />
+            正在读取上下文并组织回答…
           </div>
         )}
         <div ref={bottomRef} />
       </div>
 
       <footer className="ai-composer-wrap">
+        {pendingImages.length > 0 && (
+          <div className="ai-images-selected" aria-label="待发送图片">
+            {pendingImages.map((attachment) => (
+              <figure key={attachment.id}>
+                <img src={attachment.dataUrl} alt={attachment.name} />
+                <figcaption title={attachment.name}>{attachment.name}</figcaption>
+                <button
+                  type="button"
+                  aria-label={`移除图片：${attachment.name}`}
+                  onClick={() => setPendingImages((current) => current.filter((item) => item.id !== attachment.id))}
+                >
+                  <X aria-hidden="true" />
+                </button>
+              </figure>
+            ))}
+          </div>
+        )}
         {referencedFiles.length > 0 && (
           <div className="ai-references-selected" aria-label="已引用的项目文件">
             {referencedFiles.map((path) => {
@@ -499,15 +713,42 @@ export function AiWorkspace({
           </div>
         )}
 
-        <div className={clsx('ai-composer', !isConfigured && 'is-disabled')}>
+        {composerError && <p className="ai-composer__error" role="alert">{composerError}</p>}
+        <div className={clsx('ai-composer', composerMode === 'image' && 'is-image-mode', composerMode === 'chat' && !isConfigured && 'is-disabled')}>
+          {composerMode === 'image' && (
+            <div className="ai-image-options" aria-label="图片生成选项">
+              <span><WandSparkles aria-hidden="true" /> GPT-Image 2</span>
+              <label>
+                <span className="sr-only">图片尺寸</span>
+                <select value={imageSize} onChange={(event) => setImageSize(event.target.value as ImageGenerationPayload['size'])}>
+                  <option value="1024x1024">方形 · 1024</option>
+                  <option value="1536x1024">横向 · 1536×1024</option>
+                  <option value="1024x1536">纵向 · 1024×1536</option>
+                </select>
+              </label>
+              <label>
+                <span className="sr-only">图片质量</span>
+                <select value={imageQuality} onChange={(event) => setImageQuality(event.target.value as ImageGenerationPayload['quality'])}>
+                  <option value="low">草稿</option>
+                  <option value="medium">标准</option>
+                  <option value="high">高质量</option>
+                </select>
+              </label>
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={currentDraft}
             rows={1}
-            disabled={disabled || !isConfigured || !activeSession}
-            placeholder={!isConfigured ? '请先配置 AI' : activeSession ? '针对当前内容提问…' : '请先新建会话'}
+            disabled={disabled || !activeSession || (composerMode === 'chat' ? !isConfigured : !isImageConfigured)}
+            placeholder={
+              composerMode === 'image'
+                ? (isImageConfigured ? '描述想生成的图片…' : '请先配置 GPT-Image 2')
+                : !isConfigured ? '请先配置 AI' : activeSession ? '针对当前内容提问，也可直接粘贴图片…' : '请先新建会话'
+            }
             aria-label="向 AI 提问"
             onChange={(event) => updateDraft(event.target.value)}
+            onPaste={pasteImages}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault()
@@ -516,11 +757,55 @@ export function AiWorkspace({
             }}
           />
           <div className="ai-composer__toolbar">
+            <input
+              ref={imageInputRef}
+              className="sr-only"
+              type="file"
+              accept={CHAT_IMAGE_MIME_TYPES.join(',')}
+              multiple
+              tabIndex={-1}
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? [])
+                event.target.value = ''
+                if (files.length) void addImages(files)
+              }}
+            />
+            <button
+              className={clsx('ai-composer__tool', pendingImages.length > 0 && 'is-active')}
+              type="button"
+              disabled={disabled || !activeSession || isBusy}
+              title="添加图片（也可直接粘贴）"
+              onClick={() => imageInputRef.current?.click()}
+            >
+              <ImagePlus aria-hidden="true" />
+              图片
+              {pendingImages.length > 0 && <b>{pendingImages.length}</b>}
+            </button>
+            <button
+              className="ai-composer__tool"
+              type="button"
+              disabled={disabled || !activeSession || isBusy}
+              title="截取鼠标所在屏幕并加入聊天（⌘/Ctrl + Shift + 8）"
+              onClick={() => void onCaptureScreenshot?.()}
+            >
+              <ScanLine aria-hidden="true" />
+              截图
+            </button>
+            <button
+              className={clsx('ai-composer__tool', composerMode === 'image' && 'is-active')}
+              type="button"
+              disabled={disabled || !activeSession || isBusy}
+              aria-pressed={composerMode === 'image'}
+              onClick={toggleImageMode}
+            >
+              <ImageIcon aria-hidden="true" />
+              生成图片
+            </button>
             <div className="ai-reference-picker" ref={referenceMenuRef}>
               <button
                 className={clsx('ai-composer__tool', referencedFiles.length > 0 && 'is-active')}
                 type="button"
-                disabled={disabled || !activeSession}
+                disabled={disabled || !activeSession || isBusy || composerMode === 'image'}
                 aria-haspopup="dialog"
                 aria-expanded={referenceMenuOpen}
                 onClick={() => setReferenceMenuOpen((open) => !open)}
@@ -563,26 +848,43 @@ export function AiWorkspace({
                 </div>
               )}
             </div>
-            <span className="ai-composer__hint">Enter 发送 · Shift Enter 换行</span>
-            {isStreaming ? (
-              <button className="ai-composer__stop" type="button" onClick={() => void onStop()}>
+            <button
+              className="ai-composer__tool ai-composer__tool--note"
+              type="button"
+              disabled={disabled || !activeSession || activeSession.messages.length === 0 || isBusy || !isConfigured || composerMode === 'image'}
+              title="将当前会话整理成 Markdown 笔记并保存到本地"
+              onClick={() => void onQuickNote?.()}
+            >
+              <NotebookPen aria-hidden="true" />
+              整理笔记
+            </button>
+            <span className="ai-composer__hint">{composerMode === 'image' ? 'Enter 生成 · Shift Enter 换行' : 'Enter 发送 · Shift Enter 换行'}</span>
+            {isBusy ? (
+              <button className="ai-composer__stop" type="button" onClick={() => void (isGeneratingImage ? onStopImage?.() : onStop())}>
                 <Square aria-hidden="true" /> 停止
               </button>
             ) : (
               <button
                 className="ai-composer__send"
                 type="button"
-                aria-label="发送消息"
-                title="发送消息"
-                disabled={!currentDraft.trim() || disabled || !isConfigured || !activeSession}
+                aria-label={composerMode === 'image' ? '生成图片' : '发送消息'}
+                title={composerMode === 'image' ? '生成图片' : '发送消息'}
+                disabled={
+                  disabled || !activeSession ||
+                  (composerMode === 'image'
+                    ? !currentDraft.trim() || !isImageConfigured
+                    : (!currentDraft.trim() && pendingImages.length === 0) || !isConfigured)
+                }
                 onClick={submit}
               >
-                <Send aria-hidden="true" />
+                {composerMode === 'image' ? <WandSparkles aria-hidden="true" /> : <Send aria-hidden="true" />}
               </button>
             )}
           </div>
         </div>
-        <p className="ai-composer-wrap__notice">AI 可能出错；项目来源可点击核对，文件修改需由你确认。</p>
+        <p className="ai-composer-wrap__notice">
+          {composerMode === 'image' ? '图片生成会消耗独立的 GPT-Image 2 额度。' : '普通文件修改需确认；点击“整理笔记”会在生成后直接保存。'}
+        </p>
       </footer>
     </aside>
   )

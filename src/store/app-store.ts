@@ -174,6 +174,7 @@ function treeFilePaths(tree: readonly FileNode[]): string[] {
 function cloneMessage(message: ChatMessage): ChatMessage {
   return {
     ...message,
+    attachments: message.attachments?.map((attachment) => ({ ...attachment })),
     context: message.context ? cloneContextSnapshot(message.context) : undefined,
     sources: message.sources?.map((source) => ({ ...source })),
     operation: message.operation ? { ...message.operation } : undefined

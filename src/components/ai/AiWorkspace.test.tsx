@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AiWorkspaceProps } from './AiWorkspace'
 import { AiWorkspace } from './AiWorkspace'
 import { MarkdownOperationCard } from './MarkdownOperationCard'
-import type { ChatSession, ContextSnapshot, FileOperationProposal } from '../../shared/types'
+import type { ChatImageAttachment, ChatSession, ContextSnapshot, FileOperationProposal } from '../../shared/types'
 
 afterEach(cleanup)
 
@@ -60,6 +60,14 @@ function buildProps(overrides: Partial<AiWorkspaceProps> = {}): AiWorkspaceProps
   }
 }
 
+function pngFile(name = 'diagram.png'): File {
+  return new File(
+    [Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+    name,
+    { type: 'image/png' }
+  )
+}
+
 describe('AiWorkspace', () => {
   it('sends the question with the controlled scope and referenced files', () => {
     const onSend = vi.fn()
@@ -79,9 +87,126 @@ describe('AiWorkspace', () => {
 
     expect(onSend).toHaveBeenCalledWith({
       content: '这里为什么需要持久化？',
+      attachments: [],
       scope: 'document',
       referencedFiles: ['/projects/langgraph/学习笔记.md']
     })
+  })
+
+  it('selects an image file and sends it without requiring text', async () => {
+    const onSend = vi.fn()
+    const { container } = render(<AiWorkspace {...buildProps({ onSend })} />)
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+
+    fireEvent.change(input, { target: { files: [pngFile('selected.png')] } })
+
+    expect(await screen.findByRole('img', { name: 'selected.png' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith({
+      content: '',
+      attachments: [expect.objectContaining({
+        name: 'selected.png',
+        mimeType: 'image/png',
+        dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+        size: 8
+      })],
+      scope: 'visible',
+      referencedFiles: []
+    }))
+  })
+
+  it('accepts pasted images and lets the user remove them before sending', async () => {
+    const onSend = vi.fn()
+    render(<AiWorkspace {...buildProps({ onSend })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+    const file = pngFile('pasted.png')
+
+    const dispatched = fireEvent.paste(textbox, {
+      clipboardData: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+        getData: () => ''
+      }
+    })
+
+    expect(dispatched).toBe(false)
+    expect(await screen.findByRole('img', { name: 'pasted.png' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '移除图片：pasted.png' }))
+    await waitFor(() => expect(screen.queryByRole('img', { name: 'pasted.png' })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('captures the screen and places the returned image in the pending composer', async () => {
+    const onCaptureScreenshot = vi.fn()
+    const onCapturedImageHandled = vi.fn()
+    const attachment: ChatImageAttachment = {
+      id: 'screenshot-1',
+      name: 'CoScribe-screenshot.jpg',
+      mimeType: 'image/jpeg',
+      dataUrl: 'data:image/jpeg;base64,/9j/2Q==',
+      size: 4
+    }
+    const { rerender } = render(<AiWorkspace {...buildProps({ onCaptureScreenshot, onCapturedImageHandled })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '截图' }))
+    expect(onCaptureScreenshot).toHaveBeenCalledOnce()
+
+    rerender(<AiWorkspace {...buildProps({ capturedImage: attachment, onCaptureScreenshot, onCapturedImageHandled })} />)
+    expect(await screen.findByRole('img', { name: 'CoScribe-screenshot.jpg' })).toBeInTheDocument()
+    expect(onCapturedImageHandled).toHaveBeenCalledOnce()
+  })
+
+  it('offers one-click note organization for a non-empty conversation', () => {
+    const onQuickNote = vi.fn()
+    const sessionWithContent: ChatSession = {
+      ...session,
+      messages: [{ id: 'message-1', role: 'assistant', content: '关于状态持久化的解释', createdAt: 3 }]
+    }
+    render(<AiWorkspace {...buildProps({ sessions: [sessionWithContent], onQuickNote })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '整理笔记' }))
+    expect(onQuickNote).toHaveBeenCalledOnce()
+  })
+
+  it('does not intercept an ordinary text-only paste', () => {
+    const onDraftChange = vi.fn()
+    render(<AiWorkspace {...buildProps({ onDraftChange })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+
+    const dispatched = fireEvent.paste(textbox, {
+      clipboardData: {
+        items: [],
+        getData: (type: string) => type === 'text/plain' ? '普通文本' : ''
+      }
+    })
+
+    expect(dispatched).toBe(true)
+    expect(onDraftChange).not.toHaveBeenCalled()
+  })
+
+  it('switches to GPT-Image 2 mode and sends the selected generation options', () => {
+    const onSend = vi.fn()
+    const onGenerateImage = vi.fn()
+    render(<AiWorkspace {...buildProps({
+      isImageConfigured: true,
+      onSend,
+      onGenerateImage
+    })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '生成图片' }))
+    fireEvent.change(screen.getByLabelText('图片尺寸'), { target: { value: '1024x1536' } })
+    fireEvent.change(screen.getByLabelText('图片质量'), { target: { value: 'high' } })
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+    fireEvent.change(textbox, { target: { value: '生成一张知识图谱插图' } })
+    fireEvent.keyDown(textbox, { key: 'Enter', code: 'Enter' })
+
+    expect(onGenerateImage).toHaveBeenCalledWith({
+      prompt: '生成一张知识图谱插图',
+      size: '1024x1536',
+      quality: 'high'
+    })
+    expect(onSend).not.toHaveBeenCalled()
   })
 
   it('shows the exact visible-document context and exposes scope changes', () => {
@@ -169,5 +294,29 @@ describe('MarkdownOperationCard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '接受并写入' }))
     expect(onAccept).toHaveBeenCalledWith(operation)
+  })
+
+  it('previews every file in a multi-file note project and accepts it as one operation', () => {
+    const onAccept = vi.fn()
+    const batch: FileOperationProposal = {
+      id: 'operation-batch',
+      kind: 'create',
+      targetPath: '/projects/langgraph/notes/index.md',
+      proposedContent: '# LangGraph 学习项目',
+      operations: [
+        { kind: 'create', targetPath: '/projects/langgraph/notes/index.md', proposedContent: '# LangGraph 学习项目' },
+        { kind: 'create', targetPath: '/projects/langgraph/notes/checkpointer.md', proposedContent: '# Checkpointer\n\n持久化状态。' }
+      ],
+      summary: '创建完整学习笔记项目',
+      status: 'pending'
+    }
+    render(<MarkdownOperationCard operation={batch} onAccept={onAccept} onReject={vi.fn()} />)
+
+    expect(screen.getByText('创建笔记项目 · 2 个文件')).toBeInTheDocument()
+    expect(screen.getByText('index.md')).toBeInTheDocument()
+    expect(screen.getByText('checkpointer.md')).toBeInTheDocument()
+    expect(screen.getByText('一次确认后写入整组文件')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '接受并写入' }))
+    expect(onAccept).toHaveBeenCalledWith(batch)
   })
 })

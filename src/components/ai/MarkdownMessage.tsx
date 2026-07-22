@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, Copy, ExternalLink, FileText, RotateCcw, Sparkles, Square } from 'lucide-react'
+import { Check, Copy, Download, ExternalLink, FileText, RotateCcw, Sparkles, Square } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
@@ -171,6 +171,27 @@ export function MarkdownMessage({
           </button>
         )}
 
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="ai-message__images" aria-label={message.role === 'user' ? '发送的图片' : '生成的图片'}>
+            {message.attachments.map((attachment) => (
+              <figure key={attachment.id}>
+                <img src={attachment.dataUrl} alt={attachment.name} loading="lazy" />
+                <figcaption>
+                  <span title={attachment.name}>{attachment.name}</span>
+                  <a
+                    href={attachment.dataUrl}
+                    download={attachment.name}
+                    title={`下载 ${attachment.name}`}
+                    aria-label={`下载 ${attachment.name}`}
+                  >
+                    <Download aria-hidden="true" />
+                  </a>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+
         <div className="ai-markdown">
           {message.content ? (
             <>
@@ -189,7 +210,7 @@ export function MarkdownMessage({
 
         {message.sources && message.sources.length > 0 && (
           <section className="ai-sources" aria-label="回答来源">
-            <h4>项目来源</h4>
+            <h4>回答来源</h4>
             <ol>
               {message.sources.map((source, index) => (
                 <li key={`${source.path}-${source.page ?? ''}-${source.heading ?? ''}-${index}`}>

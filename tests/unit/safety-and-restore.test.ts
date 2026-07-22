@@ -136,6 +136,22 @@ describe('source validation', () => {
     expect(result.validSources).toEqual([])
     expect(result.rejectedSources[0].reason).toBe('来源不在本次发送上下文的白名单中。')
   })
+
+  it('keeps only allowlisted HTTP web citations', () => {
+    const allowed: SourceRef = { path: 'https://example.com/research', label: 'Research', kind: 'web' }
+    const result = validateSources([
+      { ...allowed, label: 'AI changed label' },
+      { path: 'javascript:alert(1)', label: 'Bad', kind: 'web' }
+    ], {
+      projectPath: '/study',
+      fileTree: tree,
+      allowedSources: [allowed]
+    })
+
+    expect(result.validSources).toEqual([allowed])
+    expect(result.rejectedSources).toHaveLength(1)
+    expect(result.rejectedSources[0].reason).toContain('白名单')
+  })
 })
 
 describe('workspace serialization and recovery', () => {

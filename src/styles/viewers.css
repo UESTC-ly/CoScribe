@@ -900,40 +900,77 @@
   overflow: auto;
 }
 
-.vk-markdown-outline nav > button {
+.vk-markdown-outline-item {
   display: flex;
   width: 100%;
   min-height: 31px;
   align-items: center;
-  gap: 7px;
-  padding-block: 5px;
-  padding-inline-end: 7px;
+}
+
+.vk-markdown-outline-toggle,
+.vk-markdown-outline-link {
   border: 0;
   border-radius: 6px;
   color: var(--vk-ink-soft);
   background: transparent;
+}
+
+.vk-markdown-outline-toggle {
+  display: grid;
+  width: 24px;
+  height: 28px;
+  flex: 0 0 24px;
+  place-items: center;
+  padding: 0;
+  color: var(--vk-ink-faint);
+}
+
+.vk-markdown-outline-toggle-placeholder {
+  width: 24px;
+  flex: 0 0 24px;
+}
+
+.vk-markdown-outline-link {
+  display: flex;
+  min-width: 0;
+  min-height: 31px;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px 5px 3px;
   font-size: 11px;
   text-align: left;
 }
 
-.vk-markdown-outline nav > button:hover,
-.vk-markdown-outline nav > button.is-active {
+.vk-markdown-outline-toggle:hover {
+  color: var(--vk-ink);
+  background: color-mix(in srgb, var(--vk-ink) 7%, transparent);
+}
+
+.vk-markdown-outline-link:hover,
+.vk-markdown-outline-link.is-active {
   color: var(--vk-accent-ink);
   background: var(--vk-accent-soft);
 }
 
-.vk-markdown-outline nav > button.is-active {
+.vk-markdown-outline-link.is-active {
   box-shadow: inset 2px 0 0 var(--vk-accent);
 }
 
-.vk-markdown-outline nav > button span {
+.vk-markdown-outline-toggle:focus-visible,
+.vk-markdown-outline-link:focus-visible {
+  outline: 2px solid var(--vk-accent);
+  outline-offset: -2px;
+}
+
+.vk-markdown-outline-link span {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.vk-markdown-outline nav > button small {
+.vk-markdown-outline-link small {
   color: var(--vk-ink-faint);
   font-size: 8px;
 }
@@ -1139,6 +1176,160 @@
   background: transparent;
   font-size: 12px;
 }
+
+.vk-code-block {
+  --vk-code-bg: #f6f5f7;
+  --vk-code-header: #efedf2;
+  --vk-code-border: #d8d5dd;
+  --vk-code-ink: #29272e;
+  --vk-code-muted: #6d6875;
+  --vk-code-comment: #6e7781;
+  --vk-code-keyword: #cf222e;
+  --vk-code-string: #0a3069;
+  --vk-code-number: #0550ae;
+  --vk-code-title: #8250df;
+  --vk-code-type: #953800;
+  --vk-code-attr: #116329;
+  --vk-code-meta: #9a6700;
+  --vk-code-deletion: #82071e;
+  --vk-code-deletion-bg: #ffebe9;
+  max-width: 100%;
+  margin: 0 0 1.2em;
+  overflow: hidden;
+  color: var(--vk-code-ink);
+  border: 1px solid var(--vk-code-border);
+  border-radius: 8px;
+  background: var(--vk-code-bg);
+  box-shadow: 0 1px 2px rgb(35 30 45 / 5%);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.vk-code-block__header {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 7px 0 12px;
+  color: var(--vk-code-muted);
+  border-bottom: 1px solid var(--vk-code-border);
+  background: var(--vk-code-header);
+  font: 650 10px/1.2 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.vk-code-block__header > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vk-code-block__header button {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  color: var(--vk-code-muted);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+}
+
+.vk-code-block__header button:hover {
+  color: var(--vk-code-ink);
+  background: color-mix(in srgb, var(--vk-code-ink) 7%, transparent);
+}
+
+.vk-code-block__header button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.vk-code-block pre,
+.vk-markdown-preview .vk-code-block pre {
+  max-height: min(620px, 68vh);
+  margin: 0;
+  padding: 14px 16px 16px;
+  overflow: auto;
+  color: var(--vk-code-ink);
+  border: 0;
+  border-radius: 0;
+  background: var(--vk-code-bg);
+  box-shadow: none;
+  font: 12px/1.62 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  tab-size: 2;
+}
+
+.vk-code-block pre code,
+.vk-markdown-preview .vk-code-block pre code {
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  font: inherit;
+}
+
+.vk-code-block .hljs-comment,
+.vk-code-block .hljs-quote {
+  color: var(--vk-code-comment);
+  font-style: italic;
+}
+
+.vk-code-block .hljs-keyword,
+.vk-code-block .hljs-selector-tag,
+.vk-code-block .hljs-doctag {
+  color: var(--vk-code-keyword);
+}
+
+.vk-code-block .hljs-string,
+.vk-code-block .hljs-regexp,
+.vk-code-block .hljs-addition,
+.vk-code-block .hljs-attribute {
+  color: var(--vk-code-string);
+}
+
+.vk-code-block .hljs-number,
+.vk-code-block .hljs-literal,
+.vk-code-block .hljs-variable,
+.vk-code-block .hljs-template-variable {
+  color: var(--vk-code-number);
+}
+
+.vk-code-block .hljs-title,
+.vk-code-block .hljs-title.class_,
+.vk-code-block .hljs-title.function_,
+.vk-code-block .hljs-section {
+  color: var(--vk-code-title);
+}
+
+.vk-code-block .hljs-type,
+.vk-code-block .hljs-built_in,
+.vk-code-block .hljs-symbol,
+.vk-code-block .hljs-bullet {
+  color: var(--vk-code-type);
+}
+
+.vk-code-block .hljs-attr,
+.vk-code-block .hljs-property,
+.vk-code-block .hljs-selector-class,
+.vk-code-block .hljs-selector-id {
+  color: var(--vk-code-attr);
+}
+
+.vk-code-block .hljs-meta,
+.vk-code-block .hljs-meta .hljs-keyword {
+  color: var(--vk-code-meta);
+}
+
+.vk-code-block .hljs-deletion {
+  color: var(--vk-code-deletion);
+  background: var(--vk-code-deletion-bg);
+}
+
+.vk-code-block .hljs-emphasis { font-style: italic; }
+.vk-code-block .hljs-strong { font-weight: 700; }
 
 .vk-mermaid {
   display: grid;
@@ -1722,6 +1913,18 @@
   font-weight: 650;
 }
 
+.vk-viewer-action-error {
+  display: block;
+  margin-top: 10px;
+  color: var(--vk-danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.vk-viewer-action-spin {
+  animation: vk-viewer-spin 900ms linear infinite;
+}
+
 :root[data-theme='dark'] .vk-viewer {
   --vk-warning-soft: color-mix(in srgb, var(--warning) 17%, var(--bg-panel));
   --vk-danger-soft: color-mix(in srgb, var(--danger) 15%, var(--bg-panel));
@@ -1731,6 +1934,25 @@
 :root[data-theme='dark'] .vk-pdf-page-shell {
   /* PDF canvases remain white, matching the authored document page. */
   background: #fff;
+}
+
+:root[data-theme='dark'] .vk-code-block {
+  --vk-code-bg: #151419;
+  --vk-code-header: #1d1c22;
+  --vk-code-border: #39363f;
+  --vk-code-ink: #e6edf3;
+  --vk-code-muted: #aeb5bf;
+  --vk-code-comment: #8b949e;
+  --vk-code-keyword: #ff7b72;
+  --vk-code-string: #a5d6ff;
+  --vk-code-number: #79c0ff;
+  --vk-code-title: #d2a8ff;
+  --vk-code-type: #ffa657;
+  --vk-code-attr: #7ee787;
+  --vk-code-meta: #d29922;
+  --vk-code-deletion: #ffa198;
+  --vk-code-deletion-bg: rgb(248 81 73 / 12%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
 }
 
 :root[data-theme='dark'] .vk-markdown-preview {
@@ -1792,6 +2014,71 @@
   background: var(--vk-canvas);
 }
 
+.vk-pptx-viewer {
+  min-width: 0;
+  min-height: 0;
+}
+
+.vk-pptx-title {
+  max-width: min(260px, 24vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.vk-pptx-page,
+.vk-pptx-zoom {
+  min-width: 52px;
+  color: var(--vk-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.vk-pptx-scroll {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--vk-canvas);
+  outline: none;
+}
+
+.vk-pptx-scroll:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--vk-accent) 42%, transparent);
+}
+
+.vk-pptx-stage {
+  display: flex;
+  min-width: 100%;
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 36px;
+}
+
+.vk-pptx-slide {
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 8px 30px rgb(25 26 22 / 18%), 0 0 0 1px rgb(25 26 22 / 10%);
+}
+
+.vk-pptx-slide.is-fit {
+  width: min(100%, 1280px);
+  max-height: calc(100vh - 160px);
+}
+
+.vk-pptx-slide > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: inherit;
+}
+
 @media (max-width: 860px) {
   .vk-pdf-zoom-control .vk-viewer-text-button,
   .vk-markdown-save-status,
@@ -1822,6 +2109,10 @@
     width: min(360px, 48vw);
     flex-basis: min(360px, 48vw);
   }
+
+  .vk-pptx-stage { padding: 22px; }
+
+  .vk-pptx-title { max-width: 150px; }
 }
 
 @media (max-width: 620px) {
