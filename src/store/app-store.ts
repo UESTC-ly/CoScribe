@@ -38,6 +38,9 @@ export interface ExternalDocumentVersion {
   modifiedAt: number
   size: number
   url?: string
+  html?: string
+  warnings?: string[]
+  ocrResults?: FileReadResult['ocrResults']
 }
 
 export interface DocumentBuffer {
@@ -48,6 +51,9 @@ export interface DocumentBuffer {
   modifiedAt: number
   size: number
   url?: string
+  html?: string
+  warnings?: string[]
+  ocrResults?: FileReadResult['ocrResults']
   dirty: boolean
   externalVersion?: ExternalDocumentVersion
 }
@@ -431,7 +437,10 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
               content: result.content,
               modifiedAt: result.modifiedAt,
               size: result.size,
-              url: result.url
+              url: result.url,
+              html: result.html,
+              warnings: result.warnings ? [...result.warnings] : undefined,
+              ocrResults: result.ocrResults?.map((item) => ({ ...item, lines: item.lines.map((line) => ({ ...line })) }))
             }
           }
         }
@@ -441,7 +450,15 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
       return {
         documents: {
           ...state.documents,
-          [key]: { ...current, modifiedAt: result.modifiedAt, size: result.size, url: result.url }
+          [key]: {
+            ...current,
+            modifiedAt: result.modifiedAt,
+            size: result.size,
+            url: result.url,
+            html: result.html,
+            warnings: result.warnings ? [...result.warnings] : undefined,
+            ocrResults: result.ocrResults?.map((item) => ({ ...item, lines: item.lines.map((line) => ({ ...line })) }))
+          }
         }
       }
     }
@@ -456,6 +473,9 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
           modifiedAt: result.modifiedAt,
           size: result.size,
           url: result.url,
+          html: result.html,
+          warnings: result.warnings ? [...result.warnings] : undefined,
+          ocrResults: result.ocrResults?.map((item) => ({ ...item, lines: item.lines.map((line) => ({ ...line })) })),
           dirty: false
         }
       }
@@ -491,6 +511,9 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
           modifiedAt: result.modifiedAt,
           size: result.size,
           url: result.url,
+          html: result.html,
+          warnings: result.warnings ? [...result.warnings] : undefined,
+          ocrResults: result.ocrResults?.map((item) => ({ ...item, lines: item.lines.map((line) => ({ ...line })) })),
           dirty: content !== result.content
         }
       }
@@ -522,6 +545,9 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
           modifiedAt: external.modifiedAt,
           size: external.size,
           url: external.url,
+          html: external.html,
+          warnings: external.warnings ? [...external.warnings] : undefined,
+          ocrResults: external.ocrResults?.map((item) => ({ ...item, lines: item.lines.map((line) => ({ ...line })) })),
           dirty: false,
           externalVersion: undefined
         }
@@ -531,6 +557,9 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
           modifiedAt: external.modifiedAt,
           size: external.size,
           url: external.url,
+          html: external.html,
+          warnings: external.warnings ? [...external.warnings] : undefined,
+          ocrResults: external.ocrResults?.map((item) => ({ ...item, lines: item.lines.map((line) => ({ ...line })) })),
           dirty: current.content !== external.content,
           externalVersion: undefined
         }

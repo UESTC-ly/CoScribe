@@ -19,6 +19,7 @@ const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string; apiLabel
   { value: 'medium', label: 'Medium', apiLabel: 'medium' },
   { value: 'high', label: 'High', apiLabel: 'high' },
   { value: 'xhigh', label: 'Extra high', apiLabel: 'xhigh' },
+  { value: 'ultra', label: 'Ultra', apiLabel: 'ultra' },
   { value: 'max', label: 'More reasoning...', apiLabel: 'max' }
 ]
 
@@ -27,6 +28,7 @@ const STATUS_LABELS: Record<ReasoningEffort, string> = {
   medium: 'Medium',
   high: 'High',
   xhigh: 'XHigh',
+  ultra: 'Ultra',
   max: 'Max'
 }
 

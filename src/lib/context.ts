@@ -75,15 +75,11 @@ export function resolveContextPriority(
   }
 
   if (requestedScope === 'document') {
-    if (useful(input.documentText)) return resolved('document', 'document', input.documentText, false)
-    const fallback = autoPriority(input)
-    return { ...fallback, usedFallback: true }
+    return resolved('document', 'document', input.documentText, !useful(input.documentText))
   }
 
   if (requestedScope === 'selection') {
-    if (useful(input.selection)) return resolved('selection', 'selection', input.selection, false)
-    const fallback = autoPriority({ ...input, selection: undefined })
-    return { ...fallback, usedFallback: true }
+    return resolved('selection', 'selection', input.selection, !useful(input.selection))
   }
 
   return autoPriority(input)

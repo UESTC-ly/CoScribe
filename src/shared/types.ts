@@ -1,4 +1,4 @@
-export type FileKind = 'folder' | 'markdown' | 'pdf' | 'image' | 'text' | 'unsupported'
+export type FileKind = 'folder' | 'markdown' | 'pdf' | 'docx' | 'image' | 'text' | 'unsupported'
 
 export interface FileNode {
   name: string
@@ -87,7 +87,7 @@ export interface ContextSnapshot {
 export interface SourceRef {
   path: string
   label: string
-  kind: 'pdf' | 'markdown' | 'text' | 'session' | 'general'
+  kind: 'pdf' | 'markdown' | 'docx' | 'image' | 'text' | 'session' | 'general'
   page?: number
   heading?: string
   line?: number
@@ -168,6 +168,42 @@ export interface FileReadResult {
   modifiedAt: number
   size: number
   url?: string
+  html?: string
+  warnings?: string[]
+  ocrResults?: OcrResult[]
+}
+
+export type OcrEngine = 'paddleocr-v6' | 'ai-vision'
+
+export interface OcrPoint {
+  x: number
+  y: number
+}
+
+export interface OcrLine {
+  text: string
+  score?: number
+  polygon?: OcrPoint[]
+}
+
+export interface OcrResult {
+  path: string
+  page?: number
+  text: string
+  lines: OcrLine[]
+  engine: OcrEngine
+  model: string
+  createdAt: number
+  sourceModifiedAt: number
+  sourceSize: number
+  warnings?: string[]
+}
+
+export interface AiOcrRequest {
+  requestId: string
+  path: string
+  page?: number
+  imageDataUrl: string
 }
 
 export interface FileChangeEvent {
@@ -185,8 +221,8 @@ export interface AiSettings {
 
 export type AiProtocol = 'auto' | 'responses' | 'chat-completions'
 export const SELECTABLE_AI_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'] as const
-// The picker mirrors the five GPT-5.6 levels requested by the UI. The API also supports `none`, but this app keeps it out of the reasoning picker.
-export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+// The picker mirrors the six GPT-5.6 levels requested by the UI. The API also supports `none`, but this app keeps it out of the reasoning picker.
+export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'ultra', 'max'] as const
 
 export type SelectableAiModel = (typeof SELECTABLE_AI_MODELS)[number]
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
@@ -278,6 +314,12 @@ export interface CoScribeAPI {
   pdf: {
     pageText: (path: string, page: number) => Promise<PdfPageText>
     search: (path: string, query: string) => Promise<PdfSearchMatch[]>
+  }
+  ocr: {
+    get: (path: string, page?: number) => Promise<OcrResult | null>
+    save: (result: OcrResult) => Promise<OcrResult>
+    enhance: (request: AiOcrRequest) => Promise<OcrResult>
+    stop: (requestId: string) => Promise<void>
   }
   settings: {
     get: () => Promise<AppSettings>

@@ -50,6 +50,9 @@ export interface PdfViewerContext {
 
 export interface PdfViewerProps {
   file: PdfSource
+  filePath?: string
+  sourceModifiedAt?: number
+  sourceSize?: number
   fileName?: string
   className?: string
   annotations?: readonly PdfViewerAnnotation[]
@@ -142,6 +145,9 @@ export interface ImageViewerState {
 
 export interface ImageViewerProps {
   src: string
+  filePath?: string
+  sourceModifiedAt?: number
+  sourceSize?: number
   alt?: string
   fileName?: string
   className?: string
@@ -149,6 +155,23 @@ export interface ImageViewerProps {
   onStateChange?: (state: ImageViewerState) => void
   onLoad?: (naturalSize: { width: number; height: number }) => void
   onError?: (error: Error) => void
+  onOpenExternal?: () => void
+  onOcrTextChange?: (text: string) => void
+}
+
+export interface DocxViewerContext {
+  selection: string
+  visibleText: string
+  documentText: string
+}
+
+export interface DocxViewerProps {
+  html: string
+  text: string
+  fileName?: string
+  warnings?: readonly string[]
+  onContextChange?: (context: DocxViewerContext) => void
+  onOpenLink?: (url: string) => void
   onOpenExternal?: () => void
 }
 

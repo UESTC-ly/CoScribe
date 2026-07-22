@@ -2,12 +2,14 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import type {
   AiRequest,
+  AiOcrRequest,
   AiStreamEvent,
   Annotation,
   AppSettings,
   ChatSession,
   FileChangeEvent,
   FileOperationProposal,
+  OcrResult,
   SearchProgress,
   CoScribeAPI,
   WorkspaceState
@@ -69,6 +71,12 @@ const api: CoScribeAPI = {
   pdf: {
     pageText: (filePath: string, page: number) => ipcRenderer.invoke(IPC.pdfPageText, filePath, page),
     search: (filePath: string, query: string) => ipcRenderer.invoke(IPC.pdfSearch, filePath, query)
+  },
+  ocr: {
+    get: (filePath: string, page?: number) => ipcRenderer.invoke(IPC.ocrGet, filePath, page),
+    save: (result: OcrResult) => ipcRenderer.invoke(IPC.ocrSave, result),
+    enhance: (request: AiOcrRequest) => ipcRenderer.invoke(IPC.ocrEnhance, request),
+    stop: (requestId: string) => ipcRenderer.invoke(IPC.ocrStop, requestId)
   },
   settings: {
     get: () => ipcRenderer.invoke(IPC.settingsGet),

@@ -26,11 +26,14 @@ import {
   type FileNode,
   type FileOperationProposal,
   type FileReadResult,
+  type OcrLine,
+  type OcrResult,
   type ProjectInfo,
   type ProjectRef,
   type SourceRef,
   type WorkspaceState
 } from '../../src/shared/types'
+import { DocxService } from './docx'
 import { assertNotMetadataPath, assertSafeName, canonicalDirectory, isInside, ProjectPathGuard } from './security'
 import { SettingsStore } from './settings'
 import { atomicCreate, atomicWrite, atomicWriteJson, readJson } from './storage'
@@ -41,6 +44,8 @@ const MAX_TEXT_FILE_SIZE = 32 * 1024 * 1024
 const MAX_SESSIONS = 200
 const MAX_MESSAGES_PER_SESSION = 2_000
 const MAX_MESSAGE_CHARS = 2 * 1024 * 1024
+const MAX_OCR_RESULTS = 2_000
+const MAX_OCR_TEXT_CHARS = 4 * 1024 * 1024
 
 const IGNORED_PROJECT_ENTRY_NAMES = new Set([
   METADATA_DIRECTORY,
@@ -89,6 +94,7 @@ export function fileKind(filePath: string, directory = false): FileKind {
   const extension = path.extname(filePath).toLocaleLowerCase()
   if (extension === '.md' || extension === '.markdown') return 'markdown'
   if (extension === '.pdf') return 'pdf'
+  if (extension === '.docx') return 'docx'
   if (IMAGE_EXTENSIONS.has(extension)) return 'image'
   if (TEXT_EXTENSIONS.has(extension)) return 'text'
   return 'unsupported'
@@ -177,7 +183,7 @@ function metadataProjectPath(value: unknown, root: string): string | undefined {
 function normalizedContext(value: unknown, root: string): ContextSnapshot | undefined {
   if (!isRecord(value)) return undefined
   const scopes = new Set(['selection', 'visible', 'document', 'project', 'general'])
-  const kinds = new Set(['folder', 'markdown', 'pdf', 'image', 'text', 'unsupported'])
+  const kinds = new Set(['folder', 'markdown', 'pdf', 'docx', 'image', 'text', 'unsupported'])
   const scope = typeof value.scope === 'string' && scopes.has(value.scope) ? value.scope as ContextSnapshot['scope'] : undefined
   if (!scope) return undefined
   const documentPath = metadataProjectPath(value.documentPath, root)
@@ -206,7 +212,7 @@ function normalizedContext(value: unknown, root: string): ContextSnapshot | unde
 
 function normalizedSource(value: unknown, root: string): SourceRef | undefined {
   if (!isRecord(value)) return undefined
-  const kinds = new Set(['pdf', 'markdown', 'text', 'session', 'general'])
+  const kinds = new Set(['pdf', 'markdown', 'docx', 'image', 'text', 'session', 'general'])
   if (typeof value.kind !== 'string' || !kinds.has(value.kind)) return undefined
   const kind = value.kind as SourceRef['kind']
   const sourcePath = kind === 'session' || kind === 'general'
@@ -323,6 +329,38 @@ interface PendingOperation {
   createdAt: number
 }
 
+interface StoredOcrResult extends Omit<OcrResult, 'path'> {
+  path: string
+}
+
+function normalizedOcrLines(value: unknown): OcrLine[] {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, 20_000).flatMap((candidate): OcrLine[] => {
+    if (!isRecord(candidate) || typeof candidate.text !== 'string') return []
+    const line: OcrLine = { text: candidate.text.slice(0, 100_000) }
+    if (typeof candidate.score === 'number' && Number.isFinite(candidate.score)) {
+      line.score = Math.max(0, Math.min(1, candidate.score))
+    }
+    if (Array.isArray(candidate.polygon)) {
+      line.polygon = candidate.polygon.slice(0, 16).flatMap((point) => {
+        if (!isRecord(point) || typeof point.x !== 'number' || typeof point.y !== 'number') return []
+        if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return []
+        return [{ x: point.x, y: point.y }]
+      })
+    }
+    return [line]
+  })
+}
+
+function normalizedOcrWarnings(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const warnings = value
+    .flatMap((item) => typeof item === 'string' ? [item.slice(0, 2_000)] : [])
+    .filter((item, index, values) => item && values.indexOf(item) === index)
+    .slice(0, 20)
+  return warnings.length ? warnings : undefined
+}
+
 export class ProjectService {
   private guardValue: ProjectPathGuard | null = null
   private currentInfo: ProjectInfo | null = null
@@ -330,6 +368,7 @@ export class ProjectService {
   private watcherTimer: NodeJS.Timeout | null = null
   private readonly queuedEvents = new Map<string, FileChangeEvent>()
   private readonly pendingOperations = new Map<string, PendingOperation>()
+  private readonly docx = new DocxService()
   private initialPath: string | null = null
 
   constructor(
@@ -356,7 +395,7 @@ export class ProjectService {
     return path.join(app.getPath('userData'), 'recent-projects.json')
   }
 
-  private async metadataFile(name: 'workspace' | 'sessions' | 'annotations'): Promise<string> {
+  private async metadataFile(name: 'workspace' | 'sessions' | 'annotations' | 'ocr'): Promise<string> {
     await this.ensureMetadata(this.guard.root)
     const filePath = path.join(this.guard.root, METADATA_DIRECTORY, `${name}.json`)
     try {
@@ -370,7 +409,7 @@ export class ProjectService {
     return filePath
   }
 
-  private async writeMetadata(name: 'workspace' | 'sessions' | 'annotations', value: unknown): Promise<void> {
+  private async writeMetadata(name: 'workspace' | 'sessions' | 'annotations' | 'ocr', value: unknown): Promise<void> {
     const filePath = await this.metadataFile(name)
     const directoryIdentity = await this.guard.identity(path.dirname(filePath), 'directory')
     const verify = () => this.guard.verifyIdentity(directoryIdentity)
@@ -488,6 +527,7 @@ export class ProjectService {
     this.guardValue = null
     this.currentInfo = null
     this.pendingOperations.clear()
+    this.docx.invalidate()
     this.onFileChanged()
   }
 
@@ -503,6 +543,7 @@ export class ProjectService {
       if (!isInside(root, absolute) || isIgnoredProjectPath(root, absolute)) return
       const event = { type, path: absolute }
       this.queuedEvents.set(`${type}:${absolute}`, event)
+      this.docx.invalidate(absolute)
       this.onFileChanged(absolute)
       if (this.watcherTimer) clearTimeout(this.watcherTimer)
       this.watcherTimer = setTimeout(() => {
@@ -629,12 +670,92 @@ export class ProjectService {
     return this.guard.existing(relative, 'file')
   }
 
+  private async readOcrCache(): Promise<StoredOcrResult[]> {
+    const value = await readJson<unknown>(await this.metadataFile('ocr'), [])
+    if (!Array.isArray(value)) return []
+    return value.slice(0, MAX_OCR_RESULTS).flatMap((candidate): StoredOcrResult[] => {
+      if (!isRecord(candidate) || typeof candidate.path !== 'string' || typeof candidate.text !== 'string') return []
+      if (candidate.engine !== 'paddleocr-v6' && candidate.engine !== 'ai-vision') return []
+      if (typeof candidate.model !== 'string' || typeof candidate.createdAt !== 'number') return []
+      if (typeof candidate.sourceModifiedAt !== 'number' || typeof candidate.sourceSize !== 'number') return []
+      const page = typeof candidate.page === 'number' && Number.isInteger(candidate.page) && candidate.page > 0
+        ? candidate.page
+        : undefined
+      return [{
+        path: candidate.path,
+        ...(page ? { page } : {}),
+        text: candidate.text.slice(0, MAX_OCR_TEXT_CHARS),
+        lines: normalizedOcrLines(candidate.lines),
+        engine: candidate.engine,
+        model: candidate.model.slice(0, 500),
+        createdAt: candidate.createdAt,
+        sourceModifiedAt: candidate.sourceModifiedAt,
+        sourceSize: candidate.sourceSize,
+        ...(normalizedOcrWarnings(candidate.warnings) ? { warnings: normalizedOcrWarnings(candidate.warnings) } : {})
+      }]
+    })
+  }
+
+  async ocrResults(inputPath: string, page?: number): Promise<OcrResult[]> {
+    const canonical = await this.guard.existing(inputPath, 'file')
+    assertNotMetadataPath(this.guard.root, canonical)
+    const relative = path.relative(this.guard.root, canonical)
+    const info = await stat(canonical)
+    const stored = await this.readOcrCache()
+    return stored
+      .filter((item) => item.path === relative && (page === undefined || item.page === page))
+      .filter((item) => item.sourceSize === info.size && Math.abs(item.sourceModifiedAt - info.mtimeMs) <= 1)
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .map((item) => ({ ...item, path: canonical, lines: item.lines.map((line) => ({ ...line, polygon: line.polygon?.map((point) => ({ ...point })) })) }))
+  }
+
+  async getOcr(inputPath: string, page?: number): Promise<OcrResult | null> {
+    return (await this.ocrResults(inputPath, page))[0] ?? null
+  }
+
+  async saveOcr(input: OcrResult): Promise<OcrResult> {
+    if (!input || typeof input !== 'object' || typeof input.path !== 'string') throw new Error('OCR 结果路径无效。')
+    if (typeof input.text !== 'string') throw new Error('OCR 结果正文无效。')
+    if (input.engine !== 'paddleocr-v6' && input.engine !== 'ai-vision') throw new Error('OCR 引擎类型无效。')
+    const canonical = await this.guard.existing(input.path, 'file')
+    assertNotMetadataPath(this.guard.root, canonical)
+    const kind = fileKind(canonical)
+    if (kind !== 'image' && kind !== 'pdf') throw new Error('OCR 结果只能关联图片或 PDF。')
+    const info = await stat(canonical)
+    const page = typeof input.page === 'number' && Number.isInteger(input.page) && input.page > 0
+      ? input.page
+      : undefined
+    if (kind === 'pdf' && !page) throw new Error('PDF OCR 结果必须包含页码。')
+    const result: OcrResult = {
+      path: canonical,
+      ...(page ? { page } : {}),
+      text: input.text.slice(0, MAX_OCR_TEXT_CHARS).trim(),
+      lines: normalizedOcrLines(input.lines),
+      engine: input.engine,
+      model: typeof input.model === 'string' ? input.model.slice(0, 500) : '',
+      createdAt: Date.now(),
+      sourceModifiedAt: info.mtimeMs,
+      sourceSize: info.size,
+      ...(normalizedOcrWarnings(input.warnings) ? { warnings: normalizedOcrWarnings(input.warnings) } : {})
+    }
+    const relative = path.relative(this.guard.root, canonical)
+    const cache = await this.readOcrCache()
+    const next: StoredOcrResult[] = [
+      { ...result, path: relative },
+      ...cache.filter((item) => !(item.path === relative && item.page === page && item.engine === result.engine))
+    ].slice(0, MAX_OCR_RESULTS)
+    await this.writeMetadata('ocr', next)
+    return result
+  }
+
   async read(inputPath: string): Promise<FileReadResult> {
     const canonical = await this.guard.existing(inputPath, 'file')
     assertNotMetadataPath(this.guard.root, canonical)
     const info = await stat(canonical)
     const kind = fileKind(canonical)
     let content = ''
+    let html: string | undefined
+    let warnings: string[] | undefined
     if (kind === 'markdown' || kind === 'text') {
       if (info.size > MAX_TEXT_FILE_SIZE) throw new Error('文本文件超过 32 MB，无法直接打开。')
       const descriptor = await this.guard.openReadOnly(canonical)
@@ -643,14 +764,28 @@ export class ProjectService {
       } finally {
         await descriptor.close()
       }
+    } else if (kind === 'docx') {
+      const descriptor = await this.guard.openReadOnly(canonical)
+      try {
+        const extracted = await this.docx.extract(canonical, await descriptor.readFile(), info.mtimeMs)
+        content = extracted.text
+        html = extracted.html
+        warnings = extracted.warnings
+      } finally {
+        await descriptor.close()
+      }
     }
+    const ocrResults = kind === 'image' || kind === 'pdf' ? await this.ocrResults(canonical) : []
     return {
       path: canonical,
       kind,
       content,
       modifiedAt: info.mtimeMs,
       size: info.size,
-      ...(kind === 'pdf' || kind === 'image' ? { url: this.urlFor(canonical) } : {})
+      ...(kind === 'pdf' || kind === 'image' ? { url: this.urlFor(canonical) } : {}),
+      ...(html !== undefined ? { html } : {}),
+      ...(warnings?.length ? { warnings } : {}),
+      ...(ocrResults.length ? { ocrResults } : {})
     }
   }
 

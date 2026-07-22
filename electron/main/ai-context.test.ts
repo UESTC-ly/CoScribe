@@ -71,6 +71,16 @@ describe('AI context scope boundaries', () => {
     expect(result.text).not.toContain('SECRET_FULL_DOCUMENT')
   })
 
+  it('provides the exact current Markdown path as the default note target', async () => {
+    const { exposed } = service()
+    const result = await exposed.validatedContext(snapshot('document'), '记笔记')
+
+    expect(result.text).toContain('上下文范围：document')
+    expect(result.text).toContain('当前文档项目内相对路径：lesson.md')
+    expect(result.text).toContain('当前笔记写入目标：lesson.md')
+    expect(result.text).toContain('默认对此文件使用 append')
+  })
+
   it('uses app-owned retrieval only for explicit project scope', async () => {
     const resultPath = path.join(projectPath, 'retrieved.md')
     const { exposed, retrieve } = service([{

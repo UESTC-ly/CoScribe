@@ -8,6 +8,7 @@ const REASONING_LABELS: Record<AppSettings['reasoningEffort'], string> = {
   medium: 'Medium',
   high: 'High',
   xhigh: 'Extra high',
+  ultra: 'Ultra',
   max: 'More reasoning...'
 }
 

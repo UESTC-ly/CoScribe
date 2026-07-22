@@ -90,6 +90,7 @@ function inferKind(path: string): Exclude<FileKind, 'folder'> {
   const ext = path.split('.').pop()?.toLowerCase()
   if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'markdown'
   if (ext === 'pdf') return 'pdf'
+  if (ext === 'docx') return 'docx'
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif'].includes(ext ?? '')) return 'image'
   if (['txt', 'log', 'csv', 'json', 'yaml', 'yml', 'toml', 'xml'].includes(ext ?? '')) return 'text'
   return 'unsupported'
@@ -323,8 +324,14 @@ export default function App(): React.JSX.Element {
 
   const ensureDocument = useCallback(async (tab: OpenTab): Promise<void> => {
     if (appStore.getState().documents[tab.path]) return
-    try { setStore().loadDocument(await window.coscribe.file.read(tab.path)) }
-    catch (reason) { setStore().markPathMissing(tab.path); setError(reason instanceof Error ? reason.message : `无法打开 ${tab.name}`) }
+    try {
+      setStore().loadDocument(await window.coscribe.file.read(tab.path))
+    } catch (reason) {
+      if ((reason as { code?: string })?.code === 'ENOENT' || /(?:不存在|移动或删除|ENOENT)/iu.test(String(reason))) {
+        setStore().markPathMissing(tab.path)
+      }
+      setError(reason instanceof Error ? reason.message : `无法打开 ${tab.name}`)
+    }
   }, [])
 
   const openNode = useCallback((node: FileNode, location?: { page?: number; line?: number }): void => {
@@ -491,7 +498,13 @@ export default function App(): React.JSX.Element {
   const openSource = (source: SourceRef): void => {
     if (source.kind === 'session') return
     if (source.kind === 'general') return
-    openPath(source.path, source.kind === 'pdf' ? 'pdf' : source.kind === 'markdown' ? 'markdown' : 'text', { page: source.page, line: source.line })
+    openPath(
+      source.path,
+      source.kind === 'pdf' || source.kind === 'markdown' || source.kind === 'docx' || source.kind === 'image'
+        ? source.kind
+        : 'text',
+      { page: source.page, line: source.line }
+    )
   }
 
   const openContext = (context: ContextSnapshot): void => {

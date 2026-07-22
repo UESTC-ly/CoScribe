@@ -7,9 +7,14 @@ import {
   Plus,
   RotateCcw,
   RotateCw,
+  ScanText,
+  Sparkles,
 } from 'lucide-react'
+import { rasterizeImageUrl } from '../../lib/local-ocr'
 import { cx, IconButton, ToolbarDivider, ViewerNotice, ViewerSpinner } from './ViewerChrome'
+import { OcrPanel } from './OcrPanel'
 import type { ImageViewerProps, ImageViewerState } from './types'
+import { useOcrSession } from './useOcrSession'
 
 const IMAGE_MIN_SCALE = 0.1
 const IMAGE_MAX_SCALE = 8
@@ -20,6 +25,9 @@ function clampScale(scale: number): number {
 
 export function ImageViewer({
   src,
+  filePath,
+  sourceModifiedAt,
+  sourceSize,
   alt,
   fileName = '图片',
   className,
@@ -28,6 +36,7 @@ export function ImageViewer({
   onLoad,
   onError,
   onOpenExternal,
+  onOcrTextChange,
 }: ImageViewerProps): React.JSX.Element {
   const [scale, setScale] = useState(clampScale(initialState?.scale ?? 1))
   const [rotation, setRotation] = useState<ImageViewerState['rotation']>(initialState?.rotation ?? 0)
@@ -36,6 +45,14 @@ export function ImageViewer({
   const [error, setError] = useState<Error | null>(null)
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const getOcrImage = useCallback(() => rasterizeImageUrl(src, rotation), [rotation, src])
+  const ocr = useOcrSession({
+    path: filePath,
+    sourceModifiedAt,
+    sourceSize,
+    getImage: getOcrImage,
+    onResult: (result) => onOcrTextChange?.(result?.text ?? '')
+  })
 
   useEffect(() => {
     setLoading(true)
@@ -70,6 +87,13 @@ export function ImageViewer({
             <RotateCw size={17} />
           </IconButton>
           <ToolbarDivider />
+          <IconButton label="本地文字识别" active={ocr.panelOpen && ocr.result?.engine === 'paddleocr-v6'} onClick={() => void ocr.runLocal()}>
+            <ScanText size={17} />
+          </IconButton>
+          <IconButton label="AI 增强识别（发送当前图像）" active={ocr.panelOpen && ocr.result?.engine === 'ai-vision'} onClick={() => void ocr.runAi()}>
+            <Sparkles size={17} />
+          </IconButton>
+          <ToolbarDivider />
           <IconButton label="缩小" onClick={() => changeScale(scale - 0.1)}>
             <Minus size={17} />
           </IconButton>
@@ -102,16 +126,17 @@ export function ImageViewer({
         </div>
       </header>
 
-      <div
-        ref={scrollRef}
-        className={cx('vk-image-stage', fit && 'is-fit')}
-        tabIndex={0}
-        onWheel={(event) => {
-          if (!event.ctrlKey && !event.metaKey) return
-          event.preventDefault()
-          changeScale(scale + (event.deltaY < 0 ? 0.1 : -0.1))
-        }}
-      >
+      <div className="vk-image-body">
+        <div
+          ref={scrollRef}
+          className={cx('vk-image-stage', fit && 'is-fit')}
+          tabIndex={0}
+          onWheel={(event) => {
+            if (!event.ctrlKey && !event.metaKey) return
+            event.preventDefault()
+            changeScale(scale + (event.deltaY < 0 ? 0.1 : -0.1))
+          }}
+        >
         {loading && !error && <ViewerSpinner label="正在载入图片…" />}
         {error ? (
           <ViewerNotice
@@ -156,6 +181,18 @@ export function ImageViewer({
               setError(nextError)
               onError?.(nextError)
             }}
+          />
+        )}
+        </div>
+        {ocr.panelOpen && (
+          <OcrPanel
+            result={ocr.result}
+            status={ocr.status}
+            error={ocr.error}
+            onLocal={() => void ocr.runLocal()}
+            onAi={() => void ocr.runAi()}
+            onCancel={ocr.cancel}
+            onClose={() => ocr.setPanelOpen(false)}
           />
         )}
       </div>

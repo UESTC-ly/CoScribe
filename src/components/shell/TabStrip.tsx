@@ -1,4 +1,4 @@
-import { File, FileImage, FileText, GripVertical, X } from 'lucide-react'
+import { File, FileImage, FileText, FileType2, GripVertical, X } from 'lucide-react'
 import type { OpenTab, PaneId } from '../../shared/types'
 
 interface TabStripProps {
@@ -13,6 +13,7 @@ interface TabStripProps {
 
 function TabIcon({ tab }: { tab: OpenTab }): React.JSX.Element {
   if (tab.kind === 'image') return <FileImage size={13} />
+  if (tab.kind === 'docx') return <FileType2 size={13} />
   if (tab.kind === 'markdown' || tab.kind === 'text') return <FileText size={13} />
   return <File size={13} />
 }

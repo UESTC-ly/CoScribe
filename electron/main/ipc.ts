@@ -2,10 +2,12 @@ import { app, ipcMain, type IpcMainInvokeEvent } from 'electron'
 
 import type {
   AiRequest,
+  AiOcrRequest,
   Annotation,
   AppSettings,
   ChatSession,
   FileOperationProposal,
+  OcrResult,
   WorkspaceState
 } from '../../src/shared/types'
 import { IPC } from '../ipc-channels'
@@ -39,7 +41,7 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
     if (senderUrl.origin !== new URL(developmentUrl).origin) throw new Error('IPC 请求来源不受信任。')
     return
   }
-  if (senderUrl.protocol !== 'file:' || senderUrl.hostname || !senderUrl.pathname.endsWith('/renderer/index.html')) {
+  if (senderUrl.protocol !== 'coscribe-app:' || senderUrl.hostname !== 'app' || senderUrl.pathname !== '/index.html') {
     throw new Error('IPC 请求来源不受信任。')
   }
 }
@@ -95,6 +97,11 @@ export function registerIpc(services: Services): void {
 
   handle(IPC.pdfPageText, (_event, filePath: string, page: number) => pdf.pageText(filePath, page))
   handle(IPC.pdfSearch, (_event, filePath: string, query: string) => pdf.search(filePath, query))
+
+  handle(IPC.ocrGet, (_event, filePath: string, page?: number) => project.getOcr(filePath, page))
+  handle(IPC.ocrSave, (_event, result: OcrResult) => project.saveOcr(result))
+  handle(IPC.ocrEnhance, (_event, request: AiOcrRequest) => ai.enhanceImage(request))
+  handle(IPC.ocrStop, (_event, requestId: string) => ai.stopOcr(requestId))
 
   handle(IPC.settingsGet, () => settings.get())
   handle(IPC.settingsSave, (_event, value: AppSettings) => settings.save(value))

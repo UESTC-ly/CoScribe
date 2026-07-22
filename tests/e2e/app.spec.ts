@@ -1,11 +1,12 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
 const appRoot = path.resolve(import.meta.dirname, '../..')
+const packagedExecutable = process.env.COSCRIBE_E2E_EXECUTABLE
 
 let electronApp: ElectronApplication
 let page: Page
@@ -14,7 +15,8 @@ let userDataPath: string
 
 async function launchProject(): Promise<void> {
   electronApp = await electron.launch({
-    args: [appRoot, '--project', projectPath],
+    ...(packagedExecutable ? { executablePath: packagedExecutable } : {}),
+    args: packagedExecutable ? ['--project', projectPath] : [appRoot, '--project', projectPath],
     env: { ...process.env, NODE_ENV: 'test', COSCRIBE_USER_DATA_DIR: userDataPath }
   })
   page = await electronApp.firstWindow()
@@ -42,6 +44,17 @@ test.beforeEach(async () => {
     '依赖项可以被复用。'
   ].join('\n'))
   await writeFile(path.join(projectPath, '资料.txt'), '本地项目中的普通文本文件。\n')
+  await copyFile(
+    path.join(appRoot, 'node_modules', 'mammoth', 'test', 'test-data', 'single-paragraph.docx'),
+    path.join(projectPath, '示例文档.docx')
+  )
+  await writeFile(path.join(projectPath, 'OCR测试.svg'), [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420">',
+    '<rect width="1200" height="420" fill="white"/>',
+    '<text x="70" y="180" fill="black" font-family="Arial, sans-serif" font-size="86" font-weight="700">COSCRIBE OCR TEST</text>',
+    '<text x="70" y="300" fill="black" font-family="Arial, sans-serif" font-size="66">LOCAL 2026</text>',
+    '</svg>'
+  ].join(''))
   await mkdir(path.join(projectPath, '教程', '章节'), { recursive: true })
   await writeFile(path.join(projectPath, '教程', '章节', '流程.md'), '# 流程\n\n```mermaid\ngraph TD\n  A[开始] --> B[完成]\n```\n')
   await mkdir(path.join(projectPath, '.venv', 'lib'), { recursive: true })
@@ -112,6 +125,28 @@ test('renders Mermaid fenced blocks in Markdown preview', async ({}, testInfo) =
   await expect.poll(async () => page.locator('.vk-mermaid-svg svg').evaluate((element) => element.outerHTML)).not.toBe(lightSvg)
   await expect(page.locator('.vk-mermaid-error')).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('mermaid-preview-dark.png') })
+})
+
+test('opens DOCX files as a local semantic document', async () => {
+  await page.locator('.tree-row').filter({ hasText: '示例文档.docx' }).click()
+
+  await expect(page.getByLabel('示例文档.docx DOCX 阅读器')).toBeVisible()
+  await expect(page.locator('.vk-docx-page')).toContainText('Walking on imported air')
+  await expect(page.getByRole('button', { name: '复制正文' })).toBeVisible()
+})
+
+test('runs bundled local OCR from the packaged renderer origin', async () => {
+  test.setTimeout(120_000)
+  await page.locator('.tree-row').filter({ hasText: 'OCR测试.svg' }).click()
+  await expect(page.getByLabel('OCR测试.svg 图片查看器')).toBeVisible()
+  await page.getByRole('button', { name: '本地文字识别' }).click()
+
+  const panel = page.getByLabel('OCR 识别结果')
+  await expect(panel).toBeVisible()
+  await expect(panel.locator('.vk-ocr-state')).toBeVisible()
+  await expect(panel.locator('.vk-ocr-state')).toHaveCount(0, { timeout: 90_000 })
+  await expect(panel.locator('.vk-ocr-error')).toHaveCount(0)
+  await expect(panel.locator('.vk-ocr-text')).toContainText(/(?:COSCRIBE|OCR TEST)/iu, { timeout: 90_000 })
 })
 
 test('keeps the file tree when optional project metadata cannot be read', async () => {
@@ -272,6 +307,119 @@ test('keeps an AI-created note on preview until the user accepts it', async () =
     expect(capturedRequest?.['messages']).toBeUndefined()
     expect(capturedRequest?.['reasoning']).toEqual({ effort: 'medium' })
     expect(JSON.stringify(capturedRequest?.['tools'])).toContain('propose_markdown_operation')
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+test('keeps current-document scope and gives note-taking the exact Markdown path', async () => {
+  let requestBody: Record<string, unknown> | null = null
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = []
+    for await (const chunk of request) chunks.push(Buffer.from(chunk))
+    requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: '已把要点整理为当前笔记的追加预览。' }]
+        },
+        {
+          type: 'function_call',
+          name: 'propose_markdown_operation',
+          arguments: JSON.stringify({
+            kind: 'append',
+            targetPath: 'README.md',
+            proposedContent: '\n\n## AI 整理\n\n- 当前文档要点\n',
+            summary: '追加当前文档学习要点'
+          })
+        }
+      ]
+    }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const port = (server.address() as AddressInfo).port
+    await page.getByRole('button', { name: '配置', exact: true }).click()
+    await page.getByLabel('服务地址').fill(`http://127.0.0.1:${port}`)
+    await page.getByLabel('模型', { exact: true }).fill('local-e2e-model')
+    await page.getByRole('button', { name: '保存设置' }).click()
+
+    await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
+    await expect(page.getByLabel('README.md Markdown 编辑器')).toBeVisible()
+    await page.getByLabel('基于').selectOption('document')
+    await expect(page.getByLabel('当前 AI 上下文')).toContainText('README.md')
+    await expect(page.getByLabel('当前 AI 上下文')).toContainText('完整文档')
+    await expect(page.getByLabel('当前 AI 上下文')).not.toContainText('模型通用知识')
+
+    await page.getByLabel('向 AI 提问').fill('请把刚才的要点记笔记')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect(page.getByText('已把要点整理为当前笔记的追加预览。')).toBeVisible()
+    await expect(page.getByLabel('追加内容建议')).toContainText('README.md')
+    await expect(page.getByText('基于：README.md')).toBeVisible()
+    await expect(page.getByText('基于：模型通用知识')).toHaveCount(0)
+
+    const serialized = JSON.stringify(requestBody)
+    expect(serialized).toContain('上下文范围：document')
+    expect(serialized).toContain('当前文档项目内相对路径：README.md')
+    expect(serialized).toContain('当前笔记写入目标：README.md')
+    expect(serialized).toContain('必须直接把该相对路径作为 targetPath 并使用 append')
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+test('renders Mermaid diagrams and highlighted code in AI answers', async ({}, testInfo) => {
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Consume the request before returning the mocked model response.
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({
+      output: [{
+        type: 'message',
+        role: 'assistant',
+        content: [{
+          type: 'output_text',
+          text: [
+            '这是执行流程：',
+            '',
+            '```mermaid',
+            'graph LR',
+            '  A[读取] --> B[高亮]',
+            '```',
+            '',
+            '```typescript',
+            'const answer: number = 42',
+            '```'
+          ].join('\n')
+        }]
+      }]
+    }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const port = (server.address() as AddressInfo).port
+    await page.getByRole('button', { name: '配置', exact: true }).click()
+    await page.getByLabel('服务地址').fill(`http://127.0.0.1:${port}`)
+    await page.getByLabel('模型', { exact: true }).fill('local-e2e-model')
+    await page.getByRole('button', { name: '保存设置' }).click()
+
+    await page.getByLabel('向 AI 提问').fill('请给出流程图和代码')
+    await page.getByRole('button', { name: '发送消息' }).click()
+
+    const aiMessage = page.locator('.ai-message--assistant').last()
+    await expect(aiMessage.locator('.vk-mermaid-svg svg')).toBeVisible({ timeout: 15_000 })
+    await expect(aiMessage.locator('.vk-mermaid-error')).toHaveCount(0)
+    const codeBlock = aiMessage.getByRole('region', { name: 'TypeScript 代码块' })
+    await expect(codeBlock).toBeVisible()
+    await expect(codeBlock.locator('.hljs-keyword')).toHaveText('const')
+    await expect(codeBlock.locator('.hljs-number')).toHaveText('42')
+    await page.screenshot({ path: testInfo.outputPath('ai-mermaid-and-code.png') })
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }

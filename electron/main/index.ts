@@ -14,6 +14,16 @@ import { SettingsStore } from './settings'
 
 protocol.registerSchemesAsPrivileged([
   {
+    scheme: 'coscribe-app',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      corsEnabled: true
+    }
+  },
+  {
     scheme: 'coscribe-file',
     privileges: {
       standard: true,
@@ -42,6 +52,7 @@ const singleInstance = app.requestSingleInstanceLock()
 if (!singleInstance) app.quit()
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
+const rendererDirectory = path.resolve(currentDirectory, '../renderer')
 let mainWindow: BrowserWindow | null = null
 
 function allowedExternalUrl(url: string): boolean {
@@ -127,7 +138,9 @@ function createWindow(): BrowserWindow {
       const sameHttpOrigin =
         (currentUrl.protocol === 'http:' || currentUrl.protocol === 'https:') && currentUrl.origin === nextUrl.origin
       const samePackagedPage =
-        currentUrl.protocol === 'file:' && nextUrl.protocol === 'file:' && currentUrl.pathname === nextUrl.pathname
+        currentUrl.protocol === 'coscribe-app:' &&
+        nextUrl.protocol === 'coscribe-app:' &&
+        currentUrl.origin === nextUrl.origin
       if (sameHttpOrigin || samePackagedPage) return
     } catch {
       // Invalid navigation is denied below.
@@ -141,7 +154,7 @@ function createWindow(): BrowserWindow {
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
   if (rendererUrl) void window.loadURL(rendererUrl)
-  else void window.loadFile(path.join(currentDirectory, '../renderer/index.html'))
+  else void window.loadURL('coscribe-app://app/index.html')
   return window
 }
 
@@ -179,6 +192,24 @@ app.on('open-file', (event, filePath) => {
 void app.whenReady().then(() => {
   app.setAppUserModelId('com.coscribe.app')
   registerIpc({ project, pdf, search, settings, ai })
+  protocol.handle('coscribe-app', async (request) => {
+    try {
+      const parsed = new URL(request.url)
+      if (parsed.hostname !== 'app') throw new Error('无效的应用资源地址。')
+      const decoded = decodeURIComponent(parsed.pathname).replace(/^\/+/, '') || 'index.html'
+      const filePath = path.resolve(rendererDirectory, decoded)
+      const relative = path.relative(rendererDirectory, filePath)
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new Error('应用资源路径越界。')
+      }
+      return net.fetch(pathToFileURL(filePath).toString(), {
+        headers: request.headers,
+        bypassCustomProtocolHandlers: true
+      })
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
+  })
   protocol.handle('coscribe-file', async (request) => {
     try {
       const filePath = await project.pathFromProtocol(request.url)

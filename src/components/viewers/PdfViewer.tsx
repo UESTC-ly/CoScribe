@@ -19,12 +19,16 @@ import {
   PanelLeftOpen,
   Plus,
   Search,
+  ScanText,
+  Sparkles,
   X,
 } from 'lucide-react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
+import { rasterizeCanvas } from '../../lib/local-ocr'
 import { cx, IconButton, ToolbarDivider, ViewerNotice, ViewerSpinner } from './ViewerChrome'
+import { OcrPanel } from './OcrPanel'
 import type {
   PdfAnnotationColor,
   PdfFitMode,
@@ -34,6 +38,7 @@ import type {
   PdfViewerProps,
   PdfViewerReadingState,
 } from './types'
+import { useOcrSession } from './useOcrSession'
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   // react-pdf pins its own pdf.js version. Point at that matching worker rather
@@ -205,6 +210,9 @@ function AnnotationMarks({
 
 export function PdfViewer({
   file,
+  filePath,
+  sourceModifiedAt,
+  sourceSize,
   fileName = 'PDF 文档',
   className,
   annotations = [],
@@ -251,6 +259,19 @@ export function PdfViewer({
 
   onReadingStateChangeRef.current = onReadingStateChange
   onContextChangeRef.current = onContextChange
+
+  const getOcrImage = useCallback(async () => {
+    const canvas = scrollRef.current?.querySelector<HTMLCanvasElement>(`[data-pdf-page="${mainPage}"] canvas`)
+    if (!canvas) throw new Error('当前页尚未渲染完成，请稍后重试。')
+    return rasterizeCanvas(canvas)
+  }, [mainPage])
+  const ocr = useOcrSession({
+    path: filePath,
+    page: mainPage,
+    sourceModifiedAt,
+    sourceSize,
+    getImage: getOcrImage
+  })
 
   const pageWidth = useMemo(() => {
     const availableWidth = Math.max(260, viewportSize.width - 56)
@@ -407,7 +428,10 @@ export function PdfViewer({
 
   useEffect(() => {
     if (!numPages) return
-    const currentText = pageTexts[mainPage] ?? ''
+    const extractedText = pageTexts[mainPage] ?? ''
+    const currentText = extractedText.replace(/\s/g, '').length >= 20
+      ? extractedText
+      : ocr.result?.page === mainPage ? ocr.result.text : extractedText
     const adjacentText = [pageTexts[mainPage - 1], currentText, pageTexts[mainPage + 1]]
       .filter(Boolean)
       .join('\n\n')
@@ -420,7 +444,7 @@ export function PdfViewer({
       readable: currentText.replace(/\s/g, '').length >= 20,
     }
     onContextChangeRef.current?.(context)
-  }, [mainPage, numPages, pageTexts, selection, visiblePages])
+  }, [mainPage, numPages, ocr.result, pageTexts, selection, visiblePages])
 
   useEffect(() => {
     if (!documentProxy) return
@@ -678,8 +702,26 @@ export function PdfViewer({
           >
             <Bookmark size={17} fill={bookmarkedPages.has(mainPage) ? 'currentColor' : 'none'} />
           </IconButton>
+          <IconButton label="本地识别当前页" active={ocr.panelOpen && ocr.result?.engine === 'paddleocr-v6'} onClick={() => void ocr.runLocal()}>
+            <ScanText size={17} />
+          </IconButton>
+          <IconButton label="AI 增强识别当前页（发送页面图像）" active={ocr.panelOpen && ocr.result?.engine === 'ai-vision'} onClick={() => void ocr.runAi()}>
+            <Sparkles size={17} />
+          </IconButton>
         </div>
       </header>
+
+      {ocr.panelOpen && (
+        <OcrPanel
+          result={ocr.result}
+          status={ocr.status}
+          error={ocr.error}
+          onLocal={() => void ocr.runLocal()}
+          onAi={() => void ocr.runAi()}
+          onCancel={ocr.cancel}
+          onClose={() => ocr.setPanelOpen(false)}
+        />
+      )}
 
       {selection && (
         <div className="vk-pdf-selection-bar" role="toolbar" aria-label="选中文字操作">
@@ -723,7 +765,7 @@ export function PdfViewer({
         </div>
       )}
 
-      {scannedLikely && (
+      {scannedLikely && !ocr.result?.text && (
         <div className="vk-pdf-scan-warning" role="alert">
           <FileWarning size={16} aria-hidden="true" />
           <span>这份 PDF 似乎是扫描件，无法可靠提取正文；AI 不会把页面图片当作已读取文本。</span>

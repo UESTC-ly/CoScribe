@@ -101,7 +101,7 @@ export class ProjectSearchService {
     const results: SearchResult[] = []
 
     for (const file of files) {
-      if (file.kind === 'markdown' || file.kind === 'text') {
+      if (file.kind === 'markdown' || file.kind === 'text' || file.kind === 'docx') {
         try {
           const value = await this.project.read(file.path)
           const match = retrievalScore(`${file.name}\n${value.content}`, tokens)
@@ -122,6 +122,25 @@ export class ProjectSearchService {
         } catch {
           // Unreadable files are omitted rather than guessed.
         }
+      } else if (file.kind === 'image') {
+        try {
+          const value = await this.project.getOcr(file.path)
+          if (!value) continue
+          const match = retrievalScore(`${file.name}\n${value.text}`, tokens)
+          if (tokens.length > 0 && match.score === 0) continue
+          const contentIndex = Math.max(0, match.index - file.name.length - 1)
+          results.push({
+            id: `retrieve-image:${file.path}`,
+            type: 'content',
+            path: file.path,
+            title: file.name,
+            excerpt: excerpt(value.text, contentIndex, Math.max(1, match.tokenLength)),
+            kind: 'image',
+            score: match.score || 1
+          })
+        } catch {
+          // Images without a current OCR cache remain searchable by name.
+        }
       } else if (file.kind === 'pdf') {
         try {
           const pages = await this.pdf.allPages(file.path)
@@ -139,6 +158,21 @@ export class ProjectSearchService {
               kind: 'pdf',
               page: page.page,
               score: match.score || Math.max(1, 4 - page.page / 100)
+            })
+          }
+          for (const ocr of await this.project.ocrResults(file.path)) {
+            const match = retrievalScore(`${file.name}\n${ocr.text}`, tokens)
+            if (tokens.length > 0 && match.score === 0) continue
+            const textIndex = Math.max(0, match.index - file.name.length - 1)
+            results.push({
+              id: `retrieve-pdf-ocr:${file.path}:${ocr.page}`,
+              type: 'content',
+              path: file.path,
+              title: file.name,
+              excerpt: excerpt(ocr.text, textIndex, Math.max(1, match.tokenLength)),
+              kind: 'pdf',
+              page: ocr.page,
+              score: match.score || 1
             })
           }
         } catch {
@@ -200,7 +234,7 @@ export class ProjectSearchService {
           })
         }
 
-        if (file.kind === 'markdown' || file.kind === 'text') {
+        if (file.kind === 'markdown' || file.kind === 'text' || file.kind === 'docx') {
           try {
             const value = await this.project.read(file.path)
             const haystack = value.content.toLocaleLowerCase()
@@ -222,6 +256,25 @@ export class ProjectSearchService {
           } catch {
             // Unreadable files remain searchable by name.
           }
+        } else if (file.kind === 'image') {
+          try {
+            const value = await this.project.getOcr(file.path)
+            const haystack = value?.text.toLocaleLowerCase() ?? ''
+            const index = haystack.indexOf(needle)
+            if (value && index !== -1) {
+              add({
+                id: `image-ocr:${file.path}`,
+                type: 'content',
+                path: file.path,
+                title: file.name,
+                excerpt: excerpt(value.text, index, query.length),
+                kind: 'image',
+                score: 82 + Math.min(20, countOccurrences(haystack, needle))
+              })
+            }
+          } catch {
+            // Images without current OCR text remain searchable by name.
+          }
         } else if (file.kind === 'pdf') {
           try {
             const pages = await this.pdf.allPages(file.path)
@@ -239,6 +292,23 @@ export class ProjectSearchService {
                   kind: 'pdf',
                   page: page.page,
                   score: 85 + Math.min(20, countOccurrences(haystack, needle))
+                })
+              }
+            }
+            for (const ocr of await this.project.ocrResults(file.path)) {
+              if (controller.signal.aborted) throw new DOMException('Search cancelled', 'AbortError')
+              const haystack = ocr.text.toLocaleLowerCase()
+              const index = haystack.indexOf(needle)
+              if (index !== -1) {
+                add({
+                  id: `pdf-ocr:${file.path}:${ocr.page}`,
+                  type: 'content',
+                  path: file.path,
+                  title: file.name,
+                  excerpt: excerpt(ocr.text, index, query.length),
+                  kind: 'pdf',
+                  page: ocr.page,
+                  score: 84 + Math.min(20, countOccurrences(haystack, needle))
                 })
               }
             }

@@ -85,6 +85,25 @@ describe('AI context priority and snapshots', () => {
     })
   })
 
+  it('keeps an explicit document scope when its text is temporarily unavailable', () => {
+    expect(resolveContextPriority({}, 'document')).toMatchObject({
+      scope: 'document',
+      source: 'document',
+      text: undefined,
+      usedFallback: true
+    })
+
+    expect(captureContextSnapshot({
+      projectName: 'Study',
+      projectPath: '/study',
+      pane: 'primary',
+      documentPath: '/study/notes/current.md'
+    }, 'document')).toMatchObject({
+      scope: 'document',
+      documentPath: '/study/notes/current.md'
+    })
+  })
+
   it('deep-copies array context at send time', () => {
     const visiblePages = [16, 17]
     const referencedFiles = ['notes.md']

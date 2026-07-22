@@ -160,6 +160,14 @@ export function validateSources(
       reject(rejectedSources, source, '来源类型与项目文件类型不一致。')
       continue
     }
+    if (source.kind === 'docx' && file.kind !== 'docx') {
+      reject(rejectedSources, source, '来源类型与项目文件类型不一致。')
+      continue
+    }
+    if (source.kind === 'image' && file.kind !== 'image') {
+      reject(rejectedSources, source, '来源类型与项目文件类型不一致。')
+      continue
+    }
     if (source.kind === 'text' && file.kind !== 'text' && file.kind !== 'markdown') {
       reject(rejectedSources, source, '来源类型与项目文件类型不一致。')
       continue

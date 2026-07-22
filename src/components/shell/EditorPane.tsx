@@ -12,6 +12,7 @@ import type {
 import { resolveProjectAssetUrl, resolveProjectFilePath } from '../../lib'
 import {
   ImageViewer,
+  DocxViewer,
   MarkdownViewer,
   PdfViewer,
   TextViewer,
@@ -72,7 +73,7 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
         <div className="editor-empty">
           <span className="editor-empty__mark"><BookOpenText size={27} strokeWidth={1.6} /></span>
           <strong>{props.pane === 'secondary' ? '第二个内容区域' : '打开项目内容'}</strong>
-          <p>{props.pane === 'secondary' ? '把标签拖到这里，或从来源跳转打开。' : '从左侧文件树选择 PDF、Markdown、文本或图片。'}</p>
+          <p>{props.pane === 'secondary' ? '把标签拖到这里，或从来源跳转打开。' : '从左侧文件树选择 PDF、DOCX、Markdown、文本或图片。'}</p>
         </div>
       )
     }
@@ -92,6 +93,9 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
       return (
         <PdfViewer
           file={document.url ?? ''}
+          filePath={activeTab.path}
+          sourceModifiedAt={document.modifiedAt}
+          sourceSize={document.size}
           fileName={activeTab.name}
           annotations={pdfAnnotations}
           initialReadingState={pdfState}
@@ -154,7 +158,40 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
     }
 
     if (activeTab.kind === 'image') {
-      return <ImageViewer src={document.url ?? ''} fileName={activeTab.name} onOpenExternal={() => props.onReveal(activeTab.path)} onError={(error) => props.onError(`无法显示图片：${error.message}`)} />
+      return (
+        <ImageViewer
+          src={document.url ?? ''}
+          filePath={activeTab.path}
+          sourceModifiedAt={document.modifiedAt}
+          sourceSize={document.size}
+          fileName={activeTab.name}
+          onOcrTextChange={(text) => props.onContext(activeTab.path, {
+            visibleText: text,
+            sectionText: text,
+            documentText: text
+          })}
+          onOpenExternal={() => props.onReveal(activeTab.path)}
+          onError={(error) => props.onError(`无法显示图片：${error.message}`)}
+        />
+      )
+    }
+
+    if (activeTab.kind === 'docx') {
+      return (
+        <DocxViewer
+          html={document.html ?? ''}
+          text={document.content}
+          fileName={activeTab.name}
+          warnings={document.warnings}
+          onContextChange={(context) => props.onContext(activeTab.path, context)}
+          onOpenLink={(url) => {
+            const target = resolveProjectFilePath(props.projectPath, activeTab.path, url)
+            if (target) props.onOpenProjectPath(target)
+            else if (/^(?:https?:|mailto:)/iu.test(url)) window.open(url, '_blank', 'noopener,noreferrer')
+          }}
+          onOpenExternal={() => props.onReveal(activeTab.path)}
+        />
+      )
     }
 
     if (activeTab.kind === 'text') {

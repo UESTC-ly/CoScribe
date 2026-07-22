@@ -6,6 +6,8 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 import type { ChatMessage, ContextSnapshot, FileOperationProposal, SourceRef } from '../../shared/types'
+import { MermaidDiagram } from '../viewers/MermaidDiagram'
+import { AiCodeBlock } from './AiCodeBlock'
 import { MarkdownOperationCard } from './MarkdownOperationCard'
 
 export interface MarkdownMessageProps {
@@ -62,7 +64,25 @@ export function MarkdownContent({ content }: { content: string }): React.JSX.Ele
         ),
         input: ({ type, ...props }) => (
           <input type={type} {...props} disabled={type === 'checkbox' || props.disabled} />
-        )
+        ),
+        pre: ({ node, children, ...props }) => {
+          const codeNode = node?.children[0]
+          if (codeNode?.type === 'element' && codeNode.tagName === 'code') {
+            const classNames = codeNode.properties?.className
+            const classes = Array.isArray(classNames) ? classNames.map(String) : [String(classNames ?? '')]
+            const languageClass = classes.find((className) => className.startsWith('language-'))
+            const language = languageClass?.slice('language-'.length)
+            const source = codeNode.children
+              .filter((child) => child.type === 'text')
+              .map((child) => child.value)
+              .join('')
+              .replace(/\n$/u, '')
+
+            if (language?.toLowerCase() === 'mermaid') return <MermaidDiagram code={source} />
+            return <AiCodeBlock code={source} language={language} />
+          }
+          return <pre {...props}>{children}</pre>
+        }
       }}
     >
       {content}

@@ -4,6 +4,6 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['tests/setup.ts'],
-    include: ['src/components/ai/AiWorkspace.test.tsx']
+    include: ['src/components/ai/*.test.tsx']
   }
 })
