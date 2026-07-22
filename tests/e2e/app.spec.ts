@@ -49,7 +49,12 @@ async function launchProject(): Promise<void> {
   electronApp = await electron.launch({
     ...(packagedExecutable ? { executablePath: packagedExecutable } : {}),
     args: packagedExecutable ? ['--project', projectPath] : [appRoot, '--project', projectPath],
-    env: { ...process.env, NODE_ENV: 'test', COSCRIBE_USER_DATA_DIR: userDataPath }
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      COSCRIBE_USER_DATA_DIR: userDataPath,
+      COSCRIBE_E2E_SCREENSHOT_SOURCE: 'app-window'
+    }
   })
   page = await electronApp.firstWindow()
   page.on('console', (message) => {
@@ -160,6 +165,48 @@ test('opens a real local project, searches content, and creates a standard Markd
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect.poll(async () => readFile(notePath, 'utf8')).toContain('标准 Markdown')
   await page.screenshot({ path: testInfo.outputPath('workspace.png') })
+})
+
+test('grants a built-in plugin explicitly and creates a templated daily note', async ({}, testInfo) => {
+  await page.getByRole('button', { name: '插件', exact: true }).click()
+  const dailyCard = page.locator('.plugin-card').filter({ hasText: '每日笔记与模板' })
+  await expect(dailyCard).toBeVisible()
+  await expect(dailyCard.getByText('读取当前项目文件')).toBeVisible()
+  await dailyCard.getByRole('button', { name: '启用并授权每日笔记与模板' }).click()
+  await expect(page.getByRole('dialog').getByText(/这个内置插件将获得：读取当前项目文件；创建或修改当前项目文件/u)).toBeVisible()
+  await page.getByRole('button', { name: '授权并启用' }).click()
+  await expect(dailyCard.getByRole('button', { name: '打开插件' })).toBeEnabled()
+  await dailyCard.getByRole('button', { name: '打开插件' }).click()
+
+  await expect(page.getByRole('region', { name: '每日笔记与模板插件' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('daily-notes-workspace.png') })
+  await page.getByLabel('日期').fill('2026-07-23')
+  await page.getByRole('button', { name: '创建或打开' }).click()
+  const dailyPath = path.join(projectPath, '每日笔记', '2026-07-23.md')
+  await expect.poll(async () => readFile(dailyPath, 'utf8').catch(() => '')).toContain('# 2026-07-23')
+  await expect(page.getByLabel('2026-07-23.md Markdown 编辑器')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('daily-notes-plugin.png') })
+})
+
+test('lazy-loads flashcard, backlink, and diagnostics plugin views after explicit grants', async ({}, testInfo) => {
+  await page.getByRole('button', { name: '插件', exact: true }).click()
+  const openPlugin = async (name: string, regionName: string): Promise<void> => {
+    const card = page.locator('.plugin-card').filter({ hasText: name })
+    await card.getByRole('button', { name: `启用并授权${name}` }).click()
+    await expect(page.getByRole('dialog')).toContainText(name)
+    await page.getByRole('button', { name: '授权并启用' }).click()
+    await card.getByRole('button', { name: '打开插件' }).click()
+    await expect(page.getByRole('region', { name: regionName })).toBeVisible()
+  }
+
+  await openPlugin('闪卡与间隔复习', '闪卡与间隔复习插件')
+  await page.screenshot({ path: testInfo.outputPath('flashcards-workspace.png') })
+  await openPlugin('双向链接', '双向链接插件')
+  await expect(page.getByText('Markdown 笔记')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('backlinks-workspace.png') })
+  await openPlugin('性能诊断', '性能诊断插件')
+  await expect(page.getByText('进程资源')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('diagnostics-workspace.png') })
 })
 
 test('renders Mermaid fenced blocks in Markdown preview', async ({}, testInfo) => {
@@ -428,6 +475,9 @@ test('opens the trusted planner plugin and stores schedule data as Markdown', as
   await page.getByRole('button', { name: '插件', exact: true }).click()
   await expect(page.getByText('可信内置插件')).toBeVisible()
   await expect(page.getByText('当前版本不下载或执行第三方代码')).toBeVisible()
+  await page.getByRole('button', { name: '补充授权计划与日程' }).click()
+  await expect(page.getByRole('dialog')).toContainText('写入 macOS 日历或提醒事项')
+  await page.getByRole('button', { name: '授权并启用' }).click()
   await page.getByRole('button', { name: '打开插件' }).click()
 
   const planner = page.getByRole('region', { name: '计划与日程插件' })
@@ -435,19 +485,20 @@ test('opens the trusted planner plugin and stores schedule data as Markdown', as
   const plannerPath = path.join(projectPath, '计划', '项目计划.md')
   await expect.poll(async () => readFile(plannerPath, 'utf8').catch(() => '')).toContain('coscribe:planner:start')
 
-  await planner.getByLabel('事项', { exact: true }).fill('完成 v2.0.0 本地体验验收')
+  await planner.getByLabel('事项', { exact: true }).fill('完成 v2.1.0 本地体验验收')
   await planner.getByLabel('时间', { exact: true }).fill('10:30')
   await planner.getByLabel('优先级').selectOption('高')
   await planner.getByLabel('备注').fill('检查语音、记忆与插件性能')
   await planner.getByRole('button', { name: '加入日程' }).click()
 
-  await expect(planner.getByText('完成 v2.0.0 本地体验验收')).toBeVisible()
-  await expect.poll(async () => readFile(plannerPath, 'utf8')).toContain('| 10:30 | 完成 v2.0.0 本地体验验收 | 待办 | 高 | 检查语音、记忆与插件性能 |')
+  await expect(planner.getByText('完成 v2.1.0 本地体验验收')).toBeVisible()
+  await expect(planner.getByRole('button', { name: '将 完成 v2.1.0 本地体验验收 同步到日历' })).toBeEnabled()
+  await expect.poll(async () => readFile(plannerPath, 'utf8')).toContain('| 10:30 | 完成 v2.1.0 本地体验验收 | 待办 | 高 | 检查语音、记忆与插件性能 |')
   await planner.screenshot({ path: testInfo.outputPath('planner-plugin.png') })
 
   await planner.getByRole('button', { name: /编辑 Markdown/u }).click()
   await expect(page.getByLabel('项目计划.md Markdown 编辑器')).toBeVisible()
-  await expect(page.getByLabel('Markdown 预览')).toContainText('完成 v2.0.0 本地体验验收')
+  await expect(page.getByLabel('Markdown 预览')).toContainText('完成 v2.1.0 本地体验验收')
 })
 
 test('decodes streaming speech through the isolated native ASR process', async () => {
@@ -730,6 +781,13 @@ test('keeps an AI-created note on preview until the user accepts it', async () =
     await page.getByRole('button', { name: '接受并写入' }).click()
     await expect.poll(async () => readFile(notePath, 'utf8').catch(() => '')).toContain('经过用户确认后才落盘')
     await expect(page.getByLabel('AI 生成笔记.md Markdown 编辑器')).toBeVisible()
+
+    await page.getByRole('button', { name: 'AI 操作', exact: true }).click()
+    const historyItem = page.locator('.operation-history__item').filter({ hasText: '根据当前学习会话创建笔记' })
+    await expect(historyItem).toContainText('已应用')
+    await historyItem.getByRole('button', { name: '撤销这次操作' }).click()
+    await expect.poll(async () => access(notePath).then(() => true).catch(() => false)).toBe(false)
+    await expect(historyItem).toContainText('已撤销')
 
     const capturedRequest = requestBody as Record<string, unknown> | null
     const input = capturedRequest?.['input']

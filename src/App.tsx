@@ -20,6 +20,7 @@ import {
 } from './components/shell'
 import type { MarkdownSaveRequest, PdfTextSelection } from './components/viewers'
 import { PLANNER_FILE_PATH } from './plugins/planner/planner-utils'
+import { PLUGIN_PERMISSION_LABELS, trustedPlugin } from './plugins/registry'
 import {
   clampAiPanelWidth,
   clampProjectNavigatorWidth,
@@ -36,6 +37,7 @@ import {
 } from './store'
 import type {
   AiStreamEvent,
+  AiOperationHistoryEntry,
   Annotation,
   AppSettings,
   ChatImageAttachment,
@@ -61,6 +63,10 @@ const AiWorkspace = lazy(() => import('./components/ai/AiWorkspace').then((modul
 const BrowserWorkspace = lazy(() => import('./components/browser/BrowserWorkspace').then((module) => ({ default: module.BrowserWorkspace })))
 const EditorPane = lazy(() => import('./components/shell/EditorPane').then((module) => ({ default: module.EditorPane })))
 const PlannerWorkspace = lazy(() => import('./plugins/planner/PlannerWorkspace'))
+const DailyNotesWorkspace = lazy(() => import('./plugins/daily-notes/DailyNotesWorkspace'))
+const FlashcardsWorkspace = lazy(() => import('./plugins/flashcards/FlashcardsWorkspace'))
+const BacklinksWorkspace = lazy(() => import('./plugins/backlinks/BacklinksWorkspace'))
+const DiagnosticsWorkspace = lazy(() => import('./plugins/diagnostics/DiagnosticsWorkspace'))
 
 interface PromptState {
   title: string
@@ -159,6 +165,8 @@ function resolvedTheme(settings: AppSettings): 'light' | 'dark' {
 
 export default function App(): React.JSX.Element {
   const state = useAppStore()
+  const projectFiles = useMemo(() => flattenFiles(state.fileTree), [state.fileTree])
+  const pluginFiles = useMemo(() => projectFiles.map((file) => ({ path: file.path, name: file.name, kind: file.kind })), [projectFiles])
   const [booting, setBooting] = useState(true)
   const [hydrated, setHydrated] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -176,6 +184,8 @@ export default function App(): React.JSX.Element {
   const [contextScope, setContextScope] = useState<ContextScope>(DEFAULT_SETTINGS.defaultContextScope)
   const [browserActive, setBrowserActive] = useState(false)
   const [activePluginId, setActivePluginId] = useState<string | null>(null)
+  const [operationHistory, setOperationHistory] = useState<AiOperationHistoryEntry[]>([])
+  const [undoingOperationId, setUndoingOperationId] = useState<string | null>(null)
   const [pendingWebContext, setPendingWebContext] = useState<ContextSnapshot | null>(null)
   const [resizing, setResizing] = useState<'left' | 'ai' | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
@@ -200,11 +210,12 @@ export default function App(): React.JSX.Element {
       // Load the real file tree before mounting the workspace. A slow recursive
       // scan should not briefly look like an empty project, and a broken metadata
       // file must not hide otherwise readable user files.
-      const [treeResult, workspaceResult, sessionsResult, annotationsResult] = await Promise.allSettled([
+      const [treeResult, workspaceResult, sessionsResult, annotationsResult, operationHistoryResult] = await Promise.allSettled([
         window.coscribe.project.tree(),
         window.coscribe.project.getState(),
         window.coscribe.sessions.list(),
-        window.coscribe.annotations.list()
+        window.coscribe.annotations.list(),
+        window.coscribe.project.operationHistory()
       ])
       if (treeResult.status === 'rejected') throw treeResult.reason
 
@@ -222,6 +233,11 @@ export default function App(): React.JSX.Element {
       else warnings.push('会话历史无法恢复，文件内容不受影响。')
       if (annotationsResult.status === 'fulfilled') store.setAnnotations(annotationsResult.value)
       else warnings.push('标注无法恢复，文件内容不受影响。')
+      if (operationHistoryResult.status === 'fulfilled') setOperationHistory(operationHistoryResult.value)
+      else {
+        setOperationHistory([])
+        warnings.push('AI 操作历史无法恢复，文件内容不受影响。')
+      }
 
       const sessions = sessionsResult.status === 'fulfilled' ? sessionsResult.value : []
       if (!sessions.length) store.createSession()
@@ -239,6 +255,7 @@ export default function App(): React.JSX.Element {
     } catch (reason) {
       await window.coscribe.project.close().catch(() => undefined)
       setStore().closeProject()
+      setOperationHistory([])
       hydratedProjectPath.current = null
       setError(reason instanceof Error ? reason.message : '无法恢复项目状态。原始文件不会受到影响。')
       setHydrated(false)
@@ -300,6 +317,11 @@ export default function App(): React.JSX.Element {
   const refreshTree = useCallback(async (): Promise<void> => {
     try { setStore().setFileTree(await window.coscribe.project.tree()) }
     catch (reason) { setError(reason instanceof Error ? reason.message : '文件树刷新失败') }
+  }, [])
+
+  const refreshOperationHistory = useCallback(async (): Promise<void> => {
+    try { setOperationHistory(await window.coscribe.project.operationHistory()) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'AI 操作历史刷新失败。') }
   }, [])
 
   useEffect(() => {
@@ -412,6 +434,7 @@ export default function App(): React.JSX.Element {
               const files = result.files.length ? result.files : [result]
               for (const file of files) store.markDocumentSaved(file)
               store.setFileTree(await window.coscribe.project.tree())
+              setOperationHistory(await window.coscribe.project.operationHistory())
               const first = files[0]
               if (first) {
                 setBrowserActive(false)
@@ -520,6 +543,7 @@ export default function App(): React.JSX.Element {
       setStore().closeProject()
       setBrowserActive(false)
       setActivePluginId(null)
+      setOperationHistory([])
       setPendingWebContext(null)
       hydratedProjectPath.current = null
       setHydrated(false)
@@ -836,6 +860,24 @@ export default function App(): React.JSX.Element {
     })
   }, [imageGenerationRequestId, sendAiMessage, streamingRequestId])
 
+  const generateFlashcards = useCallback(async (topic: string): Promise<void> => {
+    if (streamingRequestId || imageGenerationRequestId) throw new Error('请等待当前 AI 任务结束后再生成闪卡。')
+    setStore().setAiVisible(true)
+    await sendAiMessage({
+      content: [
+        `请基于当前项目的真实资料生成闪卡。学习主题或要求：${topic}`,
+        '每张闪卡必须使用相邻两行“Q:: 问题”和“A:: 答案”，卡片之间空一行。',
+        '问题用于主动回忆和理解检验；答案简洁、准确、能够独立理解，并避免重复。',
+        '把候选卡片写入项目“闪卡”目录下命名清晰的 Markdown 文件。',
+        '必须调用 CoScribe 文件操作工具生成预览；在用户接受预览前不要声称已经保存。'
+      ].join('\n'),
+      attachments: [],
+      scope: 'project',
+      referencedFiles: [],
+      operationMode: 'generate-flashcards'
+    })
+  }, [imageGenerationRequestId, sendAiMessage, streamingRequestId])
+
   const stopAi = useCallback(async (): Promise<void> => {
     if (streamingRequestId) await window.coscribe.ai.stop(streamingRequestId)
   }, [streamingRequestId])
@@ -960,15 +1002,33 @@ export default function App(): React.JSX.Element {
       const files = result.files.length ? result.files : [result]
       for (const file of files) setStore().markDocumentSaved(file)
       await refreshTree()
+      await refreshOperationHistory()
       openPath(files[0]?.path ?? result.path, 'markdown')
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '无法应用文件修改'
       updateOperation(operation.id, { status: 'failed', error: message })
       setError(message)
     } finally { setApplyingOperationId(null) }
-  }, [openPath, refreshTree, updateOperation])
+  }, [openPath, refreshOperationHistory, refreshTree, updateOperation])
 
   const rejectOperation = useCallback((operation: FileOperationProposal): void => updateOperation(operation.id, { status: 'rejected' }), [updateOperation])
+
+  const undoOperation = useCallback(async (entry: AiOperationHistoryEntry): Promise<void> => {
+    setUndoingOperationId(entry.id)
+    try {
+      const result = await window.coscribe.project.undoOperation(entry.id)
+      for (const file of result.files) setStore().markDocumentSaved(file)
+      for (const deletedPath of result.deletedPaths) {
+        setStore().markPathMissing(deletedPath)
+        setStore().removeDocument(deletedPath)
+      }
+      await Promise.all([refreshTree(), refreshOperationHistory()])
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '无法撤销这次 AI 操作。')
+    } finally {
+      setUndoingOperationId(null)
+    }
+  }, [refreshOperationHistory, refreshTree])
 
   const saveSettings = useCallback(async (settings: AppSettings): Promise<void> => {
     const saved = await window.coscribe.settings.save(settings)
@@ -977,21 +1037,48 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const openPlugin = useCallback((pluginId: string): void => {
-    if (!appStore.getState().settings.enabledPlugins.includes(pluginId)) return
+    const plugin = trustedPlugin(pluginId)
+    const settings = appStore.getState().settings
+    if (!plugin || !settings.enabledPlugins.includes(pluginId)) return
+    if (!plugin.permissions.every((permission) => (settings.pluginGrants[pluginId] ?? []).includes(permission))) {
+      setError(`${plugin.name} 需要先在插件中心完成权限授权。`)
+      return
+    }
     setBrowserActive(false)
     setPendingWebContext(null)
     setActivePluginId(pluginId)
   }, [])
 
   const togglePlugin = useCallback(async (pluginId: string, enabled: boolean): Promise<void> => {
+    const plugin = trustedPlugin(pluginId)
+    if (!plugin) return
     const current = appStore.getState().settings
-    const enabledPlugins = enabled
-      ? [...new Set([...current.enabledPlugins, pluginId])]
-      : current.enabledPlugins.filter((id) => id !== pluginId)
-    try {
-      const saved = await window.coscribe.settings.save({ ...current, enabledPlugins })
+    const saveEnabled = async (): Promise<void> => {
+      const latest = appStore.getState().settings
+      const enabledPlugins = [...new Set([...latest.enabledPlugins, pluginId])]
+      const pluginGrants = { ...latest.pluginGrants, [pluginId]: [...plugin.permissions, ...(plugin.optionalPermissions ?? [])] }
+      const saved = await window.coscribe.settings.save({ ...latest, enabledPlugins, pluginGrants })
       setStore().setSettings(saved)
-      if (!enabled) setActivePluginId((active) => active === pluginId ? null : active)
+    }
+    if (enabled) {
+      setConfirm({
+        title: `启用“${plugin.name}”？`,
+        description: `这个内置插件将获得：${[...plugin.permissions, ...(plugin.optionalPermissions ?? [])].map((permission) => PLUGIN_PERMISSION_LABELS[permission]).join('；')}。权限仅作用于当前 CoScribe 功能边界，可随时停用。`,
+        confirmLabel: '授权并启用',
+        onConfirm: async () => {
+          try { await saveEnabled(); setConfirm(null) }
+          catch (reason) { setError(reason instanceof Error ? reason.message : '无法保存插件授权') }
+        }
+      })
+      return
+    }
+    try {
+      const enabledPlugins = current.enabledPlugins.filter((id) => id !== pluginId)
+      const pluginGrants = { ...current.pluginGrants }
+      delete pluginGrants[pluginId]
+      const saved = await window.coscribe.settings.save({ ...current, enabledPlugins, pluginGrants })
+      setStore().setSettings(saved)
+      setActivePluginId((active) => active === pluginId ? null : active)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '无法保存插件设置')
     }
@@ -1087,7 +1174,6 @@ export default function App(): React.JSX.Element {
   const currentSession = selectCurrentSession(state)
   const dirtyPaths = new Set(selectDirtyDocuments(state).map((document) => document.path))
   const activeContext = pendingWebContext ?? state.captureActiveContext(contextScope)
-  const projectFiles = flattenFiles(state.fileTree)
   const visibleLeftWidth = clampProjectNavigatorWidth(state.workspace.leftWidth)
   const aiMaximumWidth = maximumAiPanelWidth(viewportWidth, visibleLeftWidth)
   const visibleAiWidth = clampAiPanelWidth(state.workspace.aiWidth, aiMaximumWidth)
@@ -1096,6 +1182,7 @@ export default function App(): React.JSX.Element {
   const plannerAbsolutePath = `${state.project.path.replace(/\/+$/u, '')}/${PLANNER_FILE_PATH}`
   const hasUnsavedPlan = Boolean(state.documents[plannerAbsolutePath]?.dirty)
   const specialWorkspaceActive = browserActive || Boolean(activePluginId)
+  const activePlugin = activePluginId ? trustedPlugin(activePluginId) : undefined
 
   const paneProps = (pane: PaneId, tabs: OpenTab[]) => ({
     projectPath: state.project!.path,
@@ -1139,8 +1226,8 @@ export default function App(): React.JSX.Element {
       } as React.CSSProperties}
     >
       <header className="app-titlebar">
-        <div className="app-titlebar__project"><strong>{state.project.name}</strong><span>{browserActive ? '资料浏览器 · 原网页' : activePluginId === 'planner' ? PLANNER_FILE_PATH : activeTab?.path ?? state.project.path}</span></div>
-        <div className="app-titlebar__center">{browserActive ? '单标签资料浏览器' : activePluginId === 'planner' ? '可信内置插件' : activeDocument?.dirty ? '未保存' : activeTab ? '本地文件' : '项目工作区'}</div>
+        <div className="app-titlebar__project"><strong>{state.project.name}</strong><span>{browserActive ? '资料浏览器 · 原网页' : activePlugin ? activePlugin.name : activeTab?.path ?? state.project.path}</span></div>
+        <div className="app-titlebar__center">{browserActive ? '单标签资料浏览器' : activePlugin ? '按需加载的可信内置插件' : activeDocument?.dirty ? '未保存' : activeTab ? '本地文件' : '项目工作区'}</div>
         <div className="app-titlebar__actions">
           <button className={`icon-button ${state.workspace.split ? 'is-active' : ''}`} disabled={specialWorkspaceActive} onClick={toggleSplit} title={specialWorkspaceActive ? '当前工作区使用单内容区域' : state.workspace.split ? '关闭分屏' : '左右分屏'} aria-label={state.workspace.split ? '关闭分屏' : '左右分屏'}>{state.workspace.split ? <Columns3 size={16} /> : <Columns2 size={16} />}</button>
           <button className={`icon-button ${state.workspace.aiVisible ? 'is-active' : ''}`} onClick={() => state.setAiVisible(!state.workspace.aiVisible)} title={state.workspace.aiVisible ? '隐藏 AI' : '显示 AI'} aria-label={state.workspace.aiVisible ? '隐藏 AI' : '显示 AI'}>{state.workspace.aiVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}</button>
@@ -1187,7 +1274,11 @@ export default function App(): React.JSX.Element {
             setChatDraftFocusToken((token) => token + 1)
             state.setAiVisible(true)
           }}
+          operationHistory={operationHistory}
+          undoingOperationId={undoingOperationId}
+          onUndoOperation={undoOperation}
           enabledPluginIds={state.settings.enabledPlugins}
+          pluginGrants={state.settings.pluginGrants}
           activePluginId={activePluginId}
           onOpenPlugin={openPlugin}
           onTogglePlugin={togglePlugin}
@@ -1212,8 +1303,17 @@ export default function App(): React.JSX.Element {
                 onOpenMarkdown={(path) => openPath(path, 'markdown')}
                 onFileChanged={plannerFileChanged}
                 onGenerateWithAi={generateProjectPlan}
+                calendarGranted={(state.settings.pluginGrants.planner ?? []).includes('calendar:write')}
                 onOpenSettings={() => setSettingsOpen(true)}
               />
+            ) : activePluginId === 'daily-notes' ? (
+              <DailyNotesWorkspace projectName={state.project.name} onOpenMarkdown={(path) => openPath(path, 'markdown')} onFileChanged={plannerFileChanged} />
+            ) : activePluginId === 'flashcards' ? (
+              <FlashcardsWorkspace files={pluginFiles} aiConfigured={isConfigured} onOpenMarkdown={(path) => openPath(path, 'markdown')} onGenerateWithAi={generateFlashcards} onOpenSettings={() => setSettingsOpen(true)} />
+            ) : activePluginId === 'backlinks' ? (
+              <BacklinksWorkspace activePath={activeTab?.kind === 'markdown' ? activeTab.path : undefined} onOpenMarkdown={(path) => openPath(path, 'markdown')} />
+            ) : activePluginId === 'diagnostics' ? (
+              <DiagnosticsWorkspace />
             ) : (
               <div className="editor-workbench">
                 <EditorPane {...paneProps('primary', primaryTabs)} />

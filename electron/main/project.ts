@@ -23,6 +23,8 @@ import { app, dialog, shell } from 'electron'
 
 import {
   DEFAULT_WORKSPACE_STATE,
+  type AiOperationHistoryEntry,
+  type AppliedMarkdownOperation,
   type Annotation,
   type ChatImageAttachment,
   type ChatMessage,
@@ -34,6 +36,7 @@ import {
   type FileOperationApplyResult,
   type FileOperationProposal,
   type FileReadResult,
+  type FileOperationUndoResult,
   type MarkdownFileOperation,
   type OcrLine,
   type OcrResult,
@@ -64,11 +67,23 @@ const MAX_WEB_CAPTURE_PDF_SIZE = 256 * 1024 * 1024
 const MAX_AI_FILE_OPERATIONS = 50
 const MAX_AI_OPERATION_CONTENT = 8 * 1024 * 1024
 const MAX_AI_OPERATION_TOTAL_CONTENT = 32 * 1024 * 1024
+const MAX_AI_OPERATION_HISTORY = 30
+const MAX_AI_OPERATION_HISTORY_CONTENT = 32 * 1024 * 1024
 const MAX_SESSIONS = 200
 const MAX_MESSAGES_PER_SESSION = 2_000
 const MAX_MESSAGE_CHARS = 2 * 1024 * 1024
 const MAX_OCR_RESULTS = 2_000
 const MAX_OCR_TEXT_CHARS = 4 * 1024 * 1024
+const MAX_PLUGIN_DATA_BYTES = 4 * 1024 * 1024
+
+type ProjectMetadataName =
+  | 'workspace'
+  | 'sessions'
+  | 'annotations'
+  | 'ocr'
+  | 'knowledge-index'
+  | 'ai-operations'
+  | 'plugin-data'
 
 const IGNORED_PROJECT_ENTRY_NAMES = new Set([
   METADATA_DIRECTORY,
@@ -246,6 +261,7 @@ function normalizedWorkspace(input: unknown, root: string): WorkspaceState {
     navSection:
       candidate.navSection === 'sessions' || candidate.navSection === 'search' || candidate.navSection === 'annotations' ||
       candidate.navSection === 'memory' || candidate.navSection === 'plugins'
+      || candidate.navSection === 'operations'
         ? candidate.navSection
         : 'files',
     aiVisible: candidate.aiVisible !== false,
@@ -543,6 +559,40 @@ function normalizedOcrWarnings(value: unknown): string[] | undefined {
   return warnings.length ? warnings : undefined
 }
 
+function normalizedOperationHistory(value: unknown, root: string): AiOperationHistoryEntry[] {
+  if (!Array.isArray(value)) return []
+  let retainedContent = 0
+  return value.slice(0, MAX_AI_OPERATION_HISTORY).flatMap((candidate): AiOperationHistoryEntry[] => {
+    if (!isRecord(candidate) || typeof candidate.id !== 'string' || typeof candidate.proposalId !== 'string') return []
+    if (!Array.isArray(candidate.operations) || !candidate.operations.length || candidate.operations.length > MAX_AI_FILE_OPERATIONS) return []
+    const operations = candidate.operations.flatMap((raw): AppliedMarkdownOperation[] => {
+      if (!isRecord(raw) || (raw.kind !== 'create' && raw.kind !== 'append' && raw.kind !== 'replace')) return []
+      const targetPath = metadataProjectPath(raw.targetPath, root)
+      const beforeContent = raw.beforeContent === null ? null : text(raw.beforeContent, MAX_AI_OPERATION_CONTENT)
+      const afterContent = text(raw.afterContent, MAX_AI_OPERATION_CONTENT)
+      if (!targetPath || !/\.(?:md|markdown)$/iu.test(targetPath) || beforeContent === undefined || afterContent === undefined) return []
+      return [{ kind: raw.kind, targetPath, beforeContent, afterContent }]
+    })
+    if (operations.length !== candidate.operations.length) return []
+    const contentSize = operations.reduce(
+      (total, operation) => total + Buffer.byteLength(operation.beforeContent ?? '') + Buffer.byteLength(operation.afterContent),
+      0
+    )
+    if (retainedContent + contentSize > MAX_AI_OPERATION_HISTORY_CONTENT) return []
+    retainedContent += contentSize
+    const status = candidate.status === 'undone' ? 'undone' : 'applied'
+    return [{
+      id: candidate.id,
+      proposalId: candidate.proposalId,
+      summary: text(candidate.summary, 500) ?? 'AI 文件操作',
+      appliedAt: timestamp(candidate.appliedAt, Date.now()),
+      status,
+      ...(status === 'undone' ? { undoneAt: timestamp(candidate.undoneAt, Date.now()) } : {}),
+      operations
+    }]
+  })
+}
+
 export class ProjectService {
   private guardValue: ProjectPathGuard | null = null
   private projectRevision = 0
@@ -592,7 +642,7 @@ export class ProjectService {
     return path.join(app.getPath('userData'), 'recent-projects.json')
   }
 
-  private async metadataFile(name: 'workspace' | 'sessions' | 'annotations' | 'ocr'): Promise<string> {
+  private async metadataFile(name: ProjectMetadataName): Promise<string> {
     await this.ensureMetadata(this.guard.root)
     const filePath = path.join(this.guard.root, METADATA_DIRECTORY, `${name}.json`)
     try {
@@ -606,7 +656,11 @@ export class ProjectService {
     return filePath
   }
 
-  private async writeMetadata(name: 'workspace' | 'sessions' | 'annotations' | 'ocr', value: unknown): Promise<void> {
+  async readMetadata<T>(name: ProjectMetadataName, fallback: T): Promise<T> {
+    return readJson<T>(await this.metadataFile(name), fallback)
+  }
+
+  async writeMetadata(name: ProjectMetadataName, value: unknown): Promise<void> {
     const filePath = await this.metadataFile(name)
     const directoryIdentity = await this.guard.identity(path.dirname(filePath), 'directory')
     const verify = () => this.guard.verifyIdentity(directoryIdentity)
@@ -879,6 +933,111 @@ export class ProjectService {
   async saveAnnotations(annotations: Annotation[]): Promise<void> {
     if (!Array.isArray(annotations)) throw new Error('标注数据格式无效。')
     await this.writeMetadata('annotations', normalizeAnnotationsForProject(annotations, this.guard.root))
+  }
+
+  async pluginData(pluginId: string): Promise<unknown> {
+    if (typeof pluginId !== 'string' || !/^[a-z0-9-]{1,80}$/u.test(pluginId)) throw new Error('插件 ID 无效。')
+    const data = await this.readMetadata<Record<string, unknown>>('plugin-data', {})
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+    return Object.prototype.hasOwnProperty.call(data, pluginId) ? data[pluginId] : null
+  }
+
+  async savePluginData(pluginId: string, value: unknown): Promise<void> {
+    if (typeof pluginId !== 'string' || !/^[a-z0-9-]{1,80}$/u.test(pluginId)) throw new Error('插件 ID 无效。')
+    let serialized: string
+    try {
+      serialized = JSON.stringify(value)
+    } catch {
+      throw new Error('插件数据必须可以安全序列化为 JSON。')
+    }
+    if (serialized === undefined || Buffer.byteLength(serialized) > MAX_PLUGIN_DATA_BYTES) throw new Error('插件数据超过 4 MB 上限。')
+    const existing = await this.readMetadata<Record<string, unknown>>('plugin-data', {})
+    const next = existing && typeof existing === 'object' && !Array.isArray(existing) ? { ...existing } : {}
+    next[pluginId] = JSON.parse(serialized) as unknown
+    if (Buffer.byteLength(JSON.stringify(next)) > MAX_PLUGIN_DATA_BYTES) throw new Error('项目插件数据总量超过 4 MB 上限。')
+    await this.writeMetadata('plugin-data', next)
+  }
+
+  async operationHistory(): Promise<AiOperationHistoryEntry[]> {
+    return normalizedOperationHistory(await this.readMetadata<unknown>('ai-operations', []), this.guard.root)
+  }
+
+  private async recordOperationHistory(
+    proposal: FileOperationProposal,
+    applied: Array<{ operation: MarkdownFileOperation; result: FileReadResult }>
+  ): Promise<AiOperationHistoryEntry> {
+    const entry: AiOperationHistoryEntry = {
+      id: randomUUID(),
+      proposalId: proposal.id,
+      summary: proposal.summary,
+      appliedAt: Date.now(),
+      status: 'applied',
+      operations: applied.map(({ operation, result }) => ({
+        kind: operation.kind,
+        targetPath: result.path,
+        beforeContent: operation.kind === 'create' ? null : (operation.originalContent ?? ''),
+        afterContent: result.content
+      }))
+    }
+    const history = normalizedOperationHistory([entry, ...await this.operationHistory()], this.guard.root)
+    if (!history.some((item) => item.id === entry.id)) throw new Error('本次操作过大，无法建立安全撤销记录。')
+    await this.writeMetadata('ai-operations', history)
+    return entry
+  }
+
+  async undoOperation(historyId: string): Promise<FileOperationUndoResult> {
+    if (typeof historyId !== 'string' || !historyId.trim()) throw new Error('撤销记录 ID 无效。')
+    const history = await this.operationHistory()
+    const entry = history.find((item) => item.id === historyId)
+    if (!entry) throw new Error('找不到这条 AI 操作记录。')
+    if (entry.status !== 'applied') throw new Error('这条 AI 操作已经撤销。')
+
+    const currentFiles = new Map<string, FileReadResult>()
+    for (const operation of entry.operations) {
+      const current = await this.read(operation.targetPath)
+      if (current.content !== operation.afterContent) {
+        throw new Error(`${path.basename(operation.targetPath)} 在 AI 写入后又被修改，不能安全撤销。`)
+      }
+      currentFiles.set(operation.targetPath, current)
+    }
+
+    const restoredFiles: FileReadResult[] = []
+    const deletedPaths: string[] = []
+    const completed: AppliedMarkdownOperation[] = []
+    try {
+      for (const operation of [...entry.operations].reverse()) {
+        const current = currentFiles.get(operation.targetPath)
+        if (!current) throw new Error('撤销预检结果丢失。')
+        if (operation.kind === 'create') {
+          await unlink(await this.guard.existing(operation.targetPath, 'file'))
+          deletedPaths.push(operation.targetPath)
+        } else {
+          restoredFiles.push(await this.saveMarkdown(operation.targetPath, operation.beforeContent ?? '', current.modifiedAt))
+        }
+        completed.push(operation)
+      }
+
+      const updated: AiOperationHistoryEntry = { ...entry, status: 'undone', undoneAt: Date.now() }
+      await this.writeMetadata('ai-operations', history.map((item) => item.id === entry.id ? updated : item))
+      return { entry: updated, files: restoredFiles, deletedPaths }
+    } catch (error) {
+      const rollbackFailures: string[] = []
+      for (const operation of [...completed].reverse()) {
+        try {
+          if (operation.kind === 'create') {
+            await this.createMarkdown(operation.targetPath, operation.afterContent)
+          } else {
+            const current = await this.read(operation.targetPath)
+            await this.saveMarkdown(operation.targetPath, operation.afterContent, current.modifiedAt)
+          }
+        } catch (rollbackError) {
+          rollbackFailures.push(`${path.basename(operation.targetPath)}：${rollbackError instanceof Error ? rollbackError.message : '未知错误'}`)
+        }
+      }
+      const reason = error instanceof Error ? error.message : '撤销失败。'
+      if (rollbackFailures.length) throw new Error(`${reason} 恢复撤销前状态时仍有异常：${rollbackFailures.join('；')}`)
+      throw new Error(`${reason} 已恢复撤销前状态。`)
+    }
   }
 
   urlFor(canonicalPath: string): string {
@@ -1583,8 +1742,9 @@ export class ProjectService {
         files.push(result)
         applied.push({ operation, result })
       }
+      const history = await this.recordOperationHistory(proposal, applied)
       const first = files[0]
-      return { ...first, files }
+      return { ...first, files, historyId: history.id }
     } catch (error) {
       const rollbackFailures: string[] = []
       for (const completed of [...applied].reverse()) {

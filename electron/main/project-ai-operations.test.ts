@@ -44,7 +44,15 @@ describe('AI Markdown operations', () => {
       path.join('course', 'topics', 'topic.md')
     ])
     expect(result.path).toBe(result.files[0].path)
+    expect(result.historyId).toEqual(expect.any(String))
     await expect(readFile(path.join(root, 'course/topics/topic.md'), 'utf8')).resolves.toBe('# Topic')
+
+    const [history] = await service.operationHistory()
+    expect(history).toMatchObject({ id: result.historyId, status: 'applied', summary: '创建课程笔记项目' })
+    const undone = await service.undoOperation(result.historyId)
+    expect(undone.deletedPaths).toHaveLength(2)
+    await expect(lstat(path.join(root, 'course/index.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await service.operationHistory())[0]).toMatchObject({ id: result.historyId, status: 'undone' })
   })
 
   it('keeps single-file append compatible and rejects a modified confirmation payload', async () => {
@@ -67,6 +75,24 @@ describe('AI Markdown operations', () => {
     const result = await service.applyAiOperation({ ...proposal, status: 'accepted' })
     expect(result.files).toHaveLength(1)
     await expect(readFile(note, 'utf8')).resolves.toBe('# Existing\nNew paragraph')
+
+    const undone = await service.undoOperation(result.historyId)
+    expect(undone.files).toHaveLength(1)
+    await expect(readFile(note, 'utf8')).resolves.toBe('# Existing\n')
+  })
+
+  it('refuses undo when a user edited the generated result afterward', async () => {
+    const { root, service } = await projectService()
+    const note = path.join(root, 'note.md')
+    await writeFile(note, '# Existing\n')
+    const proposal = await service.prepareAiOperation({
+      kind: 'append', targetPath: note, proposedContent: 'AI text', summary: '追加内容'
+    })
+    const result = await service.applyAiOperation({ ...proposal, status: 'accepted' })
+    await writeFile(note, '# Existing\nAI text\nUser edit')
+
+    await expect(service.undoOperation(result.historyId)).rejects.toThrow(/又被修改/u)
+    await expect(readFile(note, 'utf8')).resolves.toContain('User edit')
   })
 
   it('rejects traversal, duplicate targets, and file-as-parent conflicts before preview', async () => {

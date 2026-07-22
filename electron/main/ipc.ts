@@ -5,6 +5,7 @@ import type {
   AiOcrRequest,
   Annotation,
   AppSettings,
+  CalendarSyncRequest,
   ChatSession,
   FileOperationProposal,
   ImageGenerationRequest,
@@ -13,8 +14,13 @@ import type {
   ResearchBrowserExtractMode,
   WorkspaceState
 } from '../../src/shared/types'
+import type { PluginPermission } from '../../src/shared/types'
+import { trustedPlugin } from '../../src/plugins/registry'
 import { IPC } from '../ipc-channels'
 import { AiService } from './ai'
+import { CalendarService } from './calendar'
+import { DiagnosticsService } from './diagnostics'
+import { KnowledgeIndexService } from './knowledge-index'
 import { ResearchBrowserService } from './browser'
 import { PdfTextService } from './pdf'
 import { ProjectService } from './project'
@@ -32,6 +38,9 @@ interface Services {
   screenshot: ScreenshotService
   browser: ResearchBrowserService
   speech: SpeechRecognitionService
+  knowledge: KnowledgeIndexService
+  calendar: CalendarService
+  diagnostics: DiagnosticsService
 }
 
 function assertTrustedSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
@@ -64,7 +73,15 @@ function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1])
 }
 
 export function registerIpc(services: Services): void {
-  const { project, pdf, search, settings, ai, screenshot, browser, speech } = services
+  const { project, pdf, search, settings, ai, screenshot, browser, speech, knowledge, calendar, diagnostics } = services
+  const requirePlugin = async (pluginId: string, permission: PluginPermission): Promise<void> => {
+    const manifest = trustedPlugin(pluginId)
+    const preferences = await settings.get()
+    if (!manifest || ![...manifest.permissions, ...(manifest.optionalPermissions ?? [])].includes(permission) || !preferences.enabledPlugins.includes(pluginId)) {
+      throw new Error('插件未启用或未声明所需权限。')
+    }
+    if (!(preferences.pluginGrants[pluginId] ?? []).includes(permission)) throw new Error('插件权限尚未获得用户授权。')
+  }
 
   handle(IPC.appVersion, () => app.getVersion())
 
@@ -82,6 +99,8 @@ export function registerIpc(services: Services): void {
   handle(IPC.projectSaveState, (_event, state: WorkspaceState) => project.saveState(state))
   handle(IPC.projectMemory, () => project.memory())
   handle(IPC.projectSaveMemory, (_event, content: string) => project.saveMemory(content))
+  handle(IPC.projectOperationHistory, () => project.operationHistory())
+  handle(IPC.projectUndoOperation, (_event, historyId: string) => project.undoOperation(historyId))
 
   handle(IPC.fileRead, (_event, filePath: string) => project.read(filePath))
   handle(IPC.fileSaveMarkdown, (_event, filePath: string, content: string, expectedModifiedAt?: number) =>
@@ -106,13 +125,28 @@ export function registerIpc(services: Services): void {
 
   handle(IPC.searchQuery, (event, requestId: string, query: string) => search.query(event.sender, requestId, query))
   handle(IPC.searchCancel, (_event, requestId: string) => search.cancel(requestId))
+  handle(IPC.knowledgeStatus, async () => { await requirePlugin('diagnostics', 'diagnostics:read'); return knowledge.status() })
+  handle(IPC.knowledgeRebuild, async () => { await requirePlugin('diagnostics', 'diagnostics:read'); return knowledge.rebuild() })
+  handle(IPC.knowledgeBacklinks, async () => { await requirePlugin('backlinks', 'project:read'); return knowledge.backlinks() })
+  handle(IPC.pluginData, async (_event, pluginId: string) => { await requirePlugin(pluginId, 'project:read'); return project.pluginData(pluginId) })
+  handle(IPC.pluginSaveData, async (_event, pluginId: string, value: unknown) => { await requirePlugin(pluginId, 'project:write'); return project.savePluginData(pluginId, value) })
+  handle(IPC.calendarSync, async (_event, request: CalendarSyncRequest) => { await requirePlugin('planner', 'calendar:write'); return calendar.sync(request) })
+  handle(IPC.diagnosticsSnapshot, async () => { await requirePlugin('diagnostics', 'diagnostics:read'); return diagnostics.snapshot() })
 
   handle(IPC.pdfPageText, (_event, filePath: string, page: number) => pdf.pageText(filePath, page))
   handle(IPC.pdfSearch, (_event, filePath: string, query: string) => pdf.search(filePath, query))
 
   handle(IPC.ocrGet, (_event, filePath: string, page?: number) => project.getOcr(filePath, page))
-  handle(IPC.ocrSave, (_event, result: OcrResult) => project.saveOcr(result))
-  handle(IPC.ocrEnhance, (_event, request: AiOcrRequest) => ai.enhanceImage(request))
+  handle(IPC.ocrSave, async (_event, result: OcrResult) => {
+    const saved = await project.saveOcr(result)
+    knowledge.invalidate(saved.path)
+    return saved
+  })
+  handle(IPC.ocrEnhance, async (_event, request: AiOcrRequest) => {
+    const saved = await ai.enhanceImage(request)
+    knowledge.invalidate(saved.path)
+    return saved
+  })
   handle(IPC.ocrStop, (_event, requestId: string) => ai.stopOcr(requestId))
 
   handle(IPC.screenshotCapture, () => screenshot.capture())

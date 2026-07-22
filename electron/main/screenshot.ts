@@ -5,6 +5,7 @@ import type { ChatImageAttachment } from '../../src/shared/types'
 import { screenshotCropBounds, type ScreenshotRegion } from './screenshot-region'
 
 const CAPTURE_SETTLE_MS = 180
+const CAPTURE_RETRY_DELAYS_MS = [0, 140, 320] as const
 const MIN_SELECTION_SIZE = 8
 
 interface ScreenshotSelection extends ScreenshotRegion {
@@ -148,6 +149,20 @@ function encodeScreenshot(image: NativeImage): Buffer {
   throw new Error('截图文件过大，无法加入聊天。请降低显示器分辨率后重试。')
 }
 
+async function captureDisplayImage(display: Display, captureSize: { width: number; height: number }): Promise<NativeImage> {
+  for (const retryDelay of CAPTURE_RETRY_DELAYS_MS) {
+    if (retryDelay > 0) await delay(retryDelay)
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: captureSize,
+      fetchWindowIcons: false
+    })
+    const source = sources.find((candidate) => candidate.display_id === String(display.id)) ?? sources[0]
+    if (source && !source.thumbnail.isEmpty()) return source.thumbnail
+  }
+  throw new Error('没有获取到可捕获的显示器图像。请检查系统的屏幕录制权限。')
+}
+
 export class ScreenshotService {
   private pendingCapture: Promise<ChatImageAttachment | null> | null = null
 
@@ -224,26 +239,27 @@ export class ScreenshotService {
       width: Math.max(1, Math.round(display.size.width * display.scaleFactor)),
       height: Math.max(1, Math.round(display.size.height * display.scaleFactor))
     }
+    // Screen Recording consent is controlled by macOS and cannot be granted by
+    // Playwright. The explicit E2E source keeps the real overlay/crop/attachment
+    // path deterministic without weakening production capture permissions.
+    const e2eImage = process.env.COSCRIBE_E2E_SCREENSHOT_SOURCE === 'app-window'
+      ? await window.webContents.capturePage()
+      : null
 
     window.hide()
     try {
       await delay(CAPTURE_SETTLE_MS)
-      const sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: captureSize,
-        fetchWindowIcons: false
-      })
-      const source = sources.find((candidate) => candidate.display_id === String(display.id)) ?? sources[0]
-      if (!source) throw new Error('没有找到可捕获的显示器。请检查系统的屏幕录制权限。')
-      if (source.thumbnail.isEmpty()) throw new Error('没有获取到屏幕图像。请检查系统的屏幕录制权限。')
+      const displayImage = e2eImage && !e2eImage.isEmpty()
+        ? e2eImage
+        : await captureDisplayImage(display, captureSize)
       const selection = await this.selectRegion(display)
       if (!selection) return null
       const crop = screenshotCropBounds(
         selection,
         { width: selection.viewportWidth, height: selection.viewportHeight },
-        source.thumbnail.getSize()
+        displayImage.getSize()
       )
-      const bytes = encodeScreenshot(source.thumbnail.crop(crop))
+      const bytes = encodeScreenshot(displayImage.crop(crop))
       const now = Date.now()
       return {
         id: `screenshot-${now}-${Math.random().toString(36).slice(2, 10)}`,

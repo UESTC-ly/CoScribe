@@ -189,6 +189,30 @@ describe('AI Markdown operation mapping', () => {
       summary: 'Create notes'
     })
   })
+
+  it('confines flashcard proposals to Q/A Markdown under the flashcard directory', async () => {
+    const prepareAiOperation = vi.fn().mockResolvedValue(undefined)
+    const ai = new AiService(
+      {} as SettingsStore,
+      { info: { path: '/project' }, prepareAiOperation } as unknown as ProjectService,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+    const exposed = ai as unknown as {
+      operationFromTool(tool: { name: string; arguments: string }, mode?: 'generate-flashcards'): Promise<unknown>
+    }
+
+    await expect(exposed.operationFromTool({
+      name: 'propose_markdown_operation',
+      arguments: JSON.stringify({ kind: 'create', targetPath: 'notes/cards.md', proposedContent: 'Q:: Why?\nA:: Because.' })
+    }, 'generate-flashcards')).rejects.toThrow(/“闪卡”目录/u)
+
+    await exposed.operationFromTool({
+      name: 'propose_markdown_operation',
+      arguments: JSON.stringify({ kind: 'create', targetPath: '闪卡/RAG.md', proposedContent: 'Q:: What is RAG?\nA:: Retrieval-augmented generation.' })
+    }, 'generate-flashcards')
+    expect(prepareAiOperation).toHaveBeenCalledWith(expect.objectContaining({ targetPath: '闪卡/RAG.md' }))
+  })
 })
 
 describe('GPT-Image 2 request and response contract', () => {

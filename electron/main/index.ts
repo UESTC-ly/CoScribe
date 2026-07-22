@@ -6,6 +6,9 @@ import { app, BrowserWindow, globalShortcut, net, protocol, session, shell, type
 
 import { IPC } from '../ipc-channels'
 import { AiService } from './ai'
+import { CalendarService } from './calendar'
+import { DiagnosticsService } from './diagnostics'
+import { KnowledgeIndexService } from './knowledge-index'
 import { ResearchBrowserService } from './browser'
 import { registerIpc } from './ipc'
 import { PdfTextService } from './pdf'
@@ -80,6 +83,7 @@ function trustedRendererUrl(value: string): boolean {
 
 const settings = new SettingsStore()
 let pdf: PdfTextService
+let knowledge: KnowledgeIndexService
 const projectLifecycle = {
   ai: null as AiService | null,
   browser: null as ResearchBrowserService | null,
@@ -90,15 +94,20 @@ const project = new ProjectService(
   (events) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.projectFilesChanged, events)
   },
-  (filePath) => pdf?.invalidate(filePath),
+  (filePath) => {
+    pdf?.invalidate(filePath)
+    knowledge?.invalidate(filePath)
+  },
   () => {
     projectLifecycle.ai?.stopAll()
     projectLifecycle.browser?.close()
     projectLifecycle.speech?.stopAll()
+    knowledge?.reset()
   }
 )
 pdf = new PdfTextService(() => project.guard)
-const search = new ProjectSearchService(project, pdf)
+knowledge = new KnowledgeIndexService(project, pdf)
+const search = new ProjectSearchService(project, knowledge)
 const ai = new AiService(settings, project, pdf, search)
 projectLifecycle.ai = ai
 const screenshot = new ScreenshotService(() => mainWindow)
@@ -106,6 +115,8 @@ const speech = new SpeechRecognitionService()
 projectLifecycle.speech = speech
 const browser = new ResearchBrowserService(() => mainWindow, project)
 projectLifecycle.browser = browser
+const calendar = new CalendarService()
+const diagnostics = new DiagnosticsService(knowledge, settings, speech)
 
 async function openExternalProject(projectPath: string): Promise<void> {
   await project.openPath(projectPath)
@@ -238,7 +249,7 @@ void app.whenReady().then(() => {
       trustedRendererUrl(webContents.getURL())
     )
   })
-  registerIpc({ project, pdf, search, settings, ai, screenshot, browser, speech })
+  registerIpc({ project, pdf, search, settings, ai, screenshot, browser, speech, knowledge, calendar, diagnostics })
   protocol.handle('coscribe-app', async (request) => {
     try {
       const parsed = new URL(request.url)

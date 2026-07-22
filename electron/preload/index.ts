@@ -46,6 +46,8 @@ const api: CoScribeAPI = {
     saveState: (state: WorkspaceState) => ipcRenderer.invoke(IPC.projectSaveState, state),
     memory: () => ipcRenderer.invoke(IPC.projectMemory),
     saveMemory: (content: string) => ipcRenderer.invoke(IPC.projectSaveMemory, content),
+    operationHistory: () => ipcRenderer.invoke(IPC.projectOperationHistory),
+    undoOperation: (historyId: string) => ipcRenderer.invoke(IPC.projectUndoOperation, historyId),
     onFilesChanged: (listener: (events: FileChangeEvent[]) => void) => subscribe(IPC.projectFilesChanged, listener)
   },
   file: {
@@ -77,6 +79,21 @@ const api: CoScribeAPI = {
     query: (requestId: string, query: string) => ipcRenderer.invoke(IPC.searchQuery, requestId, query),
     cancel: (requestId: string) => ipcRenderer.invoke(IPC.searchCancel, requestId),
     onProgress: (listener: (progress: SearchProgress) => void) => subscribe(IPC.searchProgress, listener)
+  },
+  knowledge: {
+    status: () => ipcRenderer.invoke(IPC.knowledgeStatus),
+    rebuild: () => ipcRenderer.invoke(IPC.knowledgeRebuild),
+    backlinks: () => ipcRenderer.invoke(IPC.knowledgeBacklinks)
+  },
+  plugins: {
+    data: (pluginId: string) => ipcRenderer.invoke(IPC.pluginData, pluginId),
+    saveData: (pluginId: string, value: unknown) => ipcRenderer.invoke(IPC.pluginSaveData, pluginId, value)
+  },
+  calendar: {
+    sync: (request) => ipcRenderer.invoke(IPC.calendarSync, request)
+  },
+  diagnostics: {
+    snapshot: () => ipcRenderer.invoke(IPC.diagnosticsSnapshot)
   },
   pdf: {
     pageText: (filePath: string, page: number) => ipcRenderer.invoke(IPC.pdfPageText, filePath, page),

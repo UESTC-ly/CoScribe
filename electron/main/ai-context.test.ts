@@ -2,7 +2,7 @@ import path from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ContextSnapshot, SearchResult } from '../../src/shared/types'
+import type { AiOperationMode, ContextSnapshot, SearchResult } from '../../src/shared/types'
 import { AiService, organizationRetrievalQuery } from './ai'
 import type { PdfTextService } from './pdf'
 import type { ProjectService } from './project'
@@ -70,7 +70,7 @@ function service(results: SearchResult[] = []) {
     validatedContext(
       value: ContextSnapshot,
       question: string,
-      operationMode?: 'organize-project-notes'
+      operationMode?: AiOperationMode
     ): Promise<{ text: string; sources: unknown[] }>
   }
   return { exposed, retrieve, tree }
@@ -136,6 +136,20 @@ describe('AI context scope boundaries', () => {
     expect(result.text).toContain('lesson.md')
     expect(result.text).not.toContain('当前笔记写入目标')
     expect(result.text).not.toContain('默认对此文件使用 append')
+  })
+
+  it('grounds flashcard generation in project retrieval and the bounded project tree', async () => {
+    const resultPath = path.join(projectPath, 'knowledge', 'rag.md')
+    const { exposed, retrieve, tree } = service([{
+      id: 'rag-result', type: 'content', path: resultPath, title: 'rag.md', excerpt: 'RAG uses retrieval.', kind: 'markdown', line: 3, score: 90
+    }])
+    const result = await exposed.validatedContext(snapshot('project'), 'RAG retrieval', 'generate-flashcards')
+
+    expect(tree).toHaveBeenCalledOnce()
+    expect(retrieve).toHaveBeenCalledWith('RAG retrieval', 10)
+    expect(result.text).toContain('闪卡模式')
+    expect(result.text).toContain('RAG uses retrieval.')
+    expect(result.sources).toEqual([expect.objectContaining({ path: resultPath, line: 3 })])
   })
 
   it('keeps extracted PPTX text and source type in document context', async () => {

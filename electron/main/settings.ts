@@ -7,8 +7,10 @@ import {
   type AiProtocol,
   type AppSettings,
   type ContextScope,
+  type PluginPermission,
   type ReasoningEffort
 } from '../../src/shared/types'
+import { TRUSTED_PLUGIN_REGISTRY } from '../../src/plugins/registry'
 import { atomicWriteJson, readJson } from './storage'
 
 interface StoredSettings {
@@ -20,7 +22,10 @@ interface StoredSettings {
 const CONTEXT_SCOPES = new Set<ContextScope>(['selection', 'visible', 'document', 'project', 'general'])
 const AI_PROTOCOLS = new Set<AiProtocol>(['auto', 'responses', 'chat-completions'])
 const SUPPORTED_REASONING_EFFORTS = new Set<ReasoningEffort>(REASONING_EFFORTS)
-const TRUSTED_PLUGIN_IDS = new Set(['planner'])
+const TRUSTED_PLUGIN_IDS = new Set(TRUSTED_PLUGIN_REGISTRY.map((plugin) => plugin.id))
+const TRUSTED_PLUGIN_PERMISSIONS = new Map(
+  TRUSTED_PLUGIN_REGISTRY.map((plugin) => [plugin.id, new Set<PluginPermission>([...plugin.permissions, ...(plugin.optionalPermissions ?? [])])])
+)
 export const MAX_CUSTOM_SYSTEM_PROMPT_CHARS = 20_000
 
 export function isLoopbackHost(hostname: string): boolean {
@@ -77,6 +82,19 @@ export function sanitizeSettings(
   const enabledPlugins = Array.isArray(input.enabledPlugins)
     ? [...new Set(input.enabledPlugins.filter((id): id is string => typeof id === 'string' && TRUSTED_PLUGIN_IDS.has(id)))]
     : [...DEFAULT_SETTINGS.enabledPlugins]
+  const rawGrants = input.pluginGrants && typeof input.pluginGrants === 'object' && !Array.isArray(input.pluginGrants)
+    ? input.pluginGrants
+    : DEFAULT_SETTINGS.pluginGrants
+  const pluginGrants = Object.fromEntries(
+    Object.entries(rawGrants).flatMap(([pluginId, permissions]) => {
+      const allowed = TRUSTED_PLUGIN_PERMISSIONS.get(pluginId)
+      if (!allowed || !Array.isArray(permissions)) return []
+      const grants = [...new Set(permissions.filter(
+        (permission): permission is PluginPermission => typeof permission === 'string' && allowed.has(permission as PluginPermission)
+      ))]
+      return [[pluginId, grants]]
+    })
+  )
 
   return {
     baseUrl: sanitizeBaseUrl(input.baseUrl, DEFAULT_SETTINGS.baseUrl, 'AI 服务地址'),
@@ -96,7 +114,8 @@ export function sanitizeSettings(
     customSystemPrompt,
     projectMemoryEnabled:
       typeof input.projectMemoryEnabled === 'boolean' ? input.projectMemoryEnabled : DEFAULT_SETTINGS.projectMemoryEnabled,
-    enabledPlugins
+    enabledPlugins,
+    pluginGrants
   }
 }
 

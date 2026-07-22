@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
   ArrowUpRight,
+  BellPlus,
   CalendarCheck2,
   CalendarDays,
+  CalendarPlus,
   CheckCircle2,
   Clock3,
   ListTodo,
@@ -29,6 +31,7 @@ interface PlannerWorkspaceProps {
   onOpenMarkdown: (path: string) => void
   onFileChanged: (result: FileReadResult) => void | Promise<void>
   onGenerateWithAi: (goal: string, horizon: string) => void | Promise<void>
+  calendarGranted: boolean
   onOpenSettings: () => void
 }
 
@@ -74,6 +77,8 @@ export default function PlannerWorkspace(props: PlannerWorkspaceProps): React.JS
   const [time, setTime] = useState('')
   const [priority, setPriority] = useState<PlannerPriority>('中')
   const [notes, setNotes] = useState('')
+  const [syncing, setSyncing] = useState<string | null>(null)
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -141,6 +146,27 @@ export default function PlannerWorkspace(props: PlannerWorkspaceProps): React.JS
     }
   }
 
+  const syncTask = async (task: PlannerTask, kind: 'event' | 'reminder'): Promise<void> => {
+    const key = `${kind}:${task.date}:${task.time}:${task.title}`
+    setSyncing(key)
+    setSyncMessage(null)
+    try {
+      const result = await window.coscribe.calendar.sync({
+        kind,
+        title: task.title,
+        date: task.date,
+        ...(task.time ? { time: task.time } : {}),
+        durationMinutes: 60,
+        notes: [task.notes, `CoScribe 项目计划 · ${task.priority}优先级 · ${task.status}`].filter(Boolean).join('\n')
+      })
+      setSyncMessage(`已写入 ${result.target}：${result.title}`)
+    } catch (reason) {
+      setError(failureMessage(reason))
+    } finally {
+      setSyncing(null)
+    }
+  }
+
   return (
     <section className="planner-workspace" aria-label="计划与日程插件">
       <header className="planner-hero">
@@ -184,6 +210,10 @@ export default function PlannerWorkspace(props: PlannerWorkspaceProps): React.JS
                       <div><strong>{task.title}</strong>{task.notes && <p>{task.notes}</p>}</div>
                       <span className={`planner-priority is-${task.priority}`}>{task.priority}</span>
                       <small>{task.status}</small>
+                      <div className="planner-task__sync">
+                        <button type="button" disabled={!props.calendarGranted || Boolean(syncing)} onClick={() => void syncTask(task, 'event')} title="同步到 macOS 日历" aria-label={`将 ${task.title} 同步到日历`}><CalendarPlus size={13} /></button>
+                        <button type="button" disabled={!props.calendarGranted || Boolean(syncing)} onClick={() => void syncTask(task, 'reminder')} title="同步到提醒事项" aria-label={`将 ${task.title} 同步到提醒事项`}><BellPlus size={13} /></button>
+                      </div>
                     </article>
                   ))}
                 </section>
@@ -207,6 +237,8 @@ export default function PlannerWorkspace(props: PlannerWorkspaceProps): React.JS
             <textarea rows={4} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="描述目标、截止时间和已有约束…" />
             <div className="planner-ai-card__actions"><select value={horizon} onChange={(event) => setHorizon(event.target.value)}><option>今天</option><option>本周</option><option>本月</option><option>完整项目</option></select><button type="button" disabled={!goal.trim() || generating || !props.aiConfigured} onClick={() => void generate()}>{generating ? '准备中…' : '交给 AI'}</button></div>
             {!props.aiConfigured && <p>需要先配置 AI。<button type="button" onClick={props.onOpenSettings}>打开设置</button></p>}
+            {!props.calendarGranted && <p>系统日历权限尚未授权，请在插件中心重新授权“计划与日程”。</p>}
+            {syncMessage && <p role="status">{syncMessage}</p>}
           </section>
         </aside>
       </div>

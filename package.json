@@ -1,6 +1,6 @@
 {
   "name": "coscribe",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "CoScribe：以本地项目为核心的 AI 学习与内容工作台",
   "private": true,
   "type": "module",
@@ -110,7 +110,8 @@
       "category": "public.app-category.education",
       "icon": "assets/app-icon.icns",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "CoScribe 使用麦克风在本机将语音实时转为聊天输入，不会上传原始录音。"
+        "NSMicrophoneUsageDescription": "CoScribe 使用麦克风在本机将语音实时转为聊天输入，不会上传原始录音。",
+        "NSAppleEventsUsageDescription": "CoScribe 仅在你明确点击同步时，将选定计划写入 macOS 日历或提醒事项。"
       },
       "target": [
         "dmg",

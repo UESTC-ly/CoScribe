@@ -57,7 +57,7 @@ export interface WorkspaceState {
   split: boolean
   pdf: Record<string, PdfReadingState>
   markdown: Record<string, MarkdownReadingState>
-  navSection: 'files' | 'sessions' | 'search' | 'annotations' | 'memory' | 'plugins'
+  navSection: 'files' | 'sessions' | 'search' | 'annotations' | 'memory' | 'operations' | 'plugins'
   aiVisible: boolean
   leftWidth: number
   aiWidth: number
@@ -74,7 +74,7 @@ export interface ProjectMemoryDocument {
 }
 
 export type ContextScope = 'selection' | 'visible' | 'document' | 'project' | 'general'
-export type AiOperationMode = 'organize-project-notes' | 'generate-project-plan'
+export type AiOperationMode = 'organize-project-notes' | 'generate-project-plan' | 'generate-flashcards'
 
 export interface ContextSnapshot {
   projectName: string
@@ -124,6 +124,23 @@ export interface FileOperationProposal extends MarkdownFileOperation {
   summary: string
   status: 'pending' | 'accepted' | 'rejected' | 'failed'
   error?: string
+}
+
+export interface AppliedMarkdownOperation {
+  kind: FileOperationKind
+  targetPath: string
+  beforeContent: string | null
+  afterContent: string
+}
+
+export interface AiOperationHistoryEntry {
+  id: string
+  proposalId: string
+  summary: string
+  appliedAt: number
+  status: 'applied' | 'undone'
+  undoneAt?: number
+  operations: AppliedMarkdownOperation[]
 }
 
 export interface ChatImageAttachment {
@@ -258,6 +275,86 @@ export interface FileReadResult {
 export interface FileOperationApplyResult extends FileReadResult {
   /** All affected files. The inherited fields mirror the first file for compatibility. */
   files: FileReadResult[]
+  historyId: string
+}
+
+export interface FileOperationUndoResult {
+  entry: AiOperationHistoryEntry
+  files: FileReadResult[]
+  deletedPaths: string[]
+}
+
+export interface KnowledgeIndexStatus {
+  state: 'idle' | 'indexing' | 'ready' | 'error'
+  fileCount: number
+  segmentCount: number
+  indexedAt: number
+  durationMs: number
+  changedFiles: number
+  storedBytes: number
+  error?: string
+}
+
+export interface BacklinkNode {
+  path: string
+  title: string
+  inbound: number
+  outbound: number
+  unlinkedMentions: number
+}
+
+export interface BacklinkEdge {
+  sourcePath: string
+  targetPath: string
+  kind: 'link' | 'unlinked-mention'
+  line?: number
+  excerpt?: string
+}
+
+export interface BacklinkGraph {
+  generatedAt: number
+  nodes: BacklinkNode[]
+  edges: BacklinkEdge[]
+}
+
+export type PluginPermission =
+  | 'project:read'
+  | 'project:write'
+  | 'ai:request'
+  | 'calendar:write'
+  | 'diagnostics:read'
+
+export interface CalendarSyncRequest {
+  kind: 'event' | 'reminder'
+  title: string
+  date: string
+  time?: string
+  durationMinutes?: number
+  notes?: string
+}
+
+export interface CalendarSyncResult {
+  kind: CalendarSyncRequest['kind']
+  title: string
+  target: 'Calendar' | 'Reminders'
+  createdAt: number
+}
+
+export interface ProcessDiagnostic {
+  type: string
+  cpuPercent: number
+  memoryMb: number
+}
+
+export interface DiagnosticsSnapshot {
+  capturedAt: number
+  uptimeSeconds: number
+  appMemoryMb: number
+  processes: ProcessDiagnostic[]
+  index: KnowledgeIndexStatus
+  enabledPlugins: number
+  totalPlugins: number
+  speechModelInstalled: boolean
 }
 
 export type OcrEngine = 'paddleocr-v6' | 'ai-vision'
@@ -351,6 +448,8 @@ export interface AppSettings extends AiSettings {
   projectMemoryEnabled: boolean
   /** IDs of explicitly enabled, trusted plugins. */
   enabledPlugins: string[]
+  /** Permissions accepted by the user for each enabled built-in plugin. */
+  pluginGrants: Record<string, PluginPermission[]>
 }
 
 export interface AiRequest {
@@ -399,6 +498,8 @@ export interface CoScribeAPI {
     saveState: (state: WorkspaceState) => Promise<void>
     memory: () => Promise<ProjectMemoryDocument>
     saveMemory: (content: string) => Promise<ProjectMemoryDocument>
+    operationHistory: () => Promise<AiOperationHistoryEntry[]>
+    undoOperation: (historyId: string) => Promise<FileOperationUndoResult>
     onFilesChanged: (listener: (events: FileChangeEvent[]) => void) => () => void
   }
   file: {
@@ -429,6 +530,21 @@ export interface CoScribeAPI {
     query: (requestId: string, query: string) => Promise<SearchResult[]>
     cancel: (requestId: string) => Promise<void>
     onProgress: (listener: (progress: SearchProgress) => void) => () => void
+  }
+  knowledge: {
+    status: () => Promise<KnowledgeIndexStatus>
+    rebuild: () => Promise<KnowledgeIndexStatus>
+    backlinks: () => Promise<BacklinkGraph>
+  }
+  plugins: {
+    data: (pluginId: string) => Promise<unknown>
+    saveData: (pluginId: string, value: unknown) => Promise<void>
+  }
+  calendar: {
+    sync: (request: CalendarSyncRequest) => Promise<CalendarSyncResult>
+  }
+  diagnostics: {
+    snapshot: () => Promise<DiagnosticsSnapshot>
   }
   pdf: {
     pageText: (path: string, page: number) => Promise<PdfPageText>
@@ -521,5 +637,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoTitle: true,
   customSystemPrompt: '',
   projectMemoryEnabled: true,
-  enabledPlugins: ['planner']
+  enabledPlugins: ['planner'],
+  pluginGrants: {
+    planner: ['project:read', 'project:write', 'ai:request']
+  }
 }

@@ -258,3 +258,24 @@
   .settings-grid .span-2 { grid-column: span 1; }
   .model-switcher__model { max-width: 90px; }
 }
+
+.operation-history { height: 100%; display: grid; align-content: start; gap: 8px; padding: 8px; overflow: auto; }
+.operation-history__notice { display: flex; align-items: flex-start; gap: 7px; padding: 8px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); border-radius: 7px; color: var(--accent); background: var(--accent-soft); }
+.operation-history__notice svg { flex: 0 0 auto; margin-top: 1px; }
+.operation-history__notice p { margin: 0; color: var(--text-secondary); font-size: 9px; line-height: 1.5; }
+.operation-history__item { padding: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-content); }
+.operation-history__item.is-undone { opacity: .66; }
+.operation-history__item > header { display: grid; grid-template-columns: 27px minmax(0, 1fr) auto; align-items: center; gap: 7px; }
+.operation-history__item > header > span { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 6px; color: var(--accent); background: var(--accent-soft); }
+.operation-history__item header > div { min-width: 0; display: grid; gap: 2px; }
+.operation-history__item header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
+.operation-history__item header small { color: var(--text-muted); font-size: 8.5px; }
+.operation-history__item header em { padding: 3px 5px; border-radius: 4px; color: var(--success); background: color-mix(in srgb, var(--success) 8%, transparent); font-size: 8px; font-style: normal; }
+.operation-history__item.is-undone header em { color: var(--text-muted); background: var(--bg-panel); }
+.operation-history__files { display: grid; gap: 3px; margin: 8px 0; }
+.operation-history__files button { min-width: 0; display: flex; align-items: center; gap: 6px; padding: 5px; border: 0; border-radius: 4px; color: var(--text-secondary); background: var(--bg-panel); text-align: left; }
+.operation-history__files button:hover { background: var(--bg-hover); }
+.operation-history__files span { flex: 0 0 auto; color: var(--text-muted); font-size: 8px; }
+.operation-history__files strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.operation-history__item > .secondary-button { width: 100%; min-height: 27px; display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 9px; }
+.operation-history__undone { margin: 6px 0 0; color: var(--text-muted); font-size: 8.5px; text-align: right; }
