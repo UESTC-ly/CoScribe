@@ -1,13 +1,28 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiWorkspaceProps } from './AiWorkspace'
 import { AiWorkspace } from './AiWorkspace'
 import { MarkdownOperationCard } from './MarkdownOperationCard'
 import type { ChatImageAttachment, ChatSession, ContextSnapshot, FileOperationProposal } from '../../shared/types'
 
 afterEach(cleanup)
+
+beforeEach(() => {
+  Object.defineProperty(window, 'coscribe', {
+    configurable: true,
+    value: {
+      speech: {
+        status: vi.fn().mockResolvedValue({ available: true, platform: 'darwin-arm64', model: 'test', modelInstalled: true }),
+        start: vi.fn().mockResolvedValue(undefined),
+        audio: vi.fn(),
+        stop: vi.fn().mockResolvedValue(undefined),
+        onEvent: vi.fn().mockReturnValue(() => undefined)
+      }
+    }
+  })
+})
 
 const context: ContextSnapshot = {
   projectName: 'LangGraph 学习',

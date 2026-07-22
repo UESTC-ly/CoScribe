@@ -1,4 +1,4 @@
-import { app, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 
 import type {
   AiRequest,
@@ -21,6 +21,7 @@ import { ProjectService } from './project'
 import { ProjectSearchService } from './search'
 import { ScreenshotService } from './screenshot'
 import { SettingsStore } from './settings'
+import { SpeechRecognitionService } from './speech'
 
 interface Services {
   project: ProjectService
@@ -30,9 +31,10 @@ interface Services {
   ai: AiService
   screenshot: ScreenshotService
   browser: ResearchBrowserService
+  speech: SpeechRecognitionService
 }
 
-function assertTrustedSender(event: IpcMainInvokeEvent): void {
+function assertTrustedSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
   const frame = event.senderFrame
   if (!frame || frame !== event.sender.mainFrame || frame.url !== event.sender.getURL()) {
     throw new Error('拒绝来自非主窗口页面的 IPC 请求。')
@@ -62,7 +64,7 @@ function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1])
 }
 
 export function registerIpc(services: Services): void {
-  const { project, pdf, search, settings, ai, screenshot, browser } = services
+  const { project, pdf, search, settings, ai, screenshot, browser, speech } = services
 
   handle(IPC.appVersion, () => app.getVersion())
 
@@ -78,6 +80,8 @@ export function registerIpc(services: Services): void {
   handle(IPC.projectTree, () => project.tree())
   handle(IPC.projectGetState, () => project.getState())
   handle(IPC.projectSaveState, (_event, state: WorkspaceState) => project.saveState(state))
+  handle(IPC.projectMemory, () => project.memory())
+  handle(IPC.projectSaveMemory, (_event, content: string) => project.saveMemory(content))
 
   handle(IPC.fileRead, (_event, filePath: string) => project.read(filePath))
   handle(IPC.fileSaveMarkdown, (_event, filePath: string, content: string, expectedModifiedAt?: number) =>
@@ -112,6 +116,15 @@ export function registerIpc(services: Services): void {
   handle(IPC.ocrStop, (_event, requestId: string) => ai.stopOcr(requestId))
 
   handle(IPC.screenshotCapture, () => screenshot.capture())
+
+  handle(IPC.speechStatus, () => speech.status())
+  handle(IPC.speechStart, (event, requestId: string, sampleRate: number) => speech.start(event.sender, requestId, sampleRate))
+  handle(IPC.speechStop, (event, requestId: string) => speech.stop(event.sender, requestId))
+  ipcMain.removeAllListeners(IPC.speechAudio)
+  ipcMain.on(IPC.speechAudio, (event, requestId: string, samples: unknown) => {
+    assertTrustedSender(event)
+    speech.audio(event.sender, requestId, samples)
+  })
 
   handle(IPC.browserOpen, (_event, url?: string) => browser.open(url))
   handle(IPC.browserNavigate, (_event, url: string) => browser.navigate(url))

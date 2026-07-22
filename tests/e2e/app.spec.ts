@@ -7,11 +7,43 @@ import path from 'node:path'
 
 const appRoot = path.resolve(import.meta.dirname, '../..')
 const packagedExecutable = process.env.COSCRIBE_E2E_EXECUTABLE
+const speechTestWav = process.env.COSCRIBE_ASR_TEST_WAV
 
 let electronApp: ElectronApplication
 let page: Page
 let projectPath: string
 let userDataPath: string
+
+function pcm16WavPayload(source: Buffer): { sampleRate: number; channels: number; pcmBase64: string } {
+  if (source.toString('ascii', 0, 4) !== 'RIFF' || source.toString('ascii', 8, 12) !== 'WAVE') {
+    throw new Error('ASR fixture is not a RIFF/WAVE file')
+  }
+  let offset = 12
+  let audioFormat = 0
+  let channels = 0
+  let sampleRate = 0
+  let bitsPerSample = 0
+  let pcm: Buffer | null = null
+  while (offset + 8 <= source.length) {
+    const chunkId = source.toString('ascii', offset, offset + 4)
+    const chunkSize = source.readUInt32LE(offset + 4)
+    const body = offset + 8
+    if (body + chunkSize > source.length) break
+    if (chunkId === 'fmt ' && chunkSize >= 16) {
+      audioFormat = source.readUInt16LE(body)
+      channels = source.readUInt16LE(body + 2)
+      sampleRate = source.readUInt32LE(body + 4)
+      bitsPerSample = source.readUInt16LE(body + 14)
+    } else if (chunkId === 'data') {
+      pcm = source.subarray(body, body + chunkSize)
+    }
+    offset = body + chunkSize + (chunkSize % 2)
+  }
+  if (audioFormat !== 1 || bitsPerSample !== 16 || channels < 1 || !sampleRate || !pcm) {
+    throw new Error('ASR fixture must use 16-bit PCM audio')
+  }
+  return { sampleRate, channels, pcmBase64: pcm.toString('base64') }
+}
 
 async function launchProject(): Promise<void> {
   electronApp = await electron.launch({
@@ -366,6 +398,120 @@ test('copies selected document text into the AI composer with a shortcut', async
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+K' : 'Control+Shift+K')
   await expect(page.getByLabel('向 AI 提问')).toHaveValue('E2E_SENTINEL 路由')
   await expect(page.getByLabel('基于')).toHaveValue('selection')
+})
+
+test('persists transparent project memory and the editable system prompt', async () => {
+  await page.getByRole('button', { name: '记忆', exact: true }).click()
+  const memoryEditor = page.getByLabel('项目记忆 Markdown')
+  await expect(memoryEditor).toHaveValue(/CoScribe Project Memory/u)
+  await memoryEditor.fill([
+    '# CoScribe Project Memory',
+    '',
+    '## 稳定约定',
+    '',
+    '- 所有计划都使用普通 Markdown。',
+    '- 技术解释先给结论，再给依据。'
+  ].join('\n'))
+  await page.getByRole('button', { name: '保存记忆' }).click()
+  await expect.poll(async () => readFile(path.join(projectPath, 'COSCRIBE.md'), 'utf8').catch(() => '')).toContain('技术解释先给结论')
+  await expect(page.getByText('已写入项目')).toBeVisible()
+
+  await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+  await page.getByLabel('自定义系统提示词').fill('回答时先给结论；关键术语保留英文原文。')
+  await page.getByRole('button', { name: '保存设置' }).click()
+  await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+  await expect(page.getByLabel('自定义系统提示词')).toHaveValue('回答时先给结论；关键术语保留英文原文。')
+  await page.getByRole('button', { name: '取消' }).click()
+})
+
+test('opens the trusted planner plugin and stores schedule data as Markdown', async ({}, testInfo) => {
+  await page.getByRole('button', { name: '插件', exact: true }).click()
+  await expect(page.getByText('可信内置插件')).toBeVisible()
+  await expect(page.getByText('当前版本不下载或执行第三方代码')).toBeVisible()
+  await page.getByRole('button', { name: '打开插件' }).click()
+
+  const planner = page.getByRole('region', { name: '计划与日程插件' })
+  await expect(planner).toBeVisible()
+  const plannerPath = path.join(projectPath, '计划', '项目计划.md')
+  await expect.poll(async () => readFile(plannerPath, 'utf8').catch(() => '')).toContain('coscribe:planner:start')
+
+  await planner.getByLabel('事项', { exact: true }).fill('完成 v2.0.0 本地体验验收')
+  await planner.getByLabel('时间', { exact: true }).fill('10:30')
+  await planner.getByLabel('优先级').selectOption('高')
+  await planner.getByLabel('备注').fill('检查语音、记忆与插件性能')
+  await planner.getByRole('button', { name: '加入日程' }).click()
+
+  await expect(planner.getByText('完成 v2.0.0 本地体验验收')).toBeVisible()
+  await expect.poll(async () => readFile(plannerPath, 'utf8')).toContain('| 10:30 | 完成 v2.0.0 本地体验验收 | 待办 | 高 | 检查语音、记忆与插件性能 |')
+  await planner.screenshot({ path: testInfo.outputPath('planner-plugin.png') })
+
+  await planner.getByRole('button', { name: /编辑 Markdown/u }).click()
+  await expect(page.getByLabel('项目计划.md Markdown 编辑器')).toBeVisible()
+  await expect(page.getByLabel('Markdown 预览')).toContainText('完成 v2.0.0 本地体验验收')
+})
+
+test('decodes streaming speech through the isolated native ASR process', async () => {
+  test.skip(!speechTestWav, 'Set COSCRIBE_ASR_TEST_WAV to a 16-bit PCM WAV fixture for the native ASR integration test.')
+  test.setTimeout(90_000)
+  const payload = pcm16WavPayload(await readFile(speechTestWav!))
+  await expect(page.getByRole('button', { name: '开始语音输入' })).toBeVisible()
+
+  const transcript = await page.evaluate(async (fixture) => {
+    const binary = atob(fixture.pcmBase64)
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+    const view = new DataView(bytes.buffer)
+    const frameBytes = fixture.channels * 2
+    const samples = new Float32Array(Math.floor(bytes.byteLength / frameBytes))
+    for (let frame = 0; frame < samples.length; frame += 1) {
+      let sum = 0
+      for (let channel = 0; channel < fixture.channels; channel += 1) {
+        sum += view.getInt16(frame * frameBytes + channel * 2, true) / 32_768
+      }
+      samples[frame] = sum / fixture.channels
+    }
+
+    const requestId = `speech-e2e-${crypto.randomUUID()}`
+    return new Promise<string>((resolve, reject) => {
+      let latest = ''
+      let settled = false
+      let timeout = 0
+      let unsubscribe = (): void => undefined
+      const finish = (callback: () => void): void => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeout)
+        unsubscribe()
+        callback()
+      }
+      unsubscribe = window.coscribe.speech.onEvent((event) => {
+        if (event.requestId !== requestId) return
+        if (event.type === 'transcript') latest = event.text
+        else if (event.type === 'error') finish(() => reject(new Error(event.message)))
+        else if (event.type === 'stopped') finish(() => resolve(latest))
+      })
+      timeout = window.setTimeout(() => finish(() => reject(new Error('native ASR E2E timed out'))), 75_000)
+
+      void (async () => {
+        try {
+          const status = await window.coscribe.speech.status()
+          if (!status.available) throw new Error(status.reason ?? 'native ASR unavailable')
+          await window.coscribe.speech.start(requestId, fixture.sampleRate)
+          for (let offset = 0; offset < samples.length; offset += 3_200) {
+            window.coscribe.speech.audio(requestId, samples.slice(offset, offset + 3_200))
+            if (offset % 32_000 === 0) await new Promise((resume) => window.setTimeout(resume, 1))
+          }
+          await new Promise((resume) => window.setTimeout(resume, 120))
+          await window.coscribe.speech.stop(requestId)
+        } catch (reason) {
+          finish(() => reject(reason))
+        }
+      })()
+    })
+  }, payload)
+
+  expect(transcript).toContain('MONDAY')
+  expect(transcript).toContain('星期三')
 })
 
 test('drag-selects a screenshot region and adds the crop to chat attachments', async ({}, testInfo) => {

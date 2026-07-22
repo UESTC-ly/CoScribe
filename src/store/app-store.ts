@@ -185,8 +185,8 @@ function cloneSession(session: ChatSession): ChatSession {
   return { ...session, messages: session.messages.map(cloneMessage) }
 }
 
-function sortedSessions(sessions: ChatSession[]): ChatSession[] {
-  return sessions.sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
+function sortedSessions(sessions: readonly ChatSession[]): ChatSession[] {
+  return [...sessions].sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
 }
 
 function cloneAnnotation(annotation: Annotation): Annotation {
@@ -312,7 +312,8 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
   }),
 
   closeTab: (tabId) => set((state) => {
-    if (!state.workspace.tabs.some((tab) => tab.id === tabId)) return state
+    const closingTab = state.workspace.tabs.find((tab) => tab.id === tabId)
+    if (!closingTab) return state
     const workspace = cloneWorkspaceState(state.workspace)
     workspace.tabs = workspace.tabs.filter((tab) => tab.id !== tabId)
     for (const paneId of ['primary', 'secondary'] as const) {
@@ -329,7 +330,15 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
       const otherPane: PaneId = workspace.activePane === 'primary' ? 'secondary' : 'primary'
       if (workspace.split && workspace.panes[otherPane].activeTabId) workspace.activePane = otherPane
     }
-    return { workspace }
+    const key = normalizedKey(closingTab.path)
+    const buffer = state.documents[key]
+    const stillOpen = workspace.tabs.some((tab) => samePortablePath(tab.path, closingTab.path))
+    if (stillOpen || buffer?.dirty) return { workspace }
+    const documents = { ...state.documents }
+    const documentContexts = { ...state.documentContexts }
+    delete documents[key]
+    delete documentContexts[key]
+    return { workspace, documents, documentContexts }
   }),
 
   setActiveTab: (pane, tabId) => set((state) => {
@@ -650,7 +659,7 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
       messages: []
     }
     set((state) => ({
-      sessions: sortedSessions([session, ...state.sessions.map(cloneSession)]),
+      sessions: sortedSessions([session, ...state.sessions]),
       workspace: { ...state.workspace, currentSessionId: safeId }
     }))
     return safeId
@@ -662,20 +671,23 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
       sessions: sessionId === null
         ? state.sessions
         : sortedSessions(state.sessions.map((session) => session.id === sessionId
-            ? { ...cloneSession(session), updatedAt: Math.max(session.updatedAt, now) }
-            : cloneSession(session))),
+            ? { ...session, updatedAt: Math.max(session.updatedAt, now) }
+            : session)),
       workspace: { ...state.workspace, currentSessionId: sessionId }
     }
   }),
 
-  renameSession: (sessionId, title, now = Date.now()) => set((state) => ({
-    sessions: sortedSessions(state.sessions.map((session) => session.id === sessionId
-      ? { ...cloneSession(session), title: title.trim() || session.title, updatedAt: now }
-      : cloneSession(session)))
-  })),
+  renameSession: (sessionId, title, now = Date.now()) => set((state) => {
+    if (!state.sessions.some((session) => session.id === sessionId)) return state
+    return {
+      sessions: sortedSessions(state.sessions.map((session) => session.id === sessionId
+        ? { ...session, title: title.trim() || session.title, updatedAt: now }
+        : session))
+    }
+  }),
 
   deleteSession: (sessionId) => set((state) => {
-    const sessions = state.sessions.filter((session) => session.id !== sessionId).map(cloneSession)
+    const sessions = state.sessions.filter((session) => session.id !== sessionId)
     return {
       sessions,
       workspace: {
@@ -687,31 +699,32 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
     }
   }),
 
-  addMessage: (sessionId, message) => set((state) => ({
-    sessions: sortedSessions(state.sessions.map((session) => session.id === sessionId
-      ? {
-          ...cloneSession(session),
-          updatedAt: Math.max(session.updatedAt, message.createdAt),
-          messages: [...session.messages.map(cloneMessage), cloneMessage(message)]
-        }
-      : cloneSession(session)))
-  })),
+  addMessage: (sessionId, message) => set((state) => {
+    if (!state.sessions.some((session) => session.id === sessionId)) return state
+    return {
+      sessions: sortedSessions(state.sessions.map((session) => session.id === sessionId
+        ? {
+            ...session,
+            updatedAt: Math.max(session.updatedAt, message.createdAt),
+            messages: [...session.messages, cloneMessage(message)]
+          }
+        : session))
+    }
+  }),
 
-  updateMessage: (sessionId, messageId, patch, now = Date.now()) => set((state) => ({
-    sessions: sortedSessions(state.sessions.map((session) => session.id === sessionId
-      ? {
-          ...cloneSession(session),
-          updatedAt: now,
-          messages: session.messages.map((message) => {
-            if (message.id !== messageId) return cloneMessage(message)
-            const next = typeof patch === 'function'
-              ? patch(cloneMessage(message))
-              : { ...cloneMessage(message), ...patch }
-            return cloneMessage(next)
-          })
-        }
-      : cloneSession(session)))
-  })),
+  updateMessage: (sessionId, messageId, patch, now = Date.now()) => set((state) => {
+    const session = state.sessions.find((candidate) => candidate.id === sessionId)
+    const messageIndex = session?.messages.findIndex((message) => message.id === messageId) ?? -1
+    if (!session || messageIndex < 0) return state
+    const current = cloneMessage(session.messages[messageIndex])
+    const next = cloneMessage(typeof patch === 'function' ? patch(current) : { ...current, ...patch })
+    const messages = [...session.messages]
+    messages[messageIndex] = next
+    const updatedSession = { ...session, updatedAt: now, messages }
+    return {
+      sessions: sortedSessions(state.sessions.map((candidate) => candidate.id === sessionId ? updatedSession : candidate))
+    }
+  }),
 
   setAnnotations: (annotations) => set({
     annotations: annotations.map(cloneAnnotation).sort((left, right) => right.createdAt - left.createdAt)

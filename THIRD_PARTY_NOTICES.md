@@ -27,6 +27,17 @@ features. Copyright remains with the respective authors.
 - License: MIT
 - Project: https://github.com/microsoft/onnxruntime
 
+## sherpa-onnx and bilingual Zipformer ASR model
+
+- Components: `sherpa-onnx-node` 1.12.40 and the int8 small streaming
+  Chinese-English Zipformer model
+- Copyright: k2-fsa / next-gen Kaldi contributors and model contributors
+- License: Apache License 2.0
+- Projects: https://github.com/k2-fsa/sherpa-onnx and
+  https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t
+- Bundled model files and checksums: `scripts/fetch-asr-model.mjs`
+- Full license text: `resources/ocr/LICENSE-APACHE-2.0.txt`
+
 ## Mammoth
 
 - Component: `mammoth` 1.12.0

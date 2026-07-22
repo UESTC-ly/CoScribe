@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { AlertTriangle, BookOpenText } from 'lucide-react'
 import type { DocumentBuffer, DocumentContextState } from '../../store'
 import type {
@@ -10,20 +10,21 @@ import type {
   WorkspaceState
 } from '../../shared/types'
 import { resolveProjectAssetUrl, resolveProjectFilePath } from '../../lib'
-import {
-  ImageViewer,
-  DocxViewer,
-  MarkdownViewer,
-  PdfViewer,
-  PptxViewer,
-  TextViewer,
-  UnsupportedViewer,
-  type MarkdownConflictResolution,
-  type MarkdownSaveRequest,
-  type PdfTextSelection,
-  type PdfViewerAnnotation
-} from '../viewers'
+import type {
+  MarkdownConflictResolution,
+  MarkdownSaveRequest,
+  PdfTextSelection,
+  PdfViewerAnnotation
+} from '../viewers/types'
 import { TabStrip } from './TabStrip'
+
+const ImageViewer = lazy(() => import('../viewers/ImageViewer').then((module) => ({ default: module.ImageViewer })))
+const DocxViewer = lazy(() => import('../viewers/DocxViewer').then((module) => ({ default: module.DocxViewer })))
+const MarkdownViewer = lazy(() => import('../viewers/MarkdownViewer').then((module) => ({ default: module.MarkdownViewer })))
+const PdfViewer = lazy(() => import('../viewers/PdfViewer').then((module) => ({ default: module.PdfViewer })))
+const PptxViewer = lazy(() => import('../viewers/PptxViewer').then((module) => ({ default: module.PptxViewer })))
+const TextViewer = lazy(() => import('../viewers/TextViewer').then((module) => ({ default: module.TextViewer })))
+const UnsupportedViewer = lazy(() => import('../viewers/UnsupportedViewer').then((module) => ({ default: module.UnsupportedViewer })))
 
 interface EditorPaneProps {
   projectPath: string
@@ -251,7 +252,11 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
   return (
     <section className={`editor-group ${props.focused ? 'is-focused' : ''}`} onMouseDown={props.onFocus} aria-label={`${props.pane === 'primary' ? '主' : '第二'}内容区域`}>
       <TabStrip pane={props.pane} tabs={props.tabs} activeId={props.activeTabId} dirtyPaths={props.dirtyPaths} onActivate={props.onActivate} onClose={props.onClose} onDropTab={props.onDropTab} />
-      <div className="editor-group-content" role="tabpanel">{renderContent()}</div>
+      <div className="editor-group-content" role="tabpanel">
+        <Suspense fallback={<div className="empty-state"><span className="viewer-spinner" /><strong>正在载入阅读器…</strong></div>}>
+          {renderContent()}
+        </Suspense>
+      </div>
     </section>
   )
 }

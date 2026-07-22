@@ -57,15 +57,24 @@ export interface WorkspaceState {
   split: boolean
   pdf: Record<string, PdfReadingState>
   markdown: Record<string, MarkdownReadingState>
-  navSection: 'files' | 'sessions' | 'search' | 'annotations'
+  navSection: 'files' | 'sessions' | 'search' | 'annotations' | 'memory' | 'plugins'
   aiVisible: boolean
   leftWidth: number
   aiWidth: number
   currentSessionId: string | null
 }
 
+export interface ProjectMemoryDocument {
+  /** Canonical path to the transparent, project-owned COSCRIBE.md file. */
+  path: string
+  content: string
+  exists: boolean
+  modifiedAt: number
+  size: number
+}
+
 export type ContextScope = 'selection' | 'visible' | 'document' | 'project' | 'general'
-export type AiOperationMode = 'organize-project-notes'
+export type AiOperationMode = 'organize-project-notes' | 'generate-project-plan'
 
 export interface ContextSnapshot {
   projectName: string
@@ -132,6 +141,21 @@ export interface ChatImageAttachment {
 export type ScreenshotCaptureEvent =
   | { type: 'captured'; attachment: ChatImageAttachment }
   | { type: 'error'; message: string }
+
+export interface SpeechRecognitionStatus {
+  available: boolean
+  platform: string
+  model: string
+  modelInstalled: boolean
+  reason?: string
+}
+
+export type SpeechRecognitionEvent =
+  | { requestId: string; type: 'loading' }
+  | { requestId: string; type: 'listening' }
+  | { requestId: string; type: 'transcript'; text: string; final: boolean }
+  | { requestId: string; type: 'stopped' }
+  | { requestId: string; type: 'error'; message: string }
 
 export interface ResearchBrowserBounds {
   x: number
@@ -321,6 +345,12 @@ export interface AppSettings extends AiSettings {
   defaultContextScope: ContextScope
   allowGeneralKnowledge: boolean
   autoTitle: boolean
+  /** User-authored instructions applied after CoScribe's immutable safety rules. */
+  customSystemPrompt: string
+  /** Whether the current project's COSCRIBE.md memory is included in AI requests. */
+  projectMemoryEnabled: boolean
+  /** IDs of explicitly enabled, trusted plugins. */
+  enabledPlugins: string[]
 }
 
 export interface AiRequest {
@@ -367,6 +397,8 @@ export interface CoScribeAPI {
     tree: () => Promise<FileNode[]>
     getState: () => Promise<WorkspaceState>
     saveState: (state: WorkspaceState) => Promise<void>
+    memory: () => Promise<ProjectMemoryDocument>
+    saveMemory: (content: string) => Promise<ProjectMemoryDocument>
     onFilesChanged: (listener: (events: FileChangeEvent[]) => void) => () => void
   }
   file: {
@@ -411,6 +443,13 @@ export interface CoScribeAPI {
   screenshot: {
     capture: () => Promise<ChatImageAttachment | null>
     onResult: (listener: (event: ScreenshotCaptureEvent) => void) => () => void
+  }
+  speech: {
+    status: () => Promise<SpeechRecognitionStatus>
+    start: (requestId: string, sampleRate: number) => Promise<void>
+    audio: (requestId: string, samples: Float32Array) => void
+    stop: (requestId: string) => Promise<void>
+    onEvent: (listener: (event: SpeechRecognitionEvent) => void) => () => void
   }
   browser: {
     open: (url?: string) => Promise<ResearchBrowserState>
@@ -479,5 +518,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoSaveDelay: 900,
   defaultContextScope: 'visible',
   allowGeneralKnowledge: true,
-  autoTitle: true
+  autoTitle: true,
+  customSystemPrompt: '',
+  projectMemoryEnabled: true,
+  enabledPlugins: ['planner']
 }

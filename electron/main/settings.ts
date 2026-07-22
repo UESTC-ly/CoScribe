@@ -20,6 +20,8 @@ interface StoredSettings {
 const CONTEXT_SCOPES = new Set<ContextScope>(['selection', 'visible', 'document', 'project', 'general'])
 const AI_PROTOCOLS = new Set<AiProtocol>(['auto', 'responses', 'chat-completions'])
 const SUPPORTED_REASONING_EFFORTS = new Set<ReasoningEffort>(REASONING_EFFORTS)
+const TRUSTED_PLUGIN_IDS = new Set(['planner'])
+export const MAX_CUSTOM_SYSTEM_PROMPT_CHARS = 20_000
 
 export function isLoopbackHost(hostname: string): boolean {
   return (
@@ -55,7 +57,7 @@ function sanitizeBaseUrl(value: unknown, fallback: string, label: string): strin
   return parsed.toString().replace(/\/$/u, '')
 }
 
-function sanitizeSettings(
+export function sanitizeSettings(
   input: Partial<AppSettings>
 ): Omit<AppSettings, 'apiKey' | 'hasApiKey' | 'imageApiKey' | 'hasImageApiKey'> {
   const theme = input.theme === 'light' || input.theme === 'dark' || input.theme === 'system' ? input.theme : DEFAULT_SETTINGS.theme
@@ -69,6 +71,12 @@ function sanitizeSettings(
   const reasoningEffort = SUPPORTED_REASONING_EFFORTS.has(input.reasoningEffort as ReasoningEffort)
     ? (input.reasoningEffort as ReasoningEffort)
     : DEFAULT_SETTINGS.reasoningEffort
+  const customSystemPrompt = typeof input.customSystemPrompt === 'string'
+    ? input.customSystemPrompt.trim().slice(0, MAX_CUSTOM_SYSTEM_PROMPT_CHARS)
+    : DEFAULT_SETTINGS.customSystemPrompt
+  const enabledPlugins = Array.isArray(input.enabledPlugins)
+    ? [...new Set(input.enabledPlugins.filter((id): id is string => typeof id === 'string' && TRUSTED_PLUGIN_IDS.has(id)))]
+    : [...DEFAULT_SETTINGS.enabledPlugins]
 
   return {
     baseUrl: sanitizeBaseUrl(input.baseUrl, DEFAULT_SETTINGS.baseUrl, 'AI 服务地址'),
@@ -84,7 +92,11 @@ function sanitizeSettings(
     defaultContextScope: context,
     allowGeneralKnowledge:
       typeof input.allowGeneralKnowledge === 'boolean' ? input.allowGeneralKnowledge : DEFAULT_SETTINGS.allowGeneralKnowledge,
-    autoTitle: typeof input.autoTitle === 'boolean' ? input.autoTitle : DEFAULT_SETTINGS.autoTitle
+    autoTitle: typeof input.autoTitle === 'boolean' ? input.autoTitle : DEFAULT_SETTINGS.autoTitle,
+    customSystemPrompt,
+    projectMemoryEnabled:
+      typeof input.projectMemoryEnabled === 'boolean' ? input.projectMemoryEnabled : DEFAULT_SETTINGS.projectMemoryEnabled,
+    enabledPlugins
   }
 }
 

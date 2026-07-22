@@ -5,6 +5,7 @@ release/
 playwright-report/
 test-results/
 coverage/
+.cache/
 .DS_Store
 *.log
 *.tmp

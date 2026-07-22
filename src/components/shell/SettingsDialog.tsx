@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Eye, EyeOff, Image as ImageIcon, KeyRound } from 'lucide-react'
+import { BrainCircuit, Eye, EyeOff, Image as ImageIcon, KeyRound, MessageSquareCode, RotateCcw } from 'lucide-react'
 import { REASONING_EFFORTS, SELECTABLE_AI_MODELS, type AppSettings } from '../../shared/types'
 import { Dialog } from './Dialog'
 
@@ -110,6 +110,32 @@ export function SettingsDialog({ open, settings, onSave, onClose }: SettingsDial
 
         <section>
           <header>
+            <MessageSquareCode size={16} />
+            <div><h3>系统提示词</h3><p>用于设定回答风格和工作方式；应用的文件安全与密钥边界始终优先。</p></div>
+          </header>
+          <div className="settings-grid">
+            <label className="field-label span-2">
+              自定义系统提示词
+              <textarea
+                className="field settings-system-prompt"
+                value={draft.customSystemPrompt}
+                maxLength={20_000}
+                rows={7}
+                placeholder="例如：回答时先给结论，再给依据；所有技术术语保留英文原文。"
+                onChange={(event) => patch('customSystemPrompt', event.target.value)}
+              />
+              <span className="field-help">
+                <span>{draft.customSystemPrompt.length.toLocaleString('zh-CN')} / 20,000</span>
+                <button type="button" disabled={!draft.customSystemPrompt} onClick={() => patch('customSystemPrompt', '')}>
+                  <RotateCcw size={12} />清空
+                </button>
+              </span>
+            </label>
+          </div>
+        </section>
+
+        <section>
+          <header>
             <ImageIcon size={16} />
             <div>
               <h3>GPT-Image 2 图片生成</h3>
@@ -181,7 +207,7 @@ export function SettingsDialog({ open, settings, onSave, onClose }: SettingsDial
         </section>
 
         <section>
-          <header><div><h3>AI 上下文</h3><p>默认只理解当前可见内容，不会自动扫描整个项目。</p></div></header>
+          <header><BrainCircuit size={16} /><div><h3>AI 上下文与记忆</h3><p>默认只理解当前可见内容；项目记忆来自透明的 COSCRIBE.md。</p></div></header>
           <div className="settings-grid">
             <label className="field-label">
               默认范围
@@ -200,6 +226,10 @@ export function SettingsDialog({ open, settings, onSave, onClose }: SettingsDial
             <label className="check-row">
               <input type="checkbox" checked={draft.autoTitle} onChange={(event) => patch('autoTitle', event.target.checked)} />
               <span><strong>自动生成会话标题</strong><small>首轮有效对话后更新</small></span>
+            </label>
+            <label className="check-row span-2">
+              <input type="checkbox" checked={draft.projectMemoryEnabled} onChange={(event) => patch('projectMemoryEnabled', event.target.checked)} />
+              <span><strong>启用项目级长期记忆</strong><small>每轮对话读取当前项目的 COSCRIBE.md；不会读取其他项目的记忆</small></span>
             </label>
           </div>
         </section>

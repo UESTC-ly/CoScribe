@@ -1858,6 +1858,24 @@
   border-color: color-mix(in srgb, var(--ai-accent) 22%, var(--ai-line));
 }
 
+.ai-composer__tool.is-recording {
+  color: var(--ai-danger);
+  background: var(--ai-danger-wash);
+  border-color: color-mix(in srgb, var(--ai-danger) 32%, var(--ai-line));
+}
+
+.ai-composer__tool.is-recording::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 4px;
+  height: 4px;
+  background: var(--ai-danger);
+  border-radius: 50%;
+  animation: ai-recording-pulse 1.1s ease-in-out infinite;
+}
+
 .ai-composer__tool svg {
   width: 11px;
   height: 11px;
@@ -2075,6 +2093,7 @@
 }
 
 @keyframes ai-spin { to { transform: rotate(360deg); } }
+@keyframes ai-recording-pulse { 50% { opacity: .28; transform: scale(.72); } }
 @keyframes ai-caret { 50% { opacity: 0; } }
 @keyframes ai-thinking {
   0%, 75%, 100% { opacity: .28; transform: translateY(0); }
@@ -2092,7 +2111,7 @@
   }
 
   .ai-composer__toolbar {
-    grid-template-columns: repeat(4, 30px) minmax(82px, 1fr) max-content;
+    grid-template-columns: repeat(5, 30px) minmax(82px, 1fr) max-content;
     display: grid;
     gap: 3px;
     padding-inline: 6px;
@@ -2122,7 +2141,7 @@
 
   .ai-composer__send,
   .ai-composer__stop {
-    grid-column: 6;
+    grid-column: 7;
     white-space: nowrap;
   }
 

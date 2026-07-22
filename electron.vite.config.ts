@@ -11,7 +11,16 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       sourcemap: false,
-      lib: { entry: resolve(rootDir, 'electron/main/index.ts') }
+      lib: {
+        entry: {
+          index: resolve(rootDir, 'electron/main/index.ts'),
+          'asr-worker': resolve(rootDir, 'electron/main/asr-worker.ts')
+        },
+        formats: ['es']
+      },
+      rollupOptions: {
+        output: { entryFileNames: '[name].js' }
+      }
     }
   },
   preload: {

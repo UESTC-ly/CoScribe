@@ -10,6 +10,7 @@ import type {
   FileChangeEvent,
   FileOperationProposal,
   ScreenshotCaptureEvent,
+  SpeechRecognitionEvent,
   ResearchBrowserBounds,
   ResearchBrowserExtractMode,
   ResearchBrowserSelectionEvent,
@@ -43,6 +44,8 @@ const api: CoScribeAPI = {
     tree: () => ipcRenderer.invoke(IPC.projectTree),
     getState: () => ipcRenderer.invoke(IPC.projectGetState),
     saveState: (state: WorkspaceState) => ipcRenderer.invoke(IPC.projectSaveState, state),
+    memory: () => ipcRenderer.invoke(IPC.projectMemory),
+    saveMemory: (content: string) => ipcRenderer.invoke(IPC.projectSaveMemory, content),
     onFilesChanged: (listener: (events: FileChangeEvent[]) => void) => subscribe(IPC.projectFilesChanged, listener)
   },
   file: {
@@ -88,6 +91,13 @@ const api: CoScribeAPI = {
   screenshot: {
     capture: () => ipcRenderer.invoke(IPC.screenshotCapture),
     onResult: (listener: (event: ScreenshotCaptureEvent) => void) => subscribe(IPC.screenshotResult, listener)
+  },
+  speech: {
+    status: () => ipcRenderer.invoke(IPC.speechStatus),
+    start: (requestId: string, sampleRate: number) => ipcRenderer.invoke(IPC.speechStart, requestId, sampleRate),
+    audio: (requestId: string, samples: Float32Array) => ipcRenderer.send(IPC.speechAudio, requestId, samples),
+    stop: (requestId: string) => ipcRenderer.invoke(IPC.speechStop, requestId),
+    onEvent: (listener: (event: SpeechRecognitionEvent) => void) => subscribe(IPC.speechEvent, listener)
   },
   browser: {
     open: (url?: string) => ipcRenderer.invoke(IPC.browserOpen, url),

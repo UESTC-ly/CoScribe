@@ -1,6 +1,6 @@
 {
   "name": "coscribe",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "CoScribe：以本地项目为核心的 AI 学习与内容工作台",
   "private": true,
   "type": "module",
@@ -24,9 +24,11 @@
     "test:ai": "vitest run --config src/components/ai/vitest.ai.config.ts",
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test",
+    "measure:startup": "npm run build && node scripts/measure-startup.mjs",
+    "fetch:asr-model": "node scripts/fetch-asr-model.mjs",
     "dist": "npm run build && electron-builder",
     "dist:dir": "npm run build && electron-builder --dir",
-    "dist:mac:arm64": "npm run build && electron-builder --mac dmg zip --arm64",
+    "dist:mac:arm64": "npm run fetch:asr-model && npm run build && electron-builder --mac dmg zip --arm64",
     "dist:win:x64": "npm run build && electron-builder --win nsis --x64",
     "verify:package:mac": "node scripts/verify-packaged-app.mjs release/mac-arm64/CoScribe.app",
     "verify:package:win": "node scripts/verify-packaged-windows.mjs release/win-unpacked"
@@ -34,7 +36,8 @@
   "dependencies": {
     "chokidar": "^4.0.3",
     "mammoth": "^1.12.0",
-    "pdfjs-dist": "^6.1.200"
+    "pdfjs-dist": "^6.1.200",
+    "sherpa-onnx-node": "1.12.40"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.8.1",
@@ -86,11 +89,29 @@
       "package.json",
       "LICENSE",
       "THIRD_PARTY_NOTICES.md",
-      "resources/ocr/LICENSE-APACHE-2.0.txt"
+      "resources/ocr/LICENSE-APACHE-2.0.txt",
+      "!node_modules/sherpa-onnx-darwin-arm64/libonnxruntime.dylib",
+      "!node_modules/sherpa-onnx-darwin-arm64/libsherpa-onnx-cxx-api.dylib"
+    ],
+    "asarUnpack": [
+      "node_modules/sherpa-onnx-darwin-arm64/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": ".cache/asr/sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16",
+        "to": "asr/sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16",
+        "filter": [
+          "*.onnx",
+          "tokens.txt"
+        ]
+      }
     ],
     "mac": {
       "category": "public.app-category.education",
       "icon": "assets/app-icon.icns",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "CoScribe 使用麦克风在本机将语音实时转为聊天输入，不会上传原始录音。"
+      },
       "target": [
         "dmg",
         "zip"
@@ -106,5 +127,8 @@
         "deb"
       ]
     }
+  },
+  "optionalDependencies": {
+    "sherpa-onnx-darwin-arm64": "1.12.40"
   }
 }

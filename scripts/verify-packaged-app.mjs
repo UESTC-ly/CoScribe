@@ -24,6 +24,7 @@ const requiredEntries = [
   '/node_modules/mammoth/package.json',
   '/node_modules/pdfjs-dist/legacy/build/pdf.mjs',
   '/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
+  '/node_modules/sherpa-onnx-node/package.json',
   '/out/renderer/assets/ocr/models/PP-OCRv6_small_det_onnx_infer.tar',
   '/out/renderer/assets/ocr/models/PP-OCRv6_small_rec_onnx_infer.tar',
   '/out/renderer/assets/ocr/ort/ort-wasm-simd-threaded.jsep.mjs',
@@ -57,6 +58,30 @@ if (sourceMaps.length) {
   throw new Error(`成品仍包含 ${sourceMaps.length} 个 source map。`)
 }
 
+const speechModelRoot = path.join(
+  resourcesPath,
+  'asr',
+  'sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16'
+)
+const speechModelFiles = new Map([
+  ['encoder-epoch-99-avg-1.int8.onnx', 42_980_793],
+  ['decoder-epoch-99-avg-1.onnx', 13_877_276],
+  ['joiner-epoch-99-avg-1.int8.onnx', 3_228_485],
+  ['tokens.txt', 56_317]
+])
+for (const [name, size] of speechModelFiles) {
+  const file = path.join(speechModelRoot, name)
+  if (!existsSync(file) || statSync(file).size !== size) throw new Error(`成品缺少或损坏本地语音模型：${name}`)
+}
+
+const speechRuntimeRoot = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', 'sherpa-onnx-darwin-arm64')
+for (const name of ['sherpa-onnx.node', 'libsherpa-onnx-c-api.dylib', 'libonnxruntime.1.24.4.dylib']) {
+  if (!existsSync(path.join(speechRuntimeRoot, name))) throw new Error(`成品缺少本地语音运行库：${name}`)
+}
+for (const duplicate of ['libsherpa-onnx-cxx-api.dylib', 'libonnxruntime.dylib']) {
+  if (existsSync(path.join(speechRuntimeRoot, duplicate))) throw new Error(`成品仍包含重复本地语音运行库：${duplicate}`)
+}
+
 const executablePath = path.join(appPath, 'Contents', 'MacOS', path.basename(appPath, '.app'))
 const runtimeProbe = [
   'const { pathToFileURL } = require("node:url")',
@@ -64,9 +89,10 @@ const runtimeProbe = [
   'Promise.all([',
   '  import(pathToFileURL(root + "/node_modules/chokidar/index.js").href),',
   '  Promise.resolve(require(root + "/node_modules/mammoth/lib/index.js")),',
-  '  import(pathToFileURL(root + "/node_modules/pdfjs-dist/legacy/build/pdf.mjs").href)',
-  ']).then(([chokidar, mammoth, pdfjs]) => {',
-  '  if (typeof chokidar.watch !== "function" || typeof mammoth.extractRawText !== "function" || typeof pdfjs.getDocument !== "function") process.exit(2)',
+  '  import(pathToFileURL(root + "/node_modules/pdfjs-dist/legacy/build/pdf.mjs").href),',
+  '  Promise.resolve(require(root + "/node_modules/sherpa-onnx-node/sherpa-onnx.js"))',
+  ']).then(([chokidar, mammoth, pdfjs, sherpa]) => {',
+  '  if (typeof chokidar.watch !== "function" || typeof mammoth.extractRawText !== "function" || typeof pdfjs.getDocument !== "function" || typeof sherpa.OnlineRecognizer !== "function") process.exit(2)',
   '}).catch((error) => { console.error(error); process.exit(1) })'
 ].join('\n')
 execFileSync(executablePath, ['-e', runtimeProbe, asarPath], {

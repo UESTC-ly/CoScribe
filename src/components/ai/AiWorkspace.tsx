@@ -8,7 +8,9 @@ import {
   ImagePlus,
   KeyRound,
   Loader2,
+  Mic,
   MessageSquarePlus,
+  MessageSquareCode,
   NotebookPen,
   Pencil,
   Plus,
@@ -42,6 +44,7 @@ import {
   normalizeChatImageAttachments
 } from '../../shared/chat-images'
 import { MarkdownMessage } from './MarkdownMessage'
+import { useLocalSpeechInput } from './useLocalSpeechInput'
 import '../../styles/ai.css'
 
 export interface AiProjectFileOption {
@@ -309,6 +312,11 @@ export function AiWorkspace({
     if (draft === undefined) setLocalDraft(value)
     onDraftChange?.(value)
   }
+  const speech = useLocalSpeechInput({
+    draft: currentDraft,
+    onDraftChange: updateDraft,
+    onError: (message) => setComposerError(message)
+  })
 
   useEffect(() => {
     const textarea = textareaRef.current
@@ -362,7 +370,7 @@ export function AiWorkspace({
 
   const submit = (): void => {
     const content = currentDraft.trim()
-    if (isBusy || disabled || !activeSession) return
+    if (isBusy || speech.active || disabled || !activeSession) return
     if (composerMode === 'image') {
       if (!content || !isImageConfigured || !onGenerateImage) return
       updateDraft('')
@@ -492,6 +500,15 @@ export function AiWorkspace({
             onClick={() => void onNewSession()}
           >
             <Plus aria-hidden="true" />
+          </button>
+          <button
+            className="ai-icon-button"
+            type="button"
+            title="编辑系统提示词"
+            aria-label="编辑系统提示词"
+            onClick={() => onOpenSettings?.()}
+          >
+            <MessageSquareCode aria-hidden="true" />
           </button>
 
           {sessionMenuOpen && (
@@ -743,10 +760,11 @@ export function AiWorkspace({
             value={currentDraft}
             rows={1}
             disabled={disabled || !activeSession || (composerMode === 'chat' ? !isConfigured : !isImageConfigured)}
+            readOnly={speech.active}
             placeholder={
               composerMode === 'image'
                 ? (isImageConfigured ? '描述想生成的图片…' : '请先配置 GPT-Image 2')
-                : !isConfigured ? '请先配置 AI' : activeSession ? '针对当前内容提问，也可直接粘贴图片…' : '请先新建会话'
+                : speech.active ? '正在本地实时转写；再次点击麦克风结束…' : !isConfigured ? '请先配置 AI' : activeSession ? '针对当前内容提问，也可直接粘贴图片…' : '请先新建会话'
             }
             aria-label="向 AI 提问"
             onChange={(event) => updateDraft(event.target.value)}
@@ -773,9 +791,21 @@ export function AiWorkspace({
               }}
             />
             <button
+              className={clsx('ai-composer__tool', speech.active && 'is-active is-recording')}
+              type="button"
+              disabled={disabled || !activeSession || isBusy || composerMode === 'image' || speech.phase === 'stopping'}
+              aria-label={speech.active ? '停止语音输入' : '开始语音输入'}
+              aria-pressed={speech.active}
+              title={speech.active ? '停止本地语音转写' : '本地实时语音转文字'}
+              onClick={() => void (speech.active ? speech.stop() : speech.start())}
+            >
+              {speech.active && speech.phase !== 'listening' ? <Loader2 className="ai-spin" aria-hidden="true" /> : <Mic aria-hidden="true" />}
+              <span className="ai-composer__tool-label">{speech.phase === 'listening' ? '聆听中' : '语音'}</span>
+            </button>
+            <button
               className={clsx('ai-composer__tool', pendingImages.length > 0 && 'is-active')}
               type="button"
-              disabled={disabled || !activeSession || isBusy}
+              disabled={disabled || !activeSession || isBusy || speech.active}
               aria-label="添加图片"
               title="添加图片（也可直接粘贴）"
               onClick={() => imageInputRef.current?.click()}
@@ -787,7 +817,7 @@ export function AiWorkspace({
             <button
               className="ai-composer__tool"
               type="button"
-              disabled={disabled || !activeSession || isBusy}
+              disabled={disabled || !activeSession || isBusy || speech.active}
               aria-label="截图"
               title="框选屏幕区域并加入聊天（⌘/Ctrl + Shift + 8，Esc 取消）"
               onClick={() => void onCaptureScreenshot?.()}
@@ -798,7 +828,7 @@ export function AiWorkspace({
             <button
               className={clsx('ai-composer__tool', composerMode === 'image' && 'is-active')}
               type="button"
-              disabled={disabled || !activeSession || isBusy}
+              disabled={disabled || !activeSession || isBusy || speech.active}
               aria-label="生成图片"
               aria-pressed={composerMode === 'image'}
               title="切换到 GPT-Image 2 图片生成"
@@ -811,7 +841,7 @@ export function AiWorkspace({
               <button
                 className={clsx('ai-composer__tool', referencedFiles.length > 0 && 'is-active')}
                 type="button"
-                disabled={disabled || !activeSession || isBusy || composerMode === 'image'}
+                disabled={disabled || !activeSession || isBusy || speech.active || composerMode === 'image'}
                 aria-label="引用文件"
                 aria-haspopup="dialog"
                 aria-expanded={referenceMenuOpen}
@@ -859,7 +889,7 @@ export function AiWorkspace({
             <button
               className="ai-composer__tool ai-composer__tool--note"
               type="button"
-              disabled={disabled || !activeSession || activeSession.messages.length === 0 || isBusy || !isConfigured || composerMode === 'image'}
+              disabled={disabled || !activeSession || activeSession.messages.length === 0 || isBusy || speech.active || !isConfigured || composerMode === 'image'}
               aria-label="整理笔记"
               title="将当前会话整理成 Markdown 笔记并保存到本地"
               onClick={() => void onQuickNote?.()}
@@ -879,7 +909,7 @@ export function AiWorkspace({
                 aria-label={composerMode === 'image' ? '生成图片' : '发送消息'}
                 title={composerMode === 'image' ? '生成图片' : '发送消息'}
                 disabled={
-                  disabled || !activeSession ||
+                  disabled || !activeSession || speech.active ||
                   (composerMode === 'image'
                     ? !currentDraft.trim() || !isImageConfigured
                     : (!currentDraft.trim() && pendingImages.length === 0) || !isConfigured)

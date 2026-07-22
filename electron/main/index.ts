@@ -2,7 +2,7 @@ import { statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { app, BrowserWindow, globalShortcut, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, globalShortcut, net, protocol, session, shell, type MediaAccessPermissionRequest } from 'electron'
 
 import { IPC } from '../ipc-channels'
 import { AiService } from './ai'
@@ -13,6 +13,7 @@ import { ProjectService } from './project'
 import { ProjectSearchService } from './search'
 import { ScreenshotService } from './screenshot'
 import { SettingsStore } from './settings'
+import { SpeechRecognitionService } from './speech'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -66,11 +67,23 @@ function allowedExternalUrl(url: string): boolean {
   }
 }
 
+function trustedRendererUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    const developmentUrl = process.env.ELECTRON_RENDERER_URL
+    if (developmentUrl) return url.origin === new URL(developmentUrl).origin
+    return url.protocol === 'coscribe-app:' && url.hostname === 'app' && url.pathname === '/index.html'
+  } catch {
+    return false
+  }
+}
+
 const settings = new SettingsStore()
 let pdf: PdfTextService
 const projectLifecycle = {
   ai: null as AiService | null,
-  browser: null as ResearchBrowserService | null
+  browser: null as ResearchBrowserService | null,
+  speech: null as SpeechRecognitionService | null
 }
 const project = new ProjectService(
   settings,
@@ -81,6 +94,7 @@ const project = new ProjectService(
   () => {
     projectLifecycle.ai?.stopAll()
     projectLifecycle.browser?.close()
+    projectLifecycle.speech?.stopAll()
   }
 )
 pdf = new PdfTextService(() => project.guard)
@@ -88,6 +102,8 @@ const search = new ProjectSearchService(project, pdf)
 const ai = new AiService(settings, project, pdf, search)
 projectLifecycle.ai = ai
 const screenshot = new ScreenshotService(() => mainWindow)
+const speech = new SpeechRecognitionService()
+projectLifecycle.speech = speech
 const browser = new ResearchBrowserService(() => mainWindow, project)
 projectLifecycle.browser = browser
 
@@ -205,7 +221,24 @@ app.on('open-file', (event, filePath) => {
 
 void app.whenReady().then(() => {
   app.setAppUserModelId('com.coscribe.app')
-  registerIpc({ project, pdf, search, settings, ai, screenshot, browser })
+  const defaultSession = session.defaultSession
+  defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => (
+    permission === 'media' &&
+    details.isMainFrame &&
+    details.mediaType === 'audio' &&
+    Boolean(webContents && webContents === mainWindow?.webContents && trustedRendererUrl(webContents.getURL()))
+  ))
+  defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const media = details as MediaAccessPermissionRequest
+    const audioOnly = Array.isArray(media.mediaTypes) && media.mediaTypes.length === 1 && media.mediaTypes[0] === 'audio'
+    callback(
+      permission === 'media' &&
+      audioOnly &&
+      webContents === mainWindow?.webContents &&
+      trustedRendererUrl(webContents.getURL())
+    )
+  })
+  registerIpc({ project, pdf, search, settings, ai, screenshot, browser, speech })
   protocol.handle('coscribe-app', async (request) => {
     try {
       const parsed = new URL(request.url)
@@ -264,6 +297,7 @@ void app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   ai.stopAll()
+  speech.stopAll()
   browser.destroy()
   globalShortcut.unregisterAll()
 })

@@ -12,7 +12,7 @@ import { clampMarkdownOutlineWidth, PANEL_LAYOUT } from './panel-layout'
 
 const PANE_IDS: PaneId[] = ['primary', 'secondary']
 const TAB_KINDS = new Set(['markdown', 'pdf', 'docx', 'ppt', 'pptx', 'webarchive', 'image', 'text', 'unsupported'])
-const NAV_SECTIONS = new Set(['files', 'sessions', 'search', 'annotations'])
+const NAV_SECTIONS = new Set(['files', 'sessions', 'search', 'annotations', 'memory', 'plugins'])
 
 export interface WorkspaceRestoreOptions {
   /** If supplied, tabs not present in this list are retained and marked missing. */

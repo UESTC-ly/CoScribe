@@ -17,10 +17,10 @@ describe('MarkdownContent', () => {
     expect(screen.queryByRole('region', { name: /Mermaid 代码块/ })).not.toBeInTheDocument()
   })
 
-  it('adds IDE-style tokens and a language label to supported code', () => {
+  it('adds IDE-style tokens and a language label to supported code', async () => {
     render(<MarkdownContent content={'```typescript\nconst answer: number = 42\n```'} />)
 
-    const block = screen.getByRole('region', { name: 'TypeScript 代码块' })
+    const block = await screen.findByRole('region', { name: 'TypeScript 代码块' })
     expect(block).toHaveTextContent('const answer: number = 42')
     expect(block.querySelector('.hljs-keyword')).toHaveTextContent('const')
     expect(block.querySelector('.hljs-number')).toHaveTextContent('42')
@@ -34,7 +34,7 @@ describe('MarkdownContent', () => {
     })
     render(<MarkdownContent content={'```python\nprint("CoScribe")\n```'} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '复制代码' }))
+    fireEvent.click(await screen.findByRole('button', { name: '复制代码' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('print("CoScribe")'))
     expect(screen.getByRole('button', { name: '代码已复制' })).toBeInTheDocument()
   })

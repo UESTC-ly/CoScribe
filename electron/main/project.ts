@@ -38,6 +38,7 @@ import {
   type OcrLine,
   type OcrResult,
   type ProjectInfo,
+  type ProjectMemoryDocument,
   type ProjectRef,
   type SourceRef,
   type WorkspaceState
@@ -48,6 +49,11 @@ import { extractPptxText } from './pptx'
 import { assertNotMetadataPath, assertSafeName, canonicalDirectory, isInside, ProjectPathGuard } from './security'
 import { SettingsStore } from './settings'
 import { atomicCreate, atomicWrite, atomicWriteJson, readJson } from './storage'
+import {
+  DEFAULT_PROJECT_MEMORY,
+  normalizeProjectMemory,
+  PROJECT_MEMORY_FILENAME
+} from './project-memory'
 
 const METADATA_DIRECTORY = '.vibeknowledge'
 const MAX_RECENT_PROJECTS = 20
@@ -238,7 +244,8 @@ function normalizedWorkspace(input: unknown, root: string): WorkspaceState {
     pdf: candidate.pdf && typeof candidate.pdf === 'object' ? candidate.pdf : {},
     markdown: candidate.markdown && typeof candidate.markdown === 'object' ? candidate.markdown : {},
     navSection:
-      candidate.navSection === 'sessions' || candidate.navSection === 'search' || candidate.navSection === 'annotations'
+      candidate.navSection === 'sessions' || candidate.navSection === 'search' || candidate.navSection === 'annotations' ||
+      candidate.navSection === 'memory' || candidate.navSection === 'plugins'
         ? candidate.navSection
         : 'files',
     aiVisible: candidate.aiVisible !== false,
@@ -824,6 +831,34 @@ export class ProjectService {
 
   async saveState(state: WorkspaceState): Promise<void> {
     await this.writeMetadata('workspace', normalizedWorkspace(state, this.guard.root))
+  }
+
+  async memory(): Promise<ProjectMemoryDocument> {
+    const memoryPath = path.join(this.guard.root, PROJECT_MEMORY_FILENAME)
+    try {
+      const canonical = await this.guard.existing(memoryPath, 'file')
+      const info = await stat(canonical)
+      if (info.size > 256 * 1024) throw new Error('COSCRIBE.md 超过安全读取上限。')
+      const content = normalizeProjectMemory(await readFile(canonical, 'utf8'))
+      return { path: canonical, content, exists: true, modifiedAt: info.mtimeMs, size: info.size }
+    } catch (error) {
+      if (!isMissing(error)) throw error
+      return {
+        path: memoryPath,
+        content: DEFAULT_PROJECT_MEMORY,
+        exists: false,
+        modifiedAt: 0,
+        size: 0
+      }
+    }
+  }
+
+  async saveMemory(value: string): Promise<ProjectMemoryDocument> {
+    const content = normalizeProjectMemory(value)
+    const target = await this.guard.assertMarkdown(path.join(this.guard.root, PROJECT_MEMORY_FILENAME), false)
+    const rootIdentity = await this.guard.identity(this.guard.root, 'directory')
+    await atomicWrite(target, content, 0o600, () => this.guard.verifyIdentity(rootIdentity))
+    return this.memory()
   }
 
   async listSessions(): Promise<ChatSession[]> {

@@ -1,27 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Columns2,
   Columns3,
   FileCheck2,
-  FolderOpen,
   PanelRightClose,
   PanelRightOpen,
   Save,
   Settings as SettingsIcon
 } from 'lucide-react'
-import { AiWorkspace, type AiSendPayload, type ImageGenerationPayload } from './components/ai'
-import { BrowserWorkspace } from './components/browser'
+import type { AiSendPayload, ImageGenerationPayload } from './components/ai'
 import {
   ActivityRail,
   ConfirmDialog,
   Dialog,
-  EditorPane,
   HomeScreen,
   ModelSwitcher,
   ProjectNavigator,
   SettingsDialog
 } from './components/shell'
 import type { MarkdownSaveRequest, PdfTextSelection } from './components/viewers'
+import { PLANNER_FILE_PATH } from './plugins/planner/planner-utils'
 import {
   clampAiPanelWidth,
   clampProjectNavigatorWidth,
@@ -59,6 +57,11 @@ import type {
 import { DEFAULT_SETTINGS } from './shared/types'
 import './styles/shell.css'
 
+const AiWorkspace = lazy(() => import('./components/ai/AiWorkspace').then((module) => ({ default: module.AiWorkspace })))
+const BrowserWorkspace = lazy(() => import('./components/browser/BrowserWorkspace').then((module) => ({ default: module.BrowserWorkspace })))
+const EditorPane = lazy(() => import('./components/shell/EditorPane').then((module) => ({ default: module.EditorPane })))
+const PlannerWorkspace = lazy(() => import('./plugins/planner/PlannerWorkspace'))
+
 interface PromptState {
   title: string
   description: string
@@ -82,6 +85,7 @@ interface ActiveAiRequest {
   sessionId: string
   assistantMessageId: string
   autoApplyOperation?: boolean
+  operationMode?: AiSendPayload['operationMode']
 }
 
 function makeId(prefix: string): string {
@@ -171,6 +175,7 @@ export default function App(): React.JSX.Element {
   const [chatDraftFocusToken, setChatDraftFocusToken] = useState(0)
   const [contextScope, setContextScope] = useState<ContextScope>(DEFAULT_SETTINGS.defaultContextScope)
   const [browserActive, setBrowserActive] = useState(false)
+  const [activePluginId, setActivePluginId] = useState<string | null>(null)
   const [pendingWebContext, setPendingWebContext] = useState<ContextSnapshot | null>(null)
   const [resizing, setResizing] = useState<'left' | 'ai' | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
@@ -190,6 +195,7 @@ export default function App(): React.JSX.Element {
   const hydrateProject = useCallback(async (project: ProjectInfo): Promise<void> => {
     setHydrated(false)
     setError(null)
+    setActivePluginId(null)
     try {
       // Load the real file tree before mounting the workspace. A slow recursive
       // scan should not briefly look like an empty project, and a broken metadata
@@ -219,7 +225,11 @@ export default function App(): React.JSX.Element {
 
       const sessions = sessionsResult.status === 'fulfilled' ? sessionsResult.value : []
       if (!sessions.length) store.createSession()
-      const activeTabs = store.workspace.tabs.filter((tab) => !tab.missing)
+      const activeTabIds = new Set([
+        store.workspace.panes.primary.activeTabId,
+        ...(store.workspace.split ? [store.workspace.panes.secondary.activeTabId] : [])
+      ].filter((id): id is string => Boolean(id)))
+      const activeTabs = store.workspace.tabs.filter((tab) => !tab.missing && activeTabIds.has(tab.id))
       await Promise.all(activeTabs.map(async (tab) => {
         try { store.loadDocument(await window.coscribe.file.read(tab.path)) } catch { store.markPathMissing(tab.path) }
       }))
@@ -340,59 +350,103 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', copySelectionToChat)
   }, [])
 
-  useEffect(() => window.coscribe.ai.onStream((event: AiStreamEvent) => {
-    const request = activeRequests.current.get(event.requestId)
-    if (!request) return
-    const store = setStore()
-    if (event.type === 'delta') {
-      store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({ ...message, content: message.content + event.text }))
-      return
-    }
-    if (event.type === 'done') {
-      store.updateMessage(request.sessionId, request.assistantMessageId, { sources: event.sources, operation: event.operation })
-      const session = appStore.getState().sessions.find((item) => item.id === request.sessionId)
-      if (session?.title === '新会话' && appStore.getState().settings.autoTitle) {
-        const firstMessage = session.messages.find((message) => message.role === 'user')
-        const firstQuestion = firstMessage?.content.trim() || firstMessage?.attachments?.[0]?.name || '图片提问'
-        store.renameSession(session.id, firstQuestion.replace(/[#*_`]/g, '').slice(0, 20))
+  useEffect(() => {
+    // Rendering and persisting every token-sized delta makes long answers clone
+    // the chat state hundreds of times per second. A short buffer keeps the UI
+    // visibly live while bounding React/Zustand work.
+    const pendingDeltas = new Map<string, string>()
+    let flushTimer: number | null = null
+    const flush = (requestId?: string): void => {
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer)
+        flushTimer = null
       }
-      if (request.autoApplyOperation) {
-        if (!event.operation) {
-          const message = 'AI 没有返回可写入的笔记文件，请重试“整理笔记”。'
-          store.updateMessage(request.sessionId, request.assistantMessageId, { error: message })
-          setAiError(message)
-        } else {
-          const operation = event.operation
-          setApplyingOperationId(operation.id)
-          void window.coscribe.file.applyAiOperation({ ...operation, status: 'accepted' }).then(async (result) => {
-            store.updateMessage(request.sessionId, request.assistantMessageId, {
-              operation: { ...operation, status: 'accepted' }
-            })
-            const files = result.files.length ? result.files : [result]
-            for (const file of files) store.markDocumentSaved(file)
-            store.setFileTree(await window.coscribe.project.tree())
-            const first = files[0]
-            if (first) store.openTab({ id: `tab:${first.path}`, path: first.path, name: fileName(first.path), kind: 'markdown' })
-          }).catch((reason: unknown) => {
-            const message = reason instanceof Error ? reason.message : '整理后的笔记无法写入本地。'
-            store.updateMessage(request.sessionId, request.assistantMessageId, {
-              operation: { ...operation, status: 'failed', error: message }
-            })
-            setAiError(message)
-          }).finally(() => setApplyingOperationId(null))
+      const entries = requestId
+        ? [[requestId, pendingDeltas.get(requestId) ?? ''] as const]
+        : [...pendingDeltas.entries()]
+      for (const [id, text] of entries) {
+        if (!text) continue
+        pendingDeltas.delete(id)
+        const request = activeRequests.current.get(id)
+        if (!request) continue
+        setStore().updateMessage(request.sessionId, request.assistantMessageId, (message) => ({ ...message, content: message.content + text }))
+      }
+      if (pendingDeltas.size && flushTimer === null) flushTimer = window.setTimeout(() => flush(), 40)
+    }
+    const scheduleFlush = (): void => {
+      if (flushTimer === null) flushTimer = window.setTimeout(() => flush(), 40)
+    }
+
+    const unsubscribe = window.coscribe.ai.onStream((event: AiStreamEvent) => {
+      const request = activeRequests.current.get(event.requestId)
+      if (!request) return
+      const store = setStore()
+      if (event.type === 'delta') {
+        pendingDeltas.set(event.requestId, `${pendingDeltas.get(event.requestId) ?? ''}${event.text}`)
+        scheduleFlush()
+        return
+      }
+      if (event.type === 'done' || event.type === 'stopped' || event.type === 'error') flush(event.requestId)
+      if (event.type === 'done') {
+        store.updateMessage(request.sessionId, request.assistantMessageId, { sources: event.sources, operation: event.operation })
+        const session = appStore.getState().sessions.find((item) => item.id === request.sessionId)
+        if (session?.title === '新会话' && appStore.getState().settings.autoTitle) {
+          const firstMessage = session.messages.find((message) => message.role === 'user')
+          const firstQuestion = firstMessage?.content.trim() || firstMessage?.attachments?.[0]?.name || '图片提问'
+          store.renameSession(session.id, firstQuestion.replace(/[#*_`]/g, '').slice(0, 20))
         }
+        if (request.autoApplyOperation) {
+          if (!event.operation) {
+            const message = request.operationMode === 'generate-project-plan'
+              ? 'AI 没有返回可写入的项目计划，请重新生成。'
+              : 'AI 没有返回可写入的笔记文件，请重试“整理笔记”。'
+            store.updateMessage(request.sessionId, request.assistantMessageId, { error: message })
+            setAiError(message)
+          } else {
+            const operation = event.operation
+            setApplyingOperationId(operation.id)
+            void window.coscribe.file.applyAiOperation({ ...operation, status: 'accepted' }).then(async (result) => {
+              store.updateMessage(request.sessionId, request.assistantMessageId, {
+                operation: { ...operation, status: 'accepted' }
+              })
+              const files = result.files.length ? result.files : [result]
+              for (const file of files) store.markDocumentSaved(file)
+              store.setFileTree(await window.coscribe.project.tree())
+              const first = files[0]
+              if (first) {
+                setBrowserActive(false)
+                setActivePluginId(null)
+                store.openTab({ id: `tab:${first.path}`, path: first.path, name: fileName(first.path), kind: 'markdown' })
+              }
+            }).catch((reason: unknown) => {
+              const message = reason instanceof Error
+                ? reason.message
+                : request.operationMode === 'generate-project-plan'
+                  ? '生成的项目计划无法写入本地。'
+                  : '整理后的笔记无法写入本地。'
+              store.updateMessage(request.sessionId, request.assistantMessageId, {
+                operation: { ...operation, status: 'failed', error: message }
+              })
+              setAiError(message)
+            }).finally(() => setApplyingOperationId(null))
+          }
+        }
+      } else if (event.type === 'stopped') {
+        store.updateMessage(request.sessionId, request.assistantMessageId, { stopped: true })
+      } else if (event.type === 'error') {
+        store.updateMessage(request.sessionId, request.assistantMessageId, { error: event.message })
+        setAiError(event.message)
       }
-    } else if (event.type === 'stopped') {
-      store.updateMessage(request.sessionId, request.assistantMessageId, { stopped: true })
-    } else if (event.type === 'error') {
-      store.updateMessage(request.sessionId, request.assistantMessageId, { error: event.message })
-      setAiError(event.message)
+      if (event.type === 'done' || event.type === 'stopped' || event.type === 'error') {
+        activeRequests.current.delete(event.requestId)
+        setStreamingRequestId((current) => current === event.requestId ? null : current)
+      }
+    })
+    return () => {
+      unsubscribe()
+      if (flushTimer !== null) window.clearTimeout(flushTimer)
     }
-    if (event.type === 'done' || event.type === 'stopped' || event.type === 'error') {
-      activeRequests.current.delete(event.requestId)
-      setStreamingRequestId((current) => current === event.requestId ? null : current)
-    }
-  }), [])
+  }, [])
 
   const openProject = useCallback(async (loader: () => Promise<ProjectInfo | null>): Promise<void> => {
     setBooting(true)
@@ -422,6 +476,7 @@ export default function App(): React.JSX.Element {
   const openNode = useCallback((node: FileNode, location?: { page?: number; line?: number }): void => {
     if (node.kind === 'folder') return
     setBrowserActive(false)
+    setActivePluginId(null)
     setPendingWebContext(null)
     const tab: OpenTab = { id: `tab:${node.path}`, path: node.path, name: node.name, kind: node.kind }
     setStore().openTab(tab)
@@ -464,6 +519,7 @@ export default function App(): React.JSX.Element {
       await window.coscribe.project.close()
       setStore().closeProject()
       setBrowserActive(false)
+      setActivePluginId(null)
       setPendingWebContext(null)
       hydratedProjectPath.current = null
       setHydrated(false)
@@ -667,7 +723,7 @@ export default function App(): React.JSX.Element {
     let sessionId = store.workspace.currentSessionId
     if (!sessionId) sessionId = store.createSession()
     store.setReferencedFiles(payload.referencedFiles)
-    const context = payload.operationMode === 'organize-project-notes'
+    const context = payload.operationMode
       ? setStore().captureActiveContext('project')
       : pendingWebContext && pendingWebContext.projectPath === state.project?.path
         ? { ...pendingWebContext, referencedFiles: [...pendingWebContext.referencedFiles] }
@@ -692,7 +748,8 @@ export default function App(): React.JSX.Element {
       requestId,
       sessionId,
       assistantMessageId: assistantMessage.id,
-      ...(payload.autoApplyOperation ? { autoApplyOperation: true } : {})
+      ...(payload.autoApplyOperation ? { autoApplyOperation: true } : {}),
+      ...(payload.operationMode ? { operationMode: payload.operationMode } : {})
     })
     setStreamingRequestId(requestId)
     setAiError(null)
@@ -752,6 +809,32 @@ export default function App(): React.JSX.Element {
       autoApplyOperation: true
     })
   }, [sendAiMessage])
+
+  const generateProjectPlan = useCallback(async (goal: string, horizon: string): Promise<void> => {
+    if (streamingRequestId || imageGenerationRequestId) {
+      const message = '请等待当前 AI 任务结束后再生成计划。'
+      setAiError(message)
+      setStore().setAiVisible(true)
+      throw new Error(message)
+    }
+    setStore().setAiVisible(true)
+    await sendAiMessage({
+      content: [
+        `请为当前项目生成一份“${horizon}”尺度的可执行计划。`,
+        `目标与约束：${goal}`,
+        `必须写入项目内固定文件 ${PLANNER_FILE_PATH}。如果文件不存在就 create；如果已经存在就 replace 为完整更新后的文档，不要写入其他路径。`,
+        '保留并使用 CoScribe Planner 的 Markdown 日程表标记：<!-- coscribe:planner:start --> 与 <!-- coscribe:planner:end -->。',
+        '日程表列必须是：日期、时间、事项、状态、优先级、备注；日期使用 YYYY-MM-DD，状态使用待办/进行中/已完成，优先级使用低/中/高。',
+        '同时补充“本周重点”和“里程碑”，任务要具体、可验证、有合理依赖与缓冲，不要虚构项目中不存在的事实。',
+        '必须调用 CoScribe 文件操作工具并直接保存，不要只在聊天中返回计划正文。'
+      ].join('\n'),
+      attachments: [],
+      scope: 'project',
+      referencedFiles: [],
+      operationMode: 'generate-project-plan',
+      autoApplyOperation: true
+    })
+  }, [imageGenerationRequestId, sendAiMessage, streamingRequestId])
 
   const stopAi = useCallback(async (): Promise<void> => {
     if (streamingRequestId) await window.coscribe.ai.stop(streamingRequestId)
@@ -893,6 +976,32 @@ export default function App(): React.JSX.Element {
     setContextScope(saved.defaultContextScope)
   }, [])
 
+  const openPlugin = useCallback((pluginId: string): void => {
+    if (!appStore.getState().settings.enabledPlugins.includes(pluginId)) return
+    setBrowserActive(false)
+    setPendingWebContext(null)
+    setActivePluginId(pluginId)
+  }, [])
+
+  const togglePlugin = useCallback(async (pluginId: string, enabled: boolean): Promise<void> => {
+    const current = appStore.getState().settings
+    const enabledPlugins = enabled
+      ? [...new Set([...current.enabledPlugins, pluginId])]
+      : current.enabledPlugins.filter((id) => id !== pluginId)
+    try {
+      const saved = await window.coscribe.settings.save({ ...current, enabledPlugins })
+      setStore().setSettings(saved)
+      if (!enabled) setActivePluginId((active) => active === pluginId ? null : active)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '无法保存插件设置')
+    }
+  }, [])
+
+  const plannerFileChanged = useCallback(async (result: FileReadResult): Promise<void> => {
+    setStore().markDocumentSaved(result)
+    await refreshTree()
+  }, [refreshTree])
+
   const saveQuickAiSettings = useCallback(async (
     patch: Partial<Pick<AppSettings, 'model' | 'reasoningEffort'>>
   ): Promise<void> => {
@@ -984,6 +1093,9 @@ export default function App(): React.JSX.Element {
   const visibleAiWidth = clampAiPanelWidth(state.workspace.aiWidth, aiMaximumWidth)
   const isConfigured = isAiConfigured(state.settings)
   const imageConfigured = isImageConfigured(state.settings)
+  const plannerAbsolutePath = `${state.project.path.replace(/\/+$/u, '')}/${PLANNER_FILE_PATH}`
+  const hasUnsavedPlan = Boolean(state.documents[plannerAbsolutePath]?.dirty)
+  const specialWorkspaceActive = browserActive || Boolean(activePluginId)
 
   const paneProps = (pane: PaneId, tabs: OpenTab[]) => ({
     projectPath: state.project!.path,
@@ -1027,16 +1139,16 @@ export default function App(): React.JSX.Element {
       } as React.CSSProperties}
     >
       <header className="app-titlebar">
-        <div className="app-titlebar__project"><strong>{state.project.name}</strong><span>{browserActive ? '资料浏览器 · 原网页' : activeTab?.path ?? state.project.path}</span></div>
-        <div className="app-titlebar__center">{browserActive ? '单标签资料浏览器' : activeDocument?.dirty ? '未保存' : activeTab ? '本地文件' : '项目工作区'}</div>
+        <div className="app-titlebar__project"><strong>{state.project.name}</strong><span>{browserActive ? '资料浏览器 · 原网页' : activePluginId === 'planner' ? PLANNER_FILE_PATH : activeTab?.path ?? state.project.path}</span></div>
+        <div className="app-titlebar__center">{browserActive ? '单标签资料浏览器' : activePluginId === 'planner' ? '可信内置插件' : activeDocument?.dirty ? '未保存' : activeTab ? '本地文件' : '项目工作区'}</div>
         <div className="app-titlebar__actions">
-          <button className={`icon-button ${state.workspace.split ? 'is-active' : ''}`} disabled={browserActive} onClick={toggleSplit} title={browserActive ? '资料浏览器使用单工作区' : state.workspace.split ? '关闭分屏' : '左右分屏'} aria-label={state.workspace.split ? '关闭分屏' : '左右分屏'}>{state.workspace.split ? <Columns3 size={16} /> : <Columns2 size={16} />}</button>
+          <button className={`icon-button ${state.workspace.split ? 'is-active' : ''}`} disabled={specialWorkspaceActive} onClick={toggleSplit} title={specialWorkspaceActive ? '当前工作区使用单内容区域' : state.workspace.split ? '关闭分屏' : '左右分屏'} aria-label={state.workspace.split ? '关闭分屏' : '左右分屏'}>{state.workspace.split ? <Columns3 size={16} /> : <Columns2 size={16} />}</button>
           <button className={`icon-button ${state.workspace.aiVisible ? 'is-active' : ''}`} onClick={() => state.setAiVisible(!state.workspace.aiVisible)} title={state.workspace.aiVisible ? '隐藏 AI' : '显示 AI'} aria-label={state.workspace.aiVisible ? '隐藏 AI' : '显示 AI'}>{state.workspace.aiVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}</button>
           <button className="icon-button" onClick={() => setSettingsOpen(true)} title="设置" aria-label="设置"><SettingsIcon size={16} /></button>
         </div>
       </header>
       <div className="app-body">
-        <ActivityRail active={state.workspace.navSection} aiVisible={state.workspace.aiVisible} browserActive={browserActive} onChange={state.setNavSection} onToggleBrowser={() => setBrowserActive((active) => !active)} onToggleAi={() => state.setAiVisible(!state.workspace.aiVisible)} onSettings={() => setSettingsOpen(true)} />
+        <ActivityRail active={state.workspace.navSection} aiVisible={state.workspace.aiVisible} browserActive={browserActive} onChange={state.setNavSection} onToggleBrowser={() => setBrowserActive((active) => { const next = !active; if (next) setActivePluginId(null); return next })} onToggleAi={() => state.setAiVisible(!state.workspace.aiVisible)} onSettings={() => setSettingsOpen(true)} />
         <ProjectNavigator
           section={state.workspace.navSection}
           projectName={state.project.name}
@@ -1068,24 +1180,47 @@ export default function App(): React.JSX.Element {
           onOpenSearchResult={openSearchResult}
           onOpenAnnotation={openAnnotation}
           onDeleteAnnotation={(item) => state.deleteAnnotation(item.id)}
+          onOpenMemory={(path) => openPath(path, 'markdown')}
+          onMemorySaved={refreshTree}
+          onSendMemoryToAi={(value) => {
+            setChatDraft(value)
+            setChatDraftFocusToken((token) => token + 1)
+            state.setAiVisible(true)
+          }}
+          enabledPluginIds={state.settings.enabledPlugins}
+          activePluginId={activePluginId}
+          onOpenPlugin={openPlugin}
+          onTogglePlugin={togglePlugin}
         />
         <div className={`resize-handle ${resizing === 'left' ? 'is-resizing' : ''}`} onPointerDown={(event) => beginResize('left', event)} role="separator" aria-orientation="vertical" aria-label="调整项目导航宽度" />
         <main className="workspace">
-          {browserActive ? (
-            <BrowserWorkspace
-              suspended={settingsOpen || Boolean(prompt) || Boolean(confirm)}
-              onClose={() => setBrowserActive(false)}
-              onSendToAi={sendWebCaptureToAi}
-              onCiteSource={citeWebSource}
-              onSaved={browserFileSaved}
-              onError={setError}
-            />
-          ) : (
-            <div className="editor-workbench">
-              <EditorPane {...paneProps('primary', primaryTabs)} />
-              {state.workspace.split && <EditorPane {...paneProps('secondary', secondaryTabs)} />}
-            </div>
-          )}
+          <Suspense fallback={<div className="workspace-loading"><span className="viewer-spinner" /><strong>正在载入工作区…</strong></div>}>
+            {browserActive ? (
+              <BrowserWorkspace
+                suspended={settingsOpen || Boolean(prompt) || Boolean(confirm)}
+                onClose={() => setBrowserActive(false)}
+                onSendToAi={sendWebCaptureToAi}
+                onCiteSource={citeWebSource}
+                onSaved={browserFileSaved}
+                onError={setError}
+              />
+            ) : activePluginId === 'planner' ? (
+              <PlannerWorkspace
+                projectName={state.project.name}
+                aiConfigured={isConfigured}
+                hasUnsavedPlan={hasUnsavedPlan}
+                onOpenMarkdown={(path) => openPath(path, 'markdown')}
+                onFileChanged={plannerFileChanged}
+                onGenerateWithAi={generateProjectPlan}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
+            ) : (
+              <div className="editor-workbench">
+                <EditorPane {...paneProps('primary', primaryTabs)} />
+                {state.workspace.split && <EditorPane {...paneProps('secondary', secondaryTabs)} />}
+              </div>
+            )}
+          </Suspense>
         </main>
         {state.workspace.aiVisible && <>
           <div
@@ -1102,7 +1237,7 @@ export default function App(): React.JSX.Element {
             tabIndex={0}
             title="拖拽或使用方向键调整，双击恢复默认宽度"
           />
-          <AiWorkspace
+          <Suspense fallback={<aside className="ai-workspace ai-workspace-loading"><span className="viewer-spinner" /><strong>正在载入 AI 工作区…</strong></aside>}><AiWorkspace
             projectName={state.project.name}
             sessions={state.sessions}
             currentSessionId={currentSession?.id ?? null}
@@ -1145,7 +1280,7 @@ export default function App(): React.JSX.Element {
             onRegenerateMessage={regenerateAiMessage}
             onOpenSettings={() => setSettingsOpen(true)}
             onDismissError={() => setAiError(null)}
-          />
+          /></Suspense>
         </>}
       </div>
       <footer className="app-statusbar">

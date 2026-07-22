@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
 import { ArrowLeft, FilePlus2, FolderPlus, Highlighter, MessageSquarePlus, RefreshCw, Search, X } from 'lucide-react'
 import type { Annotation, ChatSession, FileNode, SearchProgress, SearchResult, WorkspaceState } from '../../shared/types'
+import { PluginCatalogView } from '../../plugins'
+import '../../styles/plugins.css'
 import { FileTree } from './FileTree'
+import { ProjectMemoryView } from './ProjectMemoryView'
 
 type NavSection = WorkspaceState['navSection']
 
@@ -36,9 +39,23 @@ interface ProjectNavigatorProps {
   onOpenSearchResult: (result: SearchResult) => void
   onOpenAnnotation: (annotation: Annotation) => void
   onDeleteAnnotation: (annotation: Annotation) => void
+  onOpenMemory: (path: string) => void
+  onMemorySaved: () => void | Promise<void>
+  onSendMemoryToAi: (prompt: string) => void
+  enabledPluginIds: string[]
+  activePluginId: string | null
+  onOpenPlugin: (pluginId: string) => void
+  onTogglePlugin: (pluginId: string, enabled: boolean) => void | Promise<void>
 }
 
-const sectionLabels: Record<NavSection, string> = { files: '文件', sessions: '会话', search: '项目搜索', annotations: '标注' }
+const sectionLabels: Record<NavSection, string> = {
+  files: '文件',
+  sessions: '会话',
+  search: '项目搜索',
+  annotations: '标注',
+  memory: '项目记忆',
+  plugins: '插件中心'
+}
 
 function relativeTime(value: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - value) / 1000))
@@ -122,6 +139,8 @@ export function ProjectNavigator(props: ProjectNavigatorProps): React.JSX.Elemen
         {props.section === 'sessions' && <SessionsView sessions={props.sessions} currentId={props.currentSessionId} onNew={props.onNewSession} onSelect={props.onSelectSession} onRename={props.onRenameSession} onDelete={props.onDeleteSession} />}
         {props.section === 'search' && <SearchView query={props.searchQuery} results={props.searchResults} progress={props.searchProgress} onSearch={props.onSearch} onOpen={props.onOpenSearchResult} />}
         {props.section === 'annotations' && <AnnotationsView annotations={props.annotations} onOpen={props.onOpenAnnotation} onDelete={props.onDeleteAnnotation} />}
+        {props.section === 'memory' && <ProjectMemoryView projectPath={props.projectPath} onOpen={props.onOpenMemory} onSaved={props.onMemorySaved} onSendToAi={props.onSendMemoryToAi} />}
+        {props.section === 'plugins' && <PluginCatalogView enabledPluginIds={props.enabledPluginIds} activePluginId={props.activePluginId} onOpen={props.onOpenPlugin} onToggle={props.onTogglePlugin} />}
       </div>
     </aside>
   )
