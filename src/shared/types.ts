@@ -46,6 +46,7 @@ export interface MarkdownReadingState {
   scrollTop: number
   cursor: number
   mode: 'edit' | 'preview' | 'both'
+  outlineWidth?: number
 }
 
 export interface WorkspaceState {
@@ -64,6 +65,7 @@ export interface WorkspaceState {
 }
 
 export type ContextScope = 'selection' | 'visible' | 'document' | 'project' | 'general'
+export type AiOperationMode = 'organize-project-notes'
 
 export interface ContextSnapshot {
   projectName: string
@@ -326,6 +328,7 @@ export interface AiRequest {
   sessionId: string
   messages: Pick<ChatMessage, 'role' | 'content' | 'attachments'>[]
   context: ContextSnapshot
+  operationMode?: AiOperationMode
   settings?: Partial<Pick<AppSettings, 'allowGeneralKnowledge'>>
 }
 
@@ -406,7 +409,7 @@ export interface CoScribeAPI {
     stop: (requestId: string) => Promise<void>
   }
   screenshot: {
-    capture: () => Promise<ChatImageAttachment>
+    capture: () => Promise<ChatImageAttachment | null>
     onResult: (listener: (event: ScreenshotCaptureEvent) => void) => () => void
   }
   browser: {

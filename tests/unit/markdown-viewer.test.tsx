@@ -92,6 +92,29 @@ describe('MarkdownViewer preview', () => {
     expect(outline.getByRole('button', { name: /Windows H3/ })).toBeVisible()
   })
 
+  it('resizes the outline from its right boundary and exposes keyboard controls', async () => {
+    const onReadingStateChange = vi.fn()
+    render(
+      <MarkdownViewer
+        value={'# 一个足够长的文档标题用于验证可调整的大纲宽度\n\n正文'}
+        onReadingStateChange={onReadingStateChange}
+      />,
+    )
+    const separator = screen.getByRole('separator', { name: '调整 Markdown 大纲宽度' })
+    const outline = screen.getByLabelText('Markdown 大纲')
+
+    expect(separator).toHaveAttribute('aria-valuenow', '216')
+    fireEvent(separator, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 216 }))
+    fireEvent(window, new MouseEvent('pointermove', { bubbles: true, clientX: 336 }))
+    fireEvent(window, new MouseEvent('pointerup', { bubbles: true, clientX: 336 }))
+
+    expect(separator).toHaveAttribute('aria-valuenow', '336')
+    expect(outline).toHaveStyle({ width: '336px' })
+    fireEvent.keyDown(separator, { key: 'End' })
+    expect(separator).toHaveAttribute('aria-valuenow', '520')
+    await waitFor(() => expect(onReadingStateChange).toHaveBeenCalledWith(expect.objectContaining({ outlineWidth: 520 })))
+  })
+
   it('keeps sibling branches visible and resets collapsed branches when the document changes', async () => {
     const content = '# 指南\n## 安装\n### Windows\n## 使用\n# 附录'
     const view = render(<MarkdownViewer documentId="guide-a" value={content} />)

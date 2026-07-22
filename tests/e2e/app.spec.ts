@@ -41,7 +41,11 @@ test.beforeEach(async () => {
     '',
     '## 依赖注入',
     '',
-    '依赖项可以被复用。'
+    '依赖项可以被复用。',
+    '',
+    '## 一个用于验证大纲宽度可调且标题能够完整显示的较长章节',
+    '',
+    '大纲宽度应该可以按需调整。'
   ].join('\n'))
   await writeFile(path.join(projectPath, '资料.txt'), '本地项目中的普通文本文件。\n')
   await copyFile(
@@ -364,6 +368,24 @@ test('copies selected document text into the AI composer with a shortcut', async
   await expect(page.getByLabel('基于')).toHaveValue('selection')
 })
 
+test('drag-selects a screenshot region and adds the crop to chat attachments', async ({}, testInfo) => {
+  const selectorWindow = electronApp.waitForEvent('window')
+  await page.getByRole('button', { name: '截图', exact: true }).click()
+  const selector = await selectorWindow
+  await selector.waitForLoadState('domcontentloaded')
+  await expect(selector.locator('#shade')).toBeVisible()
+
+  const closed = selector.waitForEvent('close')
+  await selector.mouse.move(80, 80)
+  await selector.mouse.down()
+  await selector.mouse.move(360, 260, { steps: 5 })
+  await selector.screenshot({ path: testInfo.outputPath('screenshot-roi-selector.png') })
+  await selector.mouse.up()
+  await closed
+
+  await expect(page.getByRole('img', { name: /CoScribe-screenshot-/u })).toBeVisible()
+})
+
 test('runs bundled local OCR from the packaged renderer origin', async () => {
   test.setTimeout(120_000)
   await page.locator('.tree-row').filter({ hasText: 'OCR测试.svg' }).click()
@@ -419,6 +441,41 @@ test('expands the AI workspace beyond the old cap without reverse-drag dead spac
   await page.keyboard.press('Home')
   await expect(separator).toHaveAttribute('aria-valuenow', '360')
   await expect.poll(async () => panel.evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBe(360)
+})
+
+test('resizes the Markdown outline and keeps narrow AI tools on one line', async ({}, testInfo) => {
+  await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
+  const outline = page.getByRole('complementary', { name: 'Markdown 大纲' })
+  const outlineSeparator = page.getByRole('separator', { name: '调整 Markdown 大纲宽度' })
+  const initialOutlineWidth = await outline.evaluate((element) => element.getBoundingClientRect().width)
+  const outlineBox = await outlineSeparator.boundingBox()
+  if (!outlineBox) throw new Error('Markdown outline resize separator is not visible')
+  await page.mouse.move(outlineBox.x + outlineBox.width / 2, outlineBox.y + 140)
+  await page.mouse.down()
+  await page.mouse.move(outlineBox.x + 305, outlineBox.y + 140, { steps: 8 })
+  await page.mouse.up()
+  await expect.poll(async () => outline.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(initialOutlineWidth + 250)
+
+  const longHeading = outline.getByRole('button', { name: /一个用于验证大纲宽度可调/u }).locator('span')
+  await expect.poll(async () => longHeading.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+
+  const aiSeparator = page.getByRole('separator', { name: '调整 AI 面板宽度' })
+  const aiBox = await aiSeparator.boundingBox()
+  if (!aiBox) throw new Error('AI resize separator is not visible')
+  await page.mouse.move(aiBox.x + aiBox.width / 2, aiBox.y + 120)
+  await page.mouse.down()
+  await page.mouse.move(aiBox.x + 800, aiBox.y + 120, { steps: 8 })
+  await page.mouse.up()
+  await expect(aiSeparator).toHaveAttribute('aria-valuenow', '300')
+
+  const toolbar = page.locator('.ai-composer__toolbar')
+  const toolButtons = toolbar.locator('.ai-composer__tool')
+  await expect.poll(async () => toolbar.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThan(42)
+  for (const button of await toolButtons.all()) {
+    expect(await button.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(27)
+    expect(await button.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe('nowrap')
+  }
+  await page.screenshot({ path: testInfo.outputPath('resizable-outline-and-narrow-ai.png') })
 })
 
 test('keeps focus while entering a new project name character by character', async ({}, testInfo) => {
@@ -543,10 +600,11 @@ test('keeps an AI-created note on preview until the user accepts it', async () =
 
 test('writes a multi-file note project immediately after the explicit quick-note action', async () => {
   let requestCount = 0
+  const requestBodies: Record<string, unknown>[] = []
   const server = createServer(async (request, response) => {
-    for await (const _chunk of request) {
-      // Consume the complete AI request before replying.
-    }
+    const chunks: Buffer[] = []
+    for await (const chunk of request) chunks.push(Buffer.from(chunk))
+    requestBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>)
     requestCount += 1
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
     response.end(JSON.stringify(requestCount === 1
@@ -569,8 +627,8 @@ test('writes a multi-file note project immediately after the explicit quick-note
               name: 'propose_markdown_operation',
               arguments: JSON.stringify({
                 operations: [
-                  { kind: 'create', targetPath: 'notes/index.md', proposedContent: '# 学习索引\n\n- [API 要点](topics/api.md)\n' },
-                  { kind: 'create', targetPath: 'notes/topics/api.md', proposedContent: '# API 要点\n\n自动保存的结构化内容。\n' }
+                  { kind: 'create', targetPath: '学习/API/index.md', proposedContent: '# 学习索引\n\n- [API 要点](api.md)\n' },
+                  { kind: 'create', targetPath: '学习/API/api.md', proposedContent: '# API 要点\n\n自动保存的结构化内容。\n' }
                 ],
                 summary: '创建多文件学习笔记项目'
               })
@@ -587,17 +645,29 @@ test('writes a multi-file note project immediately after the explicit quick-note
     await page.getByLabel('模型', { exact: true }).fill('local-e2e-model')
     await page.getByRole('button', { name: '保存设置' }).click()
 
+    await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
+    await expect(page.getByLabel('README.md Markdown 编辑器')).toBeVisible()
+    const readmeBefore = await readFile(path.join(projectPath, 'README.md'), 'utf8')
     await page.getByLabel('向 AI 提问').fill('请解释今天的 API 学习内容')
     await page.getByRole('button', { name: '发送消息' }).click()
     await expect(page.getByText('这里有值得长期保留的学习结论。')).toBeVisible()
     await page.getByRole('button', { name: '整理笔记', exact: true }).click()
 
-    const indexPath = path.join(projectPath, 'notes', 'index.md')
-    const topicPath = path.join(projectPath, 'notes', 'topics', 'api.md')
-    await expect.poll(async () => readFile(indexPath, 'utf8').catch(() => '')).toContain('[API 要点](topics/api.md)')
+    const indexPath = path.join(projectPath, '学习', 'API', 'index.md')
+    const topicPath = path.join(projectPath, '学习', 'API', 'api.md')
+    await expect.poll(async () => readFile(indexPath, 'utf8').catch(() => '')).toContain('[API 要点](api.md)')
     await expect.poll(async () => readFile(topicPath, 'utf8').catch(() => '')).toContain('自动保存的结构化内容')
+    expect(await readFile(path.join(projectPath, 'README.md'), 'utf8')).toBe(readmeBefore)
     await expect(page.getByRole('button', { name: '接受并写入' })).toHaveCount(0)
     expect(requestCount).toBe(2)
+
+    const organizationRequest = JSON.stringify(requestBodies[1])
+    expect(organizationRequest).toContain('项目目录结构')
+    expect(organizationRequest).toContain('README.md')
+    expect(organizationRequest).toContain('自主选择')
+    expect(organizationRequest).toContain('当前打开文档仅供参考')
+    expect(organizationRequest).not.toContain('当前笔记写入目标：README.md')
+    expect(organizationRequest).not.toContain('必须直接把该相对路径放入 operations 并使用 append')
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }

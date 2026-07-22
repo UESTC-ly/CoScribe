@@ -107,6 +107,7 @@ export interface MarkdownViewerReadingState {
   mode: MarkdownViewMode
   cursor: number
   scrollTop: number
+  outlineWidth: number
 }
 
 export interface MarkdownViewerProps {
@@ -118,6 +119,7 @@ export interface MarkdownViewerProps {
   readOnly?: boolean
   mode?: MarkdownViewMode
   defaultMode?: MarkdownViewMode
+  outlineWidth?: number
   autoSave?: boolean
   autoSaveDelayMs?: number
   modifiedAt?: number

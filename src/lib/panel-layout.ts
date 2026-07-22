@@ -3,6 +3,9 @@ export const PANEL_LAYOUT = {
   resizeHandleWidth: 1,
   projectNavigatorMinWidth: 210,
   projectNavigatorMaxWidth: 400,
+  markdownOutlineMinWidth: 168,
+  markdownOutlineDefaultWidth: 216,
+  markdownOutlineMaxWidth: 520,
   aiMinWidth: 300,
   aiDefaultWidth: 360,
   aiMaxWidth: 800,
@@ -24,6 +27,14 @@ export function clampProjectNavigatorWidth(width: number): number {
     finite(width, PANEL_LAYOUT.projectNavigatorMinWidth),
     PANEL_LAYOUT.projectNavigatorMinWidth,
     PANEL_LAYOUT.projectNavigatorMaxWidth
+  )
+}
+
+export function clampMarkdownOutlineWidth(width: number): number {
+  return clamp(
+    finite(width, PANEL_LAYOUT.markdownOutlineDefaultWidth),
+    PANEL_LAYOUT.markdownOutlineMinWidth,
+    PANEL_LAYOUT.markdownOutlineMaxWidth
   )
 }
 

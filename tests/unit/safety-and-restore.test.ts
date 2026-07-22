@@ -169,7 +169,7 @@ describe('workspace serialization and recovery', () => {
     activePane: 'secondary',
     split: true,
     pdf: { '/study/missing.pdf': { page: 4, scale: 1.2, fit: 'custom', scrollTop: 300 } },
-    markdown: {},
+    markdown: { '/study/a.md': { scrollTop: 18, cursor: 7, mode: 'preview', outlineWidth: 999 } },
     navSection: 'sessions',
     aiVisible: false,
     leftWidth: 5000,
@@ -185,6 +185,7 @@ describe('workspace serialization and recovery', () => {
     expect(restored.tabs.find((tab) => tab.id === 'b')?.missing).toBe(true)
     expect(restored.leftWidth).toBe(400)
     expect(restored.aiWidth).toBe(300)
+    expect(restored.markdown['/study/a.md']?.outlineWidth).toBe(520)
   })
 
   it('returns a detached, schema-clean serialization', () => {

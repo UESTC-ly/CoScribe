@@ -93,7 +93,7 @@
 .ai-workspace__identity strong {
   font-size: 13px;
   font-weight: 680;
-  letter-spacing: .01em;
+  letter-spacing: 0;
 }
 
 .ai-workspace__identity small {
@@ -101,7 +101,7 @@
   color: var(--ai-ink-faint);
   font-size: 9px;
   font-weight: 650;
-  letter-spacing: .12em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -206,7 +206,7 @@
   justify-content: space-between;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: .08em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -352,7 +352,7 @@
   color: var(--ai-ink-faint);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: .04em;
+  letter-spacing: 0;
   white-space: nowrap;
 }
 
@@ -729,7 +729,10 @@
 .ai-markdown h6 {
   margin: 1.15em 0 .45em;
   color: var(--ai-ink);
+  font-family: var(--font-display);
+  font-weight: 650;
   line-height: 1.3;
+  letter-spacing: 0;
 }
 
 .ai-markdown h1 { font-size: 1.32em; }
@@ -777,7 +780,7 @@
   background: color-mix(in srgb, var(--ai-line) 53%, transparent);
   border: 1px solid var(--ai-line);
   border-radius: 4px;
-  font: 500 .9em/1.4 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font: 500 .9em/1.4 var(--font-mono);
 }
 
 .ai-markdown pre {
@@ -788,7 +791,7 @@
   border: 1px solid var(--ai-code-border);
   border-radius: 7px;
   overflow: auto;
-  font: 11px/1.58 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font: 11px/1.58 var(--font-mono);
   tab-size: 2;
 }
 
@@ -822,7 +825,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font: 600 9.5px/1.2 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 600 9.5px/1.2 var(--font-ui);
 }
 
 .ai-code-block .vk-code-block__header > span {
@@ -1035,7 +1038,7 @@
   color: var(--ai-ink-faint);
   font-size: 9px;
   font-weight: 750;
-  letter-spacing: .08em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -1080,7 +1083,7 @@
   border-radius: 4px;
   display: grid;
   place-items: center;
-  font: 700 9px/1 "SFMono-Regular", monospace;
+  font: 700 9px/1 var(--font-mono);
 }
 
 .ai-source__content {
@@ -1162,7 +1165,7 @@
   color: var(--ai-ink-faint);
   font-size: 8px;
   font-weight: 750;
-  letter-spacing: .08em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -1214,7 +1217,7 @@
   color: var(--ai-ink-faint);
   font-size: 8.5px;
   font-weight: 750;
-  letter-spacing: .06em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -1229,7 +1232,7 @@
   grid-column: 2;
   overflow: hidden;
   color: var(--ai-ink-faint);
-  font: 8.5px/1.3 "SFMono-Regular", Consolas, monospace;
+  font: 8.5px/1.3 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1285,7 +1288,7 @@
 
 .ai-operation__batch summary code {
   color: var(--ai-ink-faint);
-  font: 8.5px/1.3 "SFMono-Regular", Consolas, monospace;
+  font: 8.5px/1.3 var(--font-mono);
 }
 
 .ai-operation__batch summary em {
@@ -1303,7 +1306,7 @@
   background: color-mix(in srgb, var(--ai-bg) 56%, var(--ai-paper-raised));
   border-top: 1px solid var(--ai-line);
   white-space: pre;
-  font: 9px/1.55 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font: 9px/1.55 var(--font-mono);
 }
 
 .ai-operation__summary {
@@ -1332,7 +1335,7 @@
   gap: 8px;
   font-size: 8.5px;
   font-weight: 700;
-  letter-spacing: .03em;
+  letter-spacing: 0;
 }
 
 .ai-operation__diff-legend {
@@ -1360,7 +1363,7 @@
   background: var(--ai-paper-raised);
   overflow: auto;
   white-space: pre;
-  font: 9.5px/1.55 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font: 9.5px/1.55 var(--font-mono);
   tab-size: 2;
 }
 
@@ -1369,7 +1372,7 @@
   color: var(--ai-ink-soft);
   background: var(--ai-paper-raised);
   overflow: auto;
-  font: 9px/1.5 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font: 9px/1.5 var(--font-mono);
 }
 
 .ai-diff__line {
@@ -1546,14 +1549,14 @@
   color: var(--ai-accent-dark);
   font-size: 9px;
   font-weight: 750;
-  letter-spacing: .1em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
 .ai-empty h2 {
   margin: 0;
   color: var(--ai-ink);
-  font: 650 16px/1.3 ui-serif, "Songti SC", serif;
+  font: 650 16px/1.3 var(--font-display);
 }
 
 .ai-empty p {
@@ -1816,6 +1819,7 @@
 
 .ai-composer__toolbar {
   min-height: 34px;
+  min-width: 0;
   padding: 3px 5px 5px 7px;
   display: flex;
   align-items: center;
@@ -1824,10 +1828,14 @@
 
 .ai-reference-picker {
   position: relative;
+  min-width: 0;
 }
 
 .ai-composer__tool {
+  position: relative;
   height: 25px;
+  min-width: 0;
+  flex: 0 0 auto;
   padding: 0 6px;
   color: var(--ai-ink-faint);
   background: transparent;
@@ -1838,6 +1846,8 @@
   gap: 4px;
   font-size: 9px;
   font-weight: 650;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .ai-composer__tool:hover:not(:disabled),
@@ -1851,6 +1861,7 @@
 .ai-composer__tool svg {
   width: 11px;
   height: 11px;
+  flex: 0 0 auto;
 }
 
 .ai-composer__tool b {
@@ -2070,7 +2081,7 @@
   35% { opacity: 1; transform: translateY(-3px); }
 }
 
-@container ai-panel (max-width: 370px) {
+@container ai-panel (max-width: 430px) {
   .ai-workspace__identity small,
   .ai-composer__hint {
     display: none;
@@ -2078,6 +2089,41 @@
 
   .ai-session-switcher__trigger {
     max-width: 120px;
+  }
+
+  .ai-composer__toolbar {
+    grid-template-columns: repeat(4, 30px) minmax(82px, 1fr) max-content;
+    display: grid;
+    gap: 3px;
+    padding-inline: 6px;
+  }
+
+  .ai-composer__tool {
+    width: 100%;
+    justify-content: center;
+    padding-inline: 4px;
+    overflow: hidden;
+  }
+
+  .ai-composer__tool:not(.ai-composer__tool--note) .ai-composer__tool-label {
+    display: none;
+  }
+
+  .ai-reference-picker,
+  .ai-reference-picker > .ai-composer__tool {
+    width: 30px;
+  }
+
+  .ai-composer__tool b {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+  }
+
+  .ai-composer__send,
+  .ai-composer__stop {
+    grid-column: 6;
+    white-space: nowrap;
   }
 
   .ai-context {

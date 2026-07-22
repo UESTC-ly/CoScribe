@@ -92,12 +92,6 @@ function fileName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path
 }
 
-function projectRelativePath(projectPath: string, filePath: string): string {
-  const root = projectPath.replace(/\\/gu, '/').replace(/\/+$/u, '')
-  const candidate = filePath.replace(/\\/gu, '/')
-  return candidate.startsWith(`${root}/`) ? candidate.slice(root.length + 1) : candidate
-}
-
 function inferKind(path: string): Exclude<FileKind, 'folder'> {
   const ext = path.split('.').pop()?.toLowerCase()
   if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'markdown'
@@ -673,9 +667,11 @@ export default function App(): React.JSX.Element {
     let sessionId = store.workspace.currentSessionId
     if (!sessionId) sessionId = store.createSession()
     store.setReferencedFiles(payload.referencedFiles)
-    const context = pendingWebContext && pendingWebContext.projectPath === state.project?.path
-      ? { ...pendingWebContext, referencedFiles: [...pendingWebContext.referencedFiles] }
-      : setStore().captureActiveContext(payload.scope)
+    const context = payload.operationMode === 'organize-project-notes'
+      ? setStore().captureActiveContext('project')
+      : pendingWebContext && pendingWebContext.projectPath === state.project?.path
+        ? { ...pendingWebContext, referencedFiles: [...pendingWebContext.referencedFiles] }
+        : setStore().captureActiveContext(payload.scope)
     if (!context || !state.project) return
     context.referencedFiles = [...payload.referencedFiles]
     const requestId = makeId('ai')
@@ -714,6 +710,7 @@ export default function App(): React.JSX.Element {
               : {})
           })),
         context,
+        ...(payload.operationMode ? { operationMode: payload.operationMode } : {}),
         settings: { allowGeneralKnowledge: state.settings.allowGeneralKnowledge }
       })
     } catch (reason) {
@@ -728,7 +725,9 @@ export default function App(): React.JSX.Element {
   const captureScreenshot = useCallback(async (): Promise<void> => {
     try {
       setAiError(null)
-      setCapturedImage(await window.coscribe.screenshot.capture())
+      const attachment = await window.coscribe.screenshot.capture()
+      if (!attachment) return
+      setCapturedImage(attachment)
       setStore().setAiVisible(true)
     } catch (reason) {
       setAiError(reason instanceof Error ? reason.message : '截图失败。')
@@ -737,26 +736,22 @@ export default function App(): React.JSX.Element {
 
   const quickNote = useCallback(async (): Promise<void> => {
     const store = appStore.getState()
-    const activeTab = selectActiveTab(store)
-    const currentTarget = activeTab?.kind === 'markdown' && store.project
-      ? projectRelativePath(store.project.path, activeTab.path)
-      : null
-    const targetInstruction = currentTarget
-      ? `将笔记追加到当前 Markdown 文档：${currentTarget}`
-      : '在项目的 notes 文件夹中新建一份名称清晰、不会覆盖现有文件的 Markdown 笔记。'
     await sendAiMessage({
       content: [
         '请把本次会话中有长期价值的知识整理为结构化 Markdown 笔记，并立即保存到本地项目。',
-        targetInstruction,
+        '结合会话主题、项目目录结构和现有笔记命名，自主选择最合适的保存位置。',
+        '当前打开文档仅供参考，不是默认写入目标；仅当主题明确匹配时才追加，否则创建合适的新笔记或目录。',
+        '内容涉及多个独立主题时，可以一次创建多份互相链接的 Markdown 笔记。',
         '保留关键结论、解释、步骤、代码和来源；去掉寒暄、重复内容和过程性指令。',
         '必须调用 CoScribe 文件操作工具，不要只在聊天中返回笔记正文。'
       ].join('\n'),
       attachments: [],
-      scope: contextScope,
+      scope: 'project',
       referencedFiles: [...store.referencedFiles],
+      operationMode: 'organize-project-notes',
       autoApplyOperation: true
     })
-  }, [contextScope, sendAiMessage])
+  }, [sendAiMessage])
 
   const stopAi = useCallback(async (): Promise<void> => {
     if (streamingRequestId) await window.coscribe.ai.stop(streamingRequestId)

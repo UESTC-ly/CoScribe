@@ -8,7 +8,7 @@ import {
   type WorkspaceState
 } from '../shared/types'
 import { normalizePortablePath, samePortablePath } from './path-utils'
-import { PANEL_LAYOUT } from './panel-layout'
+import { clampMarkdownOutlineWidth, PANEL_LAYOUT } from './panel-layout'
 
 const PANE_IDS: PaneId[] = ['primary', 'secondary']
 const TAB_KINDS = new Set(['markdown', 'pdf', 'docx', 'ppt', 'pptx', 'webarchive', 'image', 'text', 'unsupported'])
@@ -153,7 +153,10 @@ function parseMarkdownStates(value: unknown): Record<string, MarkdownReadingStat
     result[normalizePortablePath(path)] = {
       scrollTop: finite(candidate.scrollTop, 0, 0),
       cursor: Math.round(finite(candidate.cursor, 0, 0)),
-      mode
+      mode,
+      ...(typeof candidate.outlineWidth === 'number'
+        ? { outlineWidth: clampMarkdownOutlineWidth(candidate.outlineWidth) }
+        : {})
     }
   }
   return result

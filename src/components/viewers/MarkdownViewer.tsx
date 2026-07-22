@@ -33,6 +33,7 @@ import 'katex/dist/katex.min.css'
 import { cx, IconButton, ToolbarDivider } from './ViewerChrome'
 import { MermaidDiagram } from './MermaidDiagram'
 import { SyntaxCodeBlock } from './SyntaxCodeBlock'
+import { clampMarkdownOutlineWidth, PANEL_LAYOUT } from '../../lib/panel-layout'
 import type {
   MarkdownExternalChange,
   MarkdownOutlineItem,
@@ -211,6 +212,7 @@ export function MarkdownViewer({
   readOnly = false,
   mode,
   defaultMode = 'preview',
+  outlineWidth: restoredOutlineWidth,
   autoSave = true,
   autoSaveDelayMs = 900,
   modifiedAt,
@@ -228,6 +230,10 @@ export function MarkdownViewer({
   const [draft, setDraft] = useState(value)
   const [internalMode, setInternalMode] = useState<MarkdownViewMode>(defaultMode)
   const [outlineOpen, setOutlineOpen] = useState(true)
+  const [outlineWidth, setOutlineWidth] = useState(() => clampMarkdownOutlineWidth(
+    restoredOutlineWidth ?? PANEL_LAYOUT.markdownOutlineDefaultWidth
+  ))
+  const [outlineResizing, setOutlineResizing] = useState(false)
   const [collapsedOutlineIds, setCollapsedOutlineIds] = useState<Set<string>>(() => new Set())
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -252,6 +258,7 @@ export function MarkdownViewer({
   const lastPropValueRef = useRef(value)
   const lastSavedValueRef = useRef(value)
   const saveSequenceRef = useRef(0)
+  const outlineResizeCleanupRef = useRef<(() => void) | null>(null)
   const documentIdentity = documentId ?? fileName
   const previousDocumentIdentityRef = useRef(documentIdentity)
   const effectiveMode = mode ?? internalMode
@@ -290,12 +297,19 @@ export function MarkdownViewer({
     setSavedAt(null)
     setCursor(0)
     setEditorScrollTop(0)
+    setOutlineWidth(clampMarkdownOutlineWidth(restoredOutlineWidth ?? PANEL_LAYOUT.markdownOutlineDefaultWidth))
     setCollapsedOutlineIds(new Set())
     setDetectedConflict(null)
     setDismissedConflictKey(null)
     setCompareOpen(false)
     setSearchIndex(0)
-  }, [defaultMode, documentIdentity, value])
+  }, [defaultMode, documentIdentity, restoredOutlineWidth, value])
+
+  useEffect(() => {
+    setOutlineWidth(clampMarkdownOutlineWidth(restoredOutlineWidth ?? PANEL_LAYOUT.markdownOutlineDefaultWidth))
+  }, [restoredOutlineWidth])
+
+  useEffect(() => () => outlineResizeCleanupRef.current?.(), [])
 
   useEffect(() => {
     if (lastPropValueRef.current === value) return
@@ -420,8 +434,9 @@ export function MarkdownViewer({
       mode: effectiveMode,
       cursor,
       scrollTop: editorScrollTop,
+      outlineWidth,
     })
-  }, [cursor, editorScrollTop, effectiveMode])
+  }, [cursor, editorScrollTop, effectiveMode, outlineWidth])
 
   const handleDraftChange = useCallback(
     (nextValue: string) => {
@@ -454,6 +469,47 @@ export function MarkdownViewer({
       else next.add(id)
       return next
     })
+  }, [])
+
+  const beginOutlineResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    outlineResizeCleanupRef.current?.()
+    const startX = event.clientX
+    const startWidth = outlineWidth
+    const pointerId = event.pointerId
+    event.currentTarget.setPointerCapture?.(pointerId)
+    setOutlineResizing(true)
+
+    const move = (next: PointerEvent): void => {
+      if (next.pointerId !== pointerId) return
+      setOutlineWidth(clampMarkdownOutlineWidth(startWidth + next.clientX - startX))
+    }
+    const end = (next?: PointerEvent): void => {
+      if (next && next.pointerId !== pointerId) return
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      outlineResizeCleanupRef.current = null
+      setOutlineResizing(false)
+    }
+    outlineResizeCleanupRef.current = end
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+  }, [outlineWidth])
+
+  const resizeOutlineFromKeyboard = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const step = event.shiftKey ? 48 : 16
+    setOutlineWidth((current) => clampMarkdownOutlineWidth(
+      event.key === 'Home'
+        ? PANEL_LAYOUT.markdownOutlineDefaultWidth
+        : event.key === 'End'
+          ? PANEL_LAYOUT.markdownOutlineMaxWidth
+          : current + (event.key === 'ArrowLeft' ? -step : step)
+    ))
   }, [])
 
   const jumpToSearchMatch = useCallback(
@@ -761,46 +817,66 @@ export function MarkdownViewer({
 
       <div className="vk-markdown-body">
         {outlineOpen && (
-          <aside className="vk-markdown-outline" aria-label="Markdown 大纲">
-            <div className="vk-markdown-outline-heading">
-              <strong>文档大纲</strong>
-              <span>{outline.length} 个标题</span>
-            </div>
-            <nav>
-              {outline.length === 0 && <p className="vk-viewer-muted">添加标题后，大纲会显示在这里。</p>}
-              {outlineRows.map(({ item, hasChildren, active }) => (
-                <div
-                  key={`${item.id}-${item.offset}`}
-                  className="vk-markdown-outline-item"
-                  style={{ paddingInlineStart: 4 + (item.level - 1) * 12 }}
-                >
-                  {hasChildren ? (
+          <>
+            <aside
+              className="vk-markdown-outline"
+              aria-label="Markdown 大纲"
+              style={{ width: outlineWidth, flexBasis: outlineWidth }}
+            >
+              <div className="vk-markdown-outline-heading">
+                <strong>文档大纲</strong>
+                <span>{outline.length} 个标题</span>
+              </div>
+              <nav>
+                {outline.length === 0 && <p className="vk-viewer-muted">添加标题后，大纲会显示在这里。</p>}
+                {outlineRows.map(({ item, hasChildren, active }) => (
+                  <div
+                    key={`${item.id}-${item.offset}`}
+                    className="vk-markdown-outline-item"
+                    style={{ paddingInlineStart: 4 + (item.level - 1) * 12 }}
+                  >
+                    {hasChildren ? (
+                      <button
+                        type="button"
+                        className="vk-markdown-outline-toggle"
+                        aria-expanded={!collapsedOutlineIds.has(item.id)}
+                        aria-label={`${collapsedOutlineIds.has(item.id) ? '展开' : '折叠'}“${item.text}”下的标题`}
+                        title={collapsedOutlineIds.has(item.id) ? '展开子标题' : '折叠子标题'}
+                        onClick={() => toggleOutlineBranch(item.id)}
+                      >
+                        {collapsedOutlineIds.has(item.id) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                      </button>
+                    ) : (
+                      <span className="vk-markdown-outline-toggle-placeholder" aria-hidden="true" />
+                    )}
                     <button
                       type="button"
-                      className="vk-markdown-outline-toggle"
-                      aria-expanded={!collapsedOutlineIds.has(item.id)}
-                      aria-label={`${collapsedOutlineIds.has(item.id) ? '展开' : '折叠'}“${item.text}”下的标题`}
-                      title={collapsedOutlineIds.has(item.id) ? '展开子标题' : '折叠子标题'}
-                      onClick={() => toggleOutlineBranch(item.id)}
+                      className={cx('vk-markdown-outline-link', active && 'is-active')}
+                      aria-current={active ? 'location' : undefined}
+                      onClick={() => jumpToOffset(item.offset)}
                     >
-                      {collapsedOutlineIds.has(item.id) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                      <span title={item.text}>{item.text}</span>
+                      <small>H{item.level}</small>
                     </button>
-                  ) : (
-                    <span className="vk-markdown-outline-toggle-placeholder" aria-hidden="true" />
-                  )}
-                  <button
-                    type="button"
-                    className={cx('vk-markdown-outline-link', active && 'is-active')}
-                    aria-current={active ? 'location' : undefined}
-                    onClick={() => jumpToOffset(item.offset)}
-                  >
-                    <span>{item.text}</span>
-                    <small>H{item.level}</small>
-                  </button>
-                </div>
-              ))}
-            </nav>
-          </aside>
+                  </div>
+                ))}
+              </nav>
+            </aside>
+            <div
+              className={cx('vk-markdown-outline-resizer', outlineResizing && 'is-resizing')}
+              role="separator"
+              aria-label="调整 Markdown 大纲宽度"
+              aria-orientation="vertical"
+              aria-valuemin={PANEL_LAYOUT.markdownOutlineMinWidth}
+              aria-valuemax={PANEL_LAYOUT.markdownOutlineMaxWidth}
+              aria-valuenow={outlineWidth}
+              tabIndex={0}
+              title="拖拽或使用方向键调整，双击恢复默认宽度"
+              onPointerDown={beginOutlineResize}
+              onKeyDown={resizeOutlineFromKeyboard}
+              onDoubleClick={() => setOutlineWidth(PANEL_LAYOUT.markdownOutlineDefaultWidth)}
+            />
+          </>
         )}
 
         <div className={cx('vk-markdown-content', `is-${effectiveMode}`)}>

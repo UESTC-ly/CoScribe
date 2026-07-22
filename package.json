@@ -1,6 +1,6 @@
 {
   "name": "coscribe",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "description": "CoScribe：以本地项目为核心的 AI 学习与内容工作台",
   "private": true,
   "type": "module",

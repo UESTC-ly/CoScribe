@@ -239,7 +239,9 @@ void app.whenReady().then(() => {
   mainWindow = createWindow()
   const screenshotShortcutRegistered = globalShortcut.register('CommandOrControl+Shift+8', () => {
     void screenshot.capture().then(
-      (attachment) => mainWindow?.webContents.send(IPC.screenshotResult, { type: 'captured', attachment }),
+      (attachment) => {
+        if (attachment) mainWindow?.webContents.send(IPC.screenshotResult, { type: 'captured', attachment })
+      },
       (error: unknown) => mainWindow?.webContents.send(IPC.screenshotResult, {
         type: 'error',
         message: error instanceof Error ? error.message : '截图失败。'

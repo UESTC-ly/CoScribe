@@ -134,6 +134,7 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
           modifiedAt={document.modifiedAt}
           defaultMode={markdownState?.mode ?? 'preview'}
           mode={markdownState?.mode}
+          outlineWidth={markdownState?.outlineWidth}
           autoSave={props.settings.autoSave}
           autoSaveDelayMs={props.settings.autoSaveDelay}
           externalChange={document.externalVersion ? { content: document.externalVersion.content, modifiedAt: document.externalVersion.modifiedAt } : null}

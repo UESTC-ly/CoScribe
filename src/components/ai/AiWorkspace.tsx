@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  AiOperationMode,
   ChatMessage,
   ChatImageAttachment,
   ChatSession,
@@ -54,6 +55,7 @@ export interface AiSendPayload {
   attachments: ChatImageAttachment[]
   scope: ContextScope
   referencedFiles: string[]
+  operationMode?: AiOperationMode
   autoApplyOperation?: boolean
 }
 
@@ -774,44 +776,50 @@ export function AiWorkspace({
               className={clsx('ai-composer__tool', pendingImages.length > 0 && 'is-active')}
               type="button"
               disabled={disabled || !activeSession || isBusy}
+              aria-label="添加图片"
               title="添加图片（也可直接粘贴）"
               onClick={() => imageInputRef.current?.click()}
             >
               <ImagePlus aria-hidden="true" />
-              图片
+              <span className="ai-composer__tool-label">图片</span>
               {pendingImages.length > 0 && <b>{pendingImages.length}</b>}
             </button>
             <button
               className="ai-composer__tool"
               type="button"
               disabled={disabled || !activeSession || isBusy}
-              title="截取鼠标所在屏幕并加入聊天（⌘/Ctrl + Shift + 8）"
+              aria-label="截图"
+              title="框选屏幕区域并加入聊天（⌘/Ctrl + Shift + 8，Esc 取消）"
               onClick={() => void onCaptureScreenshot?.()}
             >
               <ScanLine aria-hidden="true" />
-              截图
+              <span className="ai-composer__tool-label">截图</span>
             </button>
             <button
               className={clsx('ai-composer__tool', composerMode === 'image' && 'is-active')}
               type="button"
               disabled={disabled || !activeSession || isBusy}
+              aria-label="生成图片"
               aria-pressed={composerMode === 'image'}
+              title="切换到 GPT-Image 2 图片生成"
               onClick={toggleImageMode}
             >
               <ImageIcon aria-hidden="true" />
-              生成图片
+              <span className="ai-composer__tool-label">生成图片</span>
             </button>
             <div className="ai-reference-picker" ref={referenceMenuRef}>
               <button
                 className={clsx('ai-composer__tool', referencedFiles.length > 0 && 'is-active')}
                 type="button"
                 disabled={disabled || !activeSession || isBusy || composerMode === 'image'}
+                aria-label="引用文件"
                 aria-haspopup="dialog"
                 aria-expanded={referenceMenuOpen}
+                title="引用当前项目中的文件"
                 onClick={() => setReferenceMenuOpen((open) => !open)}
               >
                 <AtSign aria-hidden="true" />
-                引用文件
+                <span className="ai-composer__tool-label">引用文件</span>
                 {referencedFiles.length > 0 && <b>{referencedFiles.length}</b>}
               </button>
               {referenceMenuOpen && (
@@ -852,11 +860,12 @@ export function AiWorkspace({
               className="ai-composer__tool ai-composer__tool--note"
               type="button"
               disabled={disabled || !activeSession || activeSession.messages.length === 0 || isBusy || !isConfigured || composerMode === 'image'}
+              aria-label="整理笔记"
               title="将当前会话整理成 Markdown 笔记并保存到本地"
               onClick={() => void onQuickNote?.()}
             >
               <NotebookPen aria-hidden="true" />
-              整理笔记
+              <span className="ai-composer__tool-label">整理笔记</span>
             </button>
             <span className="ai-composer__hint">{composerMode === 'image' ? 'Enter 生成 · Shift Enter 换行' : 'Enter 发送 · Shift Enter 换行'}</span>
             {isBusy ? (
