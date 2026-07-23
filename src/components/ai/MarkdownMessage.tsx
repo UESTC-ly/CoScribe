@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { Check, Copy, Download, ExternalLink, FileText, RotateCcw, Sparkles, Square } from 'lucide-react'
+import { Check, CheckCircle2, Copy, Download, ExternalLink, FileText, Loader2, RotateCcw, Sparkles, Square, XCircle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
@@ -49,6 +49,29 @@ function sourceMeta(source: SourceRef): string {
   if (source.heading) bits.push(source.heading)
   if (source.line) bits.push(`第 ${source.line} 行`)
   return bits.join(' · ')
+}
+
+function ProgressTimeline({ message }: { message: ChatMessage }): React.JSX.Element | null {
+  if (!message.progress) return null
+  return (
+    <section className="ai-progress" aria-label={message.progress.kind === 'note-organization' ? '整理笔记进度' : '会话压缩进度'}>
+      <header>
+        <strong>{message.progress.kind === 'note-organization' ? '整理笔记' : '全量压缩'}</strong>
+        <span>{message.progress.status === 'complete' ? '完成' : message.progress.status === 'error' ? '未完成' : '进行中'}</span>
+      </header>
+      <ol>
+        {message.progress.steps.map((step) => (
+          <li className={`is-${step.status}`} key={step.stage}>
+            {step.status === 'active' ? <Loader2 className="ai-spin" aria-hidden="true" /> : step.status === 'error' ? <XCircle aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}
+            <span>
+              <b>{step.label}</b>
+              {step.detail && <small>{step.detail}</small>}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
 }
 
 export function MarkdownContent({ content }: { content: string }): React.JSX.Element {
@@ -145,6 +168,11 @@ export const MarkdownMessage = memo(function MarkdownMessage({
   onRegenerate
 }: MarkdownMessageProps): React.JSX.Element {
   const isAssistant = message.role === 'assistant'
+  const displayName = message.kind === 'session-compaction'
+    ? '会话压缩'
+    : message.kind === 'note-organization'
+      ? '笔记整理'
+      : isAssistant ? 'AI 助手' : message.role === 'user' ? '你' : '系统'
 
   return (
     <article className={`ai-message ai-message--${message.role}`} data-message-id={message.id}>
@@ -153,7 +181,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
       </div>
       <div className="ai-message__body">
         <div className="ai-message__meta">
-          <span>{isAssistant ? 'AI 助手' : message.role === 'user' ? '你' : '系统'}</span>
+          <span>{displayName}</span>
           <time dateTime={new Date(message.createdAt).toISOString()}>
             {new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(message.createdAt)}
           </time>
@@ -197,6 +225,8 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             ))}
           </div>
         )}
+
+        <ProgressTimeline message={message} />
 
         <div className="ai-markdown">
           {message.content ? (
@@ -244,7 +274,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
           />
         )}
 
-        {isAssistant && message.content && !streaming && (
+        {isAssistant && message.content && !streaming && !message.kind && (
           <MessageActions message={message} onRegenerate={onRegenerate} />
         )}
       </div>

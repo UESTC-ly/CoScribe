@@ -47,6 +47,13 @@
   font: inherit;
 }
 
+.vk-markdown-preview,
+.vk-pdf-page-shell .textLayer,
+.vk-docx-scroll,
+.vk-text-source {
+  cursor: text;
+}
+
 .vk-viewer input,
 .vk-viewer textarea {
   color: inherit;
@@ -931,23 +938,37 @@
 .vk-markdown-outline-resizer {
   position: relative;
   z-index: 5;
-  width: 1px;
-  flex: 0 0 1px;
-  background: var(--vk-border);
+  width: 9px;
+  flex: 0 0 9px;
+  margin-inline: -4px;
+  background: transparent;
   cursor: col-resize;
   touch-action: none;
 }
 
-.vk-markdown-outline-resizer::after {
+.vk-markdown-outline-resizer::before {
   position: absolute;
-  inset: 0 -4px;
+  inset: 0 4px;
+  background: var(--vk-border);
+  cursor: inherit;
+  pointer-events: none;
   content: '';
 }
 
-.vk-markdown-outline-resizer:hover,
-.vk-markdown-outline-resizer.is-resizing,
-.vk-markdown-outline-resizer:focus-visible {
+.vk-markdown-outline-resizer:hover::before,
+.vk-markdown-outline-resizer.is-resizing::before,
+.vk-markdown-outline-resizer:focus-visible::before {
   background: var(--vk-accent);
+}
+
+.vk-markdown-viewer.is-outline-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.vk-markdown-viewer.is-outline-resizing,
+.vk-markdown-viewer.is-outline-resizing * {
+  cursor: col-resize !important;
 }
 
 .vk-markdown-outline nav {

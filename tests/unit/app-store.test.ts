@@ -95,6 +95,51 @@ describe('renderer store tabs and panes', () => {
   })
 })
 
+describe('renderer store chat sessions', () => {
+  it('forks a session with independent message ids and remapped checkpoints', () => {
+    const store = createAppStore()
+    store.getState().setProject(project)
+    const sourceId = store.getState().createSession('Original', 'session-source', 1)
+    store.getState().addMessage(sourceId, message('message-1', 'first', 2))
+    store.getState().setSessionCompaction(sourceId, {
+      summary: 'summary',
+      throughMessageId: 'message-1',
+      sourceMessageCount: 1,
+      createdAt: 3
+    }, 3)
+    store.getState().markSessionNotesOrganized(sourceId, {
+      throughMessageId: 'message-1',
+      sourceMessageCount: 1,
+      organizedAt: 4,
+      targetPaths: ['notes/first.md']
+    }, 4)
+
+    const forkId = store.getState().forkSession(sourceId, 'Fork', 'session-fork', 5)
+    const fork = store.getState().sessions.find((item) => item.id === forkId)
+    expect(fork?.messages[0]?.id).not.toBe('message-1')
+    expect(fork?.compaction?.throughMessageId).toBe(fork?.messages[0]?.id)
+    expect(fork?.noteCheckpoint?.throughMessageId).toBe(fork?.messages[0]?.id)
+    expect(store.getState().workspace.currentSessionId).toBe('session-fork')
+  })
+
+  it('clears messages and all derived session boundaries', () => {
+    const store = createAppStore()
+    store.getState().setProject(project)
+    const sessionId = store.getState().createSession('Clear me', 'session-clear', 1)
+    store.getState().addMessage(sessionId, message('message-1', 'content', 2))
+    store.getState().setSessionCompaction(sessionId, {
+      summary: 'summary', throughMessageId: 'message-1', sourceMessageCount: 1, createdAt: 3
+    })
+    store.getState().clearSession(sessionId, 4)
+
+    expect(store.getState().sessions.find((item) => item.id === sessionId)).toMatchObject({
+      messages: [],
+      compaction: undefined,
+      noteCheckpoint: undefined
+    })
+  })
+})
+
 describe('renderer store documents and context', () => {
   it('tracks dirty content and exposes an external version instead of overwriting it', () => {
     const store = createAppStore()

@@ -911,6 +911,136 @@ test('expands the AI workspace beyond the old cap without reverse-drag dead spac
   await expect.poll(async () => panel.evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBe(360)
 })
 
+test('keeps cursor feedback stable across nested targets and resize drags', async () => {
+  const startCursorTrace = async (): Promise<void> => {
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      const traceState = globalThis as typeof globalThis & {
+        __coscribeCursorTrace?: string[]
+        __coscribeCursorTraceAttached?: boolean
+      }
+      traceState.__coscribeCursorTrace = []
+      if (traceState.__coscribeCursorTraceAttached) return
+      const window = BrowserWindow.getAllWindows()[0]
+      if (!window) throw new Error('CoScribe window is unavailable')
+      window.webContents.on('cursor-changed', (_event, type) => {
+        traceState.__coscribeCursorTrace?.push(type)
+      })
+      traceState.__coscribeCursorTraceAttached = true
+    })
+  }
+  const cursorTrace = async (): Promise<string[]> => electronApp.evaluate(() => {
+    const traceState = globalThis as typeof globalThis & { __coscribeCursorTrace?: string[] }
+    return [...(traceState.__coscribeCursorTrace ?? [])]
+  })
+  const hoverAndExpectNativeCursor = async (
+    target: ReturnType<Page['locator']>,
+    expected: string
+  ): Promise<void> => {
+    const box = await target.boundingBox()
+    if (!box) throw new Error('Cursor target is not visible')
+    await page.mouse.move(2, 2)
+    await page.waitForTimeout(80)
+    await startCursorTrace()
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.waitForTimeout(800)
+    const trace = await cursorTrace()
+    expect(trace, `native cursor trace for ${expected}`).not.toHaveLength(0)
+    expect(trace.at(-1), `native cursor trace: ${trace.join(' -> ')}`).toBe(expected)
+  }
+
+  const fileRow = page.locator('.tree-row').filter({ hasText: 'README.md' })
+  await expect(fileRow).toBeVisible()
+  expect(await fileRow.evaluate((element) => getComputedStyle(element).cursor)).toBe('pointer')
+  expect(await fileRow.locator('.tree-row__name').evaluate((element) => getComputedStyle(element).cursor)).toBe('pointer')
+  await hoverAndExpectNativeCursor(fileRow.locator('.tree-row__name'), 'hand')
+
+  await fileRow.click()
+  const editorTab = page.locator('.editor-tab').filter({ hasText: 'README.md' })
+  expect(await editorTab.evaluate((element) => getComputedStyle(element).cursor)).toBe('pointer')
+  expect(await editorTab.locator('span').evaluate((element) => getComputedStyle(element).cursor)).toBe('pointer')
+  await hoverAndExpectNativeCursor(editorTab.locator('span'), 'hand')
+
+  const preview = page.getByLabel('Markdown 预览')
+  expect(await preview.evaluate((element) => getComputedStyle(element).cursor)).toBe('text')
+  expect(await preview.locator('p').first().evaluate((element) => getComputedStyle(element).cursor)).toBe('text')
+  await hoverAndExpectNativeCursor(preview.locator('p').first(), 'text')
+
+  const navigationSeparator = page.getByRole('separator', { name: '调整项目导航宽度' })
+  expect(await navigationSeparator.evaluate((element) => getComputedStyle(element).cursor)).toBe('col-resize')
+  expect(await navigationSeparator.evaluate((element) => getComputedStyle(element, '::after').cursor)).toBe('col-resize')
+  await hoverAndExpectNativeCursor(navigationSeparator, 'col-resize')
+  const navigationBox = await navigationSeparator.boundingBox()
+  if (!navigationBox) throw new Error('Project navigation resize separator is not visible')
+  const navigationCenterX = navigationBox.x + navigationBox.width / 2
+  const navigationY = navigationBox.y + Math.min(120, navigationBox.height / 2)
+  for (const offset of [-4, 0, 4]) {
+    await page.mouse.move(2, 2)
+    await page.waitForTimeout(80)
+    await startCursorTrace()
+    await page.mouse.move(navigationCenterX + offset, navigationY)
+    await page.waitForTimeout(500)
+    const trace = await cursorTrace()
+    expect(
+      trace.at(-1),
+      `native cursor trace ${offset}px from project divider: ${trace.join(' -> ')}`
+    ).toBe('col-resize')
+  }
+
+  const aiSeparator = page.getByRole('separator', { name: '调整 AI 面板宽度' })
+  const aiBox = await aiSeparator.boundingBox()
+  if (!aiBox) throw new Error('AI resize separator is not visible')
+  const aiCenterX = aiBox.x + aiBox.width / 2
+  const aiY = aiBox.y + Math.min(120, aiBox.height / 2)
+  for (const offset of [-4, 0, 4]) {
+    await page.mouse.move(2, 2)
+    await page.waitForTimeout(80)
+    await startCursorTrace()
+    await page.mouse.move(aiCenterX + offset, aiY)
+    await page.waitForTimeout(500)
+    const trace = await cursorTrace()
+    expect(
+      trace.at(-1),
+      `native cursor trace ${offset}px from AI divider: ${trace.join(' -> ')}`
+    ).toBe('col-resize')
+  }
+  const aiWidthBeforeExpandedHitDrag = await page.locator('.ai-workspace').evaluate(
+    (element) => element.getBoundingClientRect().width
+  )
+  await page.mouse.move(aiCenterX + 4, aiY)
+  await page.mouse.down()
+  await page.mouse.move(aiCenterX - 28, aiY, { steps: 4 })
+  await page.mouse.up()
+  await expect.poll(async () => page.locator('.ai-workspace').evaluate(
+    (element) => element.getBoundingClientRect().width
+  )).toBeGreaterThan(aiWidthBeforeExpandedHitDrag + 20)
+
+  const outlineSeparator = page.getByRole('separator', { name: '调整 Markdown 大纲宽度' })
+  const outlineBox = await outlineSeparator.boundingBox()
+  if (!outlineBox) throw new Error('Markdown outline resize separator is not visible')
+  const x = outlineBox.x + outlineBox.width / 2
+  const y = outlineBox.y + Math.min(120, outlineBox.height / 2)
+  await page.mouse.move(2, 2)
+  await page.waitForTimeout(80)
+  await startCursorTrace()
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + 80, y, { steps: 3 })
+  await page.waitForTimeout(800)
+  await expect(page.locator('.vk-markdown-viewer')).toHaveClass(/is-outline-resizing/u)
+  expect(await page.locator('.vk-markdown-viewer').evaluate((element) => getComputedStyle(element).cursor)).toBe('col-resize')
+  expect(await preview.locator('p').first().evaluate((element) => getComputedStyle(element).cursor)).toBe('col-resize')
+  const outlineDragTrace = await cursorTrace()
+  expect(outlineDragTrace, 'native cursor trace during outline drag').not.toHaveLength(0)
+  expect(
+    outlineDragTrace.at(-1),
+    `native cursor trace during outline drag: ${outlineDragTrace.join(' -> ')}`
+  ).toBe('col-resize')
+  await page.mouse.up()
+
+  await expect(page.locator('.vk-markdown-viewer')).not.toHaveClass(/is-outline-resizing/u)
+  expect(await preview.locator('p').first().evaluate((element) => getComputedStyle(element).cursor)).toBe('text')
+})
+
 test('cleans up cancelled project-navigation drags without leaving a black window', async () => {
   await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
   const separator = page.getByRole('separator', { name: '调整项目导航宽度' })

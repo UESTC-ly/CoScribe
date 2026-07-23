@@ -26,6 +26,8 @@ import {
   type AiOperationHistoryEntry,
   type AppliedMarkdownOperation,
   type Annotation,
+  type AiMessageProgress,
+  type AiProgressStage,
   type ChatImageAttachment,
   type ChatMessage,
   type ChatSession,
@@ -433,6 +435,10 @@ function normalizedMessage(value: unknown, root: string): ChatMessage | undefine
     ? value.sources.map((source) => normalizedSource(source, root)).filter((source): source is SourceRef => Boolean(source)).slice(0, 100)
     : undefined
   const operation = normalizedOperation(value.operation, root)
+  const progress = normalizedMessageProgress(value.progress)
+  const kind = value.kind === 'command' || value.kind === 'session-compaction' || value.kind === 'note-organization'
+    ? value.kind
+    : undefined
   const attachments = value.role !== 'system'
     ? normalizeChatImageAttachments(value.attachments).map((attachment) => normalizedAttachmentPaths(value.attachments, attachment, root))
     : []
@@ -441,13 +447,45 @@ function normalizedMessage(value: unknown, root: string): ChatMessage | undefine
     role: value.role,
     content,
     createdAt: timestamp(value.createdAt, Date.now()),
+    ...(kind ? { kind } : {}),
     ...(attachments.length ? { attachments } : {}),
     ...(context ? { context } : {}),
     ...(sources?.length ? { sources } : {}),
     ...(operation ? { operation } : {}),
+    ...(progress ? { progress } : {}),
     ...(value.stopped === true ? { stopped: true } : {}),
     ...(text(value.error, 20_000) ? { error: text(value.error, 20_000) } : {})
   }
+}
+
+const AI_PROGRESS_STAGES = new Set<AiProgressStage>([
+  'preparing',
+  'context',
+  'model',
+  'validation',
+  'writing',
+  'complete'
+])
+
+function normalizedMessageProgress(value: unknown): AiMessageProgress | undefined {
+  if (!isRecord(value) || (value.kind !== 'session-compaction' && value.kind !== 'note-organization')) return undefined
+  if (value.status !== 'active' && value.status !== 'complete' && value.status !== 'error') return undefined
+  if (!Array.isArray(value.steps)) return undefined
+  const steps = value.steps.slice(0, 12).flatMap((candidate): AiMessageProgress['steps'] => {
+    if (!isRecord(candidate) || typeof candidate.stage !== 'string' || !AI_PROGRESS_STAGES.has(candidate.stage as AiProgressStage)) return []
+    if (candidate.status !== 'active' && candidate.status !== 'complete' && candidate.status !== 'error') return []
+    const label = text(candidate.label, 500)?.trim()
+    if (!label) return []
+    return [{
+      stage: candidate.stage as AiProgressStage,
+      label,
+      status: candidate.status,
+      updatedAt: timestamp(candidate.updatedAt, Date.now()),
+      ...(text(candidate.detail, 2_000)?.trim() ? { detail: text(candidate.detail, 2_000)!.trim() } : {})
+    }]
+  })
+  if (!steps.length) return undefined
+  return { kind: value.kind, status: value.status, steps }
 }
 
 export function normalizeSessionsForProject(value: unknown, root: string): ChatSession[] {
@@ -459,12 +497,46 @@ export function normalizeSessionsForProject(value: unknown, root: string): ChatS
     const messages = Array.isArray(candidate.messages)
       ? candidate.messages.slice(0, MAX_MESSAGES_PER_SESSION).map((message) => normalizedMessage(message, root)).filter((message): message is ChatMessage => Boolean(message))
       : []
+    const messageIds = new Set(messages.map((message) => message.id))
+    const compaction = isRecord(candidate.compaction) &&
+      typeof candidate.compaction.throughMessageId === 'string' &&
+      messageIds.has(candidate.compaction.throughMessageId) &&
+      text(candidate.compaction.summary, MAX_MESSAGE_CHARS)?.trim()
+      ? {
+          summary: text(candidate.compaction.summary, MAX_MESSAGE_CHARS)!.trim(),
+          throughMessageId: candidate.compaction.throughMessageId.slice(0, 500),
+          sourceMessageCount: typeof candidate.compaction.sourceMessageCount === 'number' && Number.isInteger(candidate.compaction.sourceMessageCount)
+            ? Math.max(0, Math.min(candidate.compaction.sourceMessageCount, MAX_MESSAGES_PER_SESSION))
+            : 0,
+          createdAt: timestamp(candidate.compaction.createdAt, createdAt)
+        }
+      : undefined
+    const noteCheckpoint = isRecord(candidate.noteCheckpoint) &&
+      typeof candidate.noteCheckpoint.throughMessageId === 'string' &&
+      messageIds.has(candidate.noteCheckpoint.throughMessageId)
+      ? {
+          throughMessageId: candidate.noteCheckpoint.throughMessageId.slice(0, 500),
+          sourceMessageCount: typeof candidate.noteCheckpoint.sourceMessageCount === 'number' && Number.isInteger(candidate.noteCheckpoint.sourceMessageCount)
+            ? Math.max(0, Math.min(candidate.noteCheckpoint.sourceMessageCount, MAX_MESSAGES_PER_SESSION))
+            : 0,
+          organizedAt: timestamp(candidate.noteCheckpoint.organizedAt, createdAt),
+          targetPaths: Array.isArray(candidate.noteCheckpoint.targetPaths)
+            ? candidate.noteCheckpoint.targetPaths.slice(0, MAX_AI_FILE_OPERATIONS).flatMap((target): string[] => {
+                if (typeof target !== 'string') return []
+                const canonical = metadataProjectPath(target, root)
+                return canonical ? [path.relative(root, canonical).split(path.sep).join('/')] : []
+              })
+            : undefined
+        }
+      : undefined
     sessions.push({
       id: candidate.id.slice(0, 500),
       title: text(candidate.title, 500)?.trim() || '未命名会话',
       createdAt,
       updatedAt: timestamp(candidate.updatedAt, createdAt),
-      messages
+      messages,
+      ...(compaction ? { compaction } : {}),
+      ...(noteCheckpoint ? { noteCheckpoint } : {})
     })
   }
   return sessions

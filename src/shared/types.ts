@@ -77,6 +77,7 @@ export interface ProjectMemoryDocument {
 export type ContextScope = 'selection' | 'visible' | 'document' | 'project' | 'general'
 export type AiOperationMode =
   | 'organize-project-notes'
+  | 'compact-session'
   | 'generate-project-plan'
   | 'generate-flashcards'
   | 'generate-literature-matrix'
@@ -216,12 +217,52 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   createdAt: number
+  kind?: 'command' | 'session-compaction' | 'note-organization'
   attachments?: ChatImageAttachment[]
   context?: ContextSnapshot
   sources?: SourceRef[]
   operation?: FileOperationProposal
+  progress?: AiMessageProgress
   stopped?: boolean
   error?: string
+}
+
+export type AiProgressKind = 'session-compaction' | 'note-organization'
+
+export type AiProgressStage =
+  | 'preparing'
+  | 'context'
+  | 'model'
+  | 'validation'
+  | 'writing'
+  | 'complete'
+
+export interface AiProgressStep {
+  stage: AiProgressStage
+  label: string
+  status: 'active' | 'complete' | 'error'
+  updatedAt: number
+  detail?: string
+}
+
+export interface AiMessageProgress {
+  kind: AiProgressKind
+  status: 'active' | 'complete' | 'error'
+  steps: AiProgressStep[]
+}
+
+export interface ChatSessionCompaction {
+  summary: string
+  throughMessageId: string
+  sourceMessageCount: number
+  createdAt: number
+}
+
+export interface ChatSessionNoteCheckpoint {
+  throughMessageId: string
+  sourceMessageCount: number
+  organizedAt: number
+  targetPaths?: string[]
 }
 
 export interface ChatSession {
@@ -230,6 +271,8 @@ export interface ChatSession {
   createdAt: number
   updatedAt: number
   messages: ChatMessage[]
+  compaction?: ChatSessionCompaction
+  noteCheckpoint?: ChatSessionNoteCheckpoint
 }
 
 export interface Annotation {
@@ -668,6 +711,14 @@ export interface AiRequest {
 export type AiStreamEvent =
   | { requestId: string; type: 'start' }
   | { requestId: string; type: 'context-usage'; usage: ContextWindowUsage }
+  | {
+      requestId: string
+      type: 'progress'
+      kind: AiProgressKind
+      stage: AiProgressStage
+      label: string
+      detail?: string
+    }
   | { requestId: string; type: 'delta'; text: string }
   | { requestId: string; type: 'done'; sources: SourceRef[]; operation?: FileOperationProposal }
   | { requestId: string; type: 'stopped' }

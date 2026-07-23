@@ -197,6 +197,45 @@ describe('project metadata recovery', () => {
     expect(recovered.messages[2].attachments).toBeUndefined()
   })
 
+  it('restores compaction, note checkpoints, and progress metadata only when their boundaries exist', () => {
+    const [recovered] = normalizeSessionsForProject([{
+      id: 'session-progress',
+      title: 'Progress',
+      createdAt: 1,
+      updatedAt: 2,
+      messages: [{
+        id: 'source', role: 'user', content: 'source', createdAt: 2
+      }, {
+        id: 'progress', role: 'assistant', content: 'summary', createdAt: 3,
+        kind: 'session-compaction',
+        progress: {
+          kind: 'session-compaction',
+          status: 'complete',
+          steps: [{ stage: 'complete', label: '完成', status: 'complete', updatedAt: 3 }]
+        }
+      }],
+      compaction: {
+        summary: 'summary', throughMessageId: 'source', sourceMessageCount: 1, createdAt: 3
+      },
+      noteCheckpoint: {
+        throughMessageId: 'source', sourceMessageCount: 1, organizedAt: 3, targetPaths: ['notes/a.md']
+      }
+    }], root)
+
+    expect(recovered.compaction).toMatchObject({ throughMessageId: 'source', summary: 'summary' })
+    expect(recovered.noteCheckpoint).toMatchObject({ throughMessageId: 'source', targetPaths: ['notes/a.md'] })
+    expect(recovered.messages[1].progress?.steps[0]).toMatchObject({ stage: 'complete', status: 'complete' })
+
+    const [invalid] = normalizeSessionsForProject([{
+      id: 'session-invalid', title: 'Invalid', createdAt: 1, updatedAt: 2,
+      messages: [{ id: 'source', role: 'user', content: 'source', createdAt: 2 }],
+      compaction: { summary: 'bad', throughMessageId: 'missing', sourceMessageCount: 1, createdAt: 3 },
+      noteCheckpoint: { throughMessageId: 'missing', sourceMessageCount: 1, organizedAt: 3 }
+    }], root)
+    expect(invalid.compaction).toBeUndefined()
+    expect(invalid.noteCheckpoint).toBeUndefined()
+  })
+
   it('keeps only well-formed in-project annotations', () => {
     const annotations = normalizeAnnotationsForProject([
       { id: 'good', path: path.join(root, 'book.pdf'), page: 2, kind: 'bookmark', createdAt: 1 },

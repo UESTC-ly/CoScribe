@@ -70,14 +70,53 @@ html, body, #root { width: 100%; height: 100%; margin: 0; }
 body { overflow: hidden; background: var(--bg-app); }
 button, input, textarea, select { font: inherit; color: inherit; }
 h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); letter-spacing: 0; }
-button { cursor: pointer; }
-input:not([type='checkbox']):not([type='radio']):not([type='range']),
-textarea,
-[contenteditable='true'] { cursor: text; }
-select,
-input[type='checkbox'],
-input[type='radio'],
-input[type='range'] { cursor: pointer; }
+:where(
+  button:not(:disabled),
+  a[href],
+  summary,
+  select:not(:disabled),
+  input[type='button']:not(:disabled),
+  input[type='submit']:not(:disabled),
+  input[type='reset']:not(:disabled),
+  input[type='checkbox']:not(:disabled),
+  input[type='radio']:not(:disabled),
+  input[type='range']:not(:disabled),
+  input[type='color']:not(:disabled),
+  input[type='file']:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  [role='tab']:not([aria-disabled='true']),
+  [role='option']:not([aria-disabled='true'])
+) {
+  cursor: pointer;
+}
+:where(
+  button:not(:disabled),
+  a[href],
+  summary,
+  [role='button']:not([aria-disabled='true']),
+  [role='tab']:not([aria-disabled='true']),
+  [role='option']:not([aria-disabled='true'])
+) :where(*) {
+  cursor: inherit;
+}
+:where(
+  input:not([type]),
+  input[type='text'],
+  input[type='search'],
+  input[type='email'],
+  input[type='url'],
+  input[type='password'],
+  input[type='number'],
+  input[type='tel'],
+  textarea,
+  [contenteditable='true']
+) {
+  cursor: text;
+}
+:where(button, input, select, textarea):disabled,
+:where([aria-disabled='true']) {
+  cursor: not-allowed;
+}
 button, input, textarea, select { outline: none; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--focus);

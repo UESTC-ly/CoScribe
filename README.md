@@ -30,15 +30,15 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 ### 下载与安装
 
-从 [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest) 下载 `v2.2.2`：
+从 [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest) 下载稳定版 `v3.1.0`：
 
 | 系统 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS | `CoScribe-2.2.2-arm64.dmg` | Apple Silicon，macOS 13+ |
-| macOS | `CoScribe-2.2.2-arm64-mac.zip` | Apple Silicon 免安装压缩包 |
-| Windows | `CoScribe-Setup-2.2.2-x64.exe` | Windows 10/11 x64 |
-| Linux | `CoScribe-2.2.2-x64.AppImage` | 通用 x86-64 便携包 |
-| Linux | `CoScribe-2.2.2-x64.deb` | Debian / Ubuntu x86-64 |
+| macOS | `CoScribe-3.1.0-arm64.dmg` | Apple Silicon，macOS 13+ |
+| macOS | `CoScribe-3.1.0-arm64-mac.zip` | Apple Silicon 免安装压缩包 |
+| Windows | `CoScribe-Setup-3.1.0-x64.exe` | Windows 10/11 x64 |
+| Linux | `CoScribe-3.1.0-x64.AppImage` | 通用 x86-64 便携包 |
+| Linux | `CoScribe-3.1.0-x64.deb` | Debian / Ubuntu x86-64 |
 | 全平台 | `SHA256SUMS.txt` | 安装包 SHA-256 校验值 |
 
 这些安装包目前没有 Apple Developer ID、Windows Authenticode 或 Linux 发行版签名。
@@ -52,7 +52,7 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 #### Windows
 
-1. 运行 `CoScribe-Setup-2.2.2-x64.exe`。
+1. 运行 `CoScribe-Setup-3.1.0-x64.exe`。
 2. 如果 SmartScreen 拦截未签名安装包，确认文件来自本仓库并核对 SHA-256 后，选择“更多信息 → 仍要运行”。
 3. 安装完成后从开始菜单启动 CoScribe。
 
@@ -61,14 +61,14 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 AppImage：
 
 ```bash
-chmod +x CoScribe-2.2.2-x64.AppImage
-./CoScribe-2.2.2-x64.AppImage
+chmod +x CoScribe-3.1.0-x64.AppImage
+./CoScribe-3.1.0-x64.AppImage
 ```
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install ./CoScribe-2.2.2-x64.deb
+sudo apt install ./CoScribe-3.1.0-x64.deb
 ```
 
 Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门户配置。
@@ -152,6 +152,8 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 
 - 普通创建、追加或替换 Markdown 会先显示文件列表和差异，接受后才写盘。
 - “整理笔记”是明确的自动保存动作：AI 根据会话主题、项目目录和已有笔记选择目标，也可以创建子目录、多份笔记和互链结构；不会默认追加到当前文档。
+- 聊天输入框支持 `/compact`（AI 全量压缩并持久化会话摘要）、`/fork`、`/resume`、`/new`、`/clear`、`/note`、`/stop`、`/quit` 和 `/help`。普通的上下文自动压缩仍保留为轻量保护策略；全量压缩不会删除原始聊天。
+- “整理笔记”会保存已处理到的会话检查点，后续只整理新增内容；筛选、检索、生成、校验和写入阶段会在聊天窗口中流式显示。
 - AI 可以一次创建 1–50 个 Markdown 文件，但不能删除文件、写入项目外路径、跟随符号链接或覆盖二进制资料。
 - “AI 操作”保存已接受写入的事务记录。只要文件之后没有被手工修改，就可以安全撤销整次多文件操作。
 
@@ -281,23 +283,23 @@ npm run verify:package:linux
 
 ### Download and install
 
-Download `v2.2.2` from [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest):
+Download the stable `v3.1.0` release from [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest):
 
 | Platform | Artifact | Target |
 | --- | --- | --- |
-| macOS | `CoScribe-2.2.2-arm64.dmg` | Apple Silicon, macOS 13+ |
-| macOS | `CoScribe-2.2.2-arm64-mac.zip` | Portable Apple Silicon archive |
-| Windows | `CoScribe-Setup-2.2.2-x64.exe` | Windows 10/11 x64 |
-| Linux | `CoScribe-2.2.2-x64.AppImage` | Portable x86-64 AppImage |
-| Linux | `CoScribe-2.2.2-x64.deb` | Debian / Ubuntu x86-64 |
+| macOS | `CoScribe-3.1.0-arm64.dmg` | Apple Silicon, macOS 13+ |
+| macOS | `CoScribe-3.1.0-arm64-mac.zip` | Portable Apple Silicon archive |
+| Windows | `CoScribe-Setup-3.1.0-x64.exe` | Windows 10/11 x64 |
+| Linux | `CoScribe-3.1.0-x64.AppImage` | Portable x86-64 AppImage |
+| Linux | `CoScribe-3.1.0-x64.deb` | Debian / Ubuntu x86-64 |
 | All | `SHA256SUMS.txt` | SHA-256 checksums |
 
 The builds are currently unsigned.
 
 - **macOS:** drag CoScribe into Applications, then right-click and choose **Open**. If blocked, use System Settings → Privacy & Security → Open Anyway. Screen Recording is used only for region capture; Microphone is used only for local speech input.
 - **Windows:** run the x64 installer. If SmartScreen appears, verify the checksum and source before choosing **More info → Run anyway**.
-- **Linux AppImage:** run `chmod +x CoScribe-2.2.2-x64.AppImage`, then `./CoScribe-2.2.2-x64.AppImage`.
-- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-2.2.2-x64.deb`.
+- **Linux AppImage:** run `chmod +x CoScribe-3.1.0-x64.AppImage`, then `./CoScribe-3.1.0-x64.AppImage`.
+- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-3.1.0-x64.deb`.
 
 > The Apple Silicon macOS package passed real-window smoke tests. Windows and Linux were cross-built on macOS and passed architecture and packaged-content verification, but were not installed or launched on physical Windows/Linux hosts. Local speech recognition and system Calendar integration remain macOS-only.
 

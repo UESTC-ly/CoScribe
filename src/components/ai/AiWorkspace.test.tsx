@@ -147,6 +147,33 @@ describe('AiWorkspace', () => {
     })
   })
 
+  it('offers slash commands and executes an exact command without sending it to the model', async () => {
+    const onCommand = vi.fn().mockResolvedValue('已清空当前会话。')
+    const onSend = vi.fn()
+    render(<AiWorkspace {...buildProps({ onCommand, onSend })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+
+    fireEvent.change(textbox, { target: { value: '/co' } })
+    expect(screen.getByRole('option', { name: /全量压缩当前会话/u })).toBeInTheDocument()
+    fireEvent.keyDown(textbox, { key: 'Enter', code: 'Enter' })
+    expect(textbox).toHaveValue('/compact')
+    fireEvent.keyDown(textbox, { key: 'Enter', code: 'Enter' })
+
+    await waitFor(() => expect(onCommand).toHaveBeenCalledWith({
+      name: 'compact', argument: '', raw: '/compact'
+    }))
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('shows the command reference for /help', () => {
+    render(<AiWorkspace {...buildProps()} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+    fireEvent.change(textbox, { target: { value: '/help' } })
+    fireEvent.keyDown(textbox, { key: 'Enter', code: 'Enter' })
+    expect(screen.getByRole('listbox', { name: '聊天命令' })).toHaveTextContent('/compact')
+    expect(screen.getByRole('listbox', { name: '聊天命令' })).toHaveTextContent('/quit')
+  })
+
   it('selects an image file and sends it without requiring text', async () => {
     const onSend = vi.fn()
     const { container } = render(<AiWorkspace {...buildProps({ onSend })} />)
@@ -253,6 +280,29 @@ describe('AiWorkspace', () => {
     expect(screen.getByText('请求快照已压缩 3 条早期消息')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '压缩早期历史' }))
     expect(onCompactContext).toHaveBeenCalledOnce()
+  })
+
+  it('renders streamed note organization progress stages', () => {
+    const progressSession: ChatSession = {
+      ...session,
+      messages: [{
+        id: 'progress-1',
+        role: 'assistant',
+        kind: 'note-organization',
+        content: '',
+        createdAt: 3,
+        progress: {
+          kind: 'note-organization',
+          status: 'active',
+          steps: [{ stage: 'preparing', label: '筛选新增会话', status: 'complete', updatedAt: 1 }, {
+            stage: 'model', label: '模型正在规划笔记结构', status: 'active', updatedAt: 2
+          }]
+        }
+      }]
+    }
+    render(<AiWorkspace {...buildProps({ sessions: [progressSession], currentSessionId: progressSession.id })} />)
+    expect(screen.getByRole('region', { name: '整理笔记进度' })).toHaveTextContent('筛选新增会话')
+    expect(screen.getByRole('region', { name: '整理笔记进度' })).toHaveTextContent('模型正在规划笔记结构')
   })
 
   it('places the AI collapse control inside the AI panel header', () => {

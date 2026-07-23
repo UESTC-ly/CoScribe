@@ -9,6 +9,7 @@ import {
   Settings as SettingsIcon
 } from 'lucide-react'
 import type { AiSendPayload, ImageGenerationPayload } from './components/ai'
+import type { ChatCommandInvocation } from './lib/chat-commands'
 import {
   ActivityRail,
   ConfirmDialog,
@@ -62,6 +63,12 @@ import type {
 } from './shared/types'
 import { DEFAULT_SETTINGS } from './shared/types'
 import { planContextWindow } from './lib/context-window'
+import { mergeAiProgress } from './lib/ai-progress'
+import {
+  noteOrganizationBatch,
+  sessionCompactionBatch,
+  sessionRequestMessages
+} from './lib/chat-session'
 import './styles/shell.css'
 
 const AiWorkspace = lazy(() => import('./components/ai/AiWorkspace').then((module) => ({ default: module.AiWorkspace })))
@@ -103,6 +110,14 @@ interface ActiveAiRequest {
   assistantMessageId: string
   autoApplyOperation?: boolean
   operationMode?: AiSendPayload['operationMode']
+  compaction?: {
+    throughMessageId: string
+    sourceMessageCount: number
+  }
+  noteOrganization?: {
+    throughMessageId: string
+    sourceMessageCount: number
+  }
 }
 
 interface AiSelectionCommand {
@@ -251,8 +266,7 @@ export default function App(): React.JSX.Element {
     return planContextWindow({
       provider: state.settings.aiProvider,
       model: budgetModel,
-      messages: (budgetSession?.messages ?? [])
-        .filter((message) => message.role !== 'system')
+      messages: (budgetSession ? sessionRequestMessages(budgetSession) : [])
         .map((message) => ({
           role: message.role,
           content: message.attachments?.length
@@ -503,6 +517,18 @@ export default function App(): React.JSX.Element {
         setReportedContextUsage({ sessionId: request.sessionId, usage: event.usage })
         return
       }
+      if (event.type === 'progress') {
+        store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({
+          ...message,
+          progress: mergeAiProgress(message.progress, {
+            kind: event.kind,
+            stage: event.stage,
+            label: event.label,
+            detail: event.detail
+          })
+        }))
+        return
+      }
       if (event.type === 'done' || event.type === 'stopped' || event.type === 'error') flush(event.requestId)
       if (event.type === 'done') {
         store.updateMessage(request.sessionId, request.assistantMessageId, { sources: event.sources, operation: event.operation })
@@ -512,15 +538,72 @@ export default function App(): React.JSX.Element {
           const firstQuestion = firstMessage?.content.trim() || firstMessage?.attachments?.[0]?.name || '图片提问'
           store.renameSession(session.id, firstQuestion.replace(/[#*_`]/g, '').slice(0, 20))
         }
+        if (request.compaction) {
+          const summary = appStore.getState().sessions
+            .find((item) => item.id === request.sessionId)
+            ?.messages.find((message) => message.id === request.assistantMessageId)
+            ?.content.trim()
+          if (summary) {
+            store.setSessionCompaction(request.sessionId, {
+              summary,
+              throughMessageId: request.compaction.throughMessageId,
+              sourceMessageCount: request.compaction.sourceMessageCount,
+              createdAt: Date.now()
+            })
+            store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({
+              ...message,
+              progress: mergeAiProgress(message.progress, {
+                kind: 'session-compaction',
+                stage: 'complete',
+                label: '全量压缩完成，后续请求将使用这份摘要',
+                status: 'complete'
+              })
+            }))
+          } else {
+            const message = '模型没有返回可用的会话摘要，请重新执行 /compact。'
+            store.updateMessage(request.sessionId, request.assistantMessageId, (current) => ({
+              ...current,
+              error: message,
+              progress: mergeAiProgress(current.progress, {
+                kind: 'session-compaction',
+                stage: 'complete',
+                label: '全量压缩未完成',
+                status: 'error'
+              })
+            }))
+            setAiError(message)
+          }
+        }
         if (request.autoApplyOperation) {
           if (!event.operation) {
             const message = request.operationMode === 'generate-project-plan'
               ? 'AI 没有返回可写入的项目计划，请重新生成。'
               : 'AI 没有返回可写入的笔记文件，请重试“整理笔记”。'
-            store.updateMessage(request.sessionId, request.assistantMessageId, { error: message })
+            store.updateMessage(request.sessionId, request.assistantMessageId, (current) => ({
+              ...current,
+              error: message,
+              ...(request.noteOrganization && current.progress ? {
+                progress: mergeAiProgress(current.progress, {
+                  kind: 'note-organization',
+                  stage: 'validation',
+                  label: '模型没有返回可写入的笔记建议',
+                  status: 'error'
+                })
+              } : {})
+            }))
             setAiError(message)
           } else {
             const operation = event.operation
+            if (request.noteOrganization) {
+              store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({
+                ...message,
+                progress: mergeAiProgress(message.progress, {
+                  kind: 'note-organization',
+                  stage: 'writing',
+                  label: '正在将整理结果安全写入本地项目'
+                })
+              }))
+            }
             setApplyingOperationId(operation.id)
             void window.coscribe.file.applyAiOperation({ ...operation, status: 'accepted' }).then(async (result) => {
               store.updateMessage(request.sessionId, request.assistantMessageId, {
@@ -528,6 +611,25 @@ export default function App(): React.JSX.Element {
               })
               const files = result.files.length ? result.files : [result]
               for (const file of files) store.markDocumentSaved(file)
+              if (request.noteOrganization) {
+                const targetPaths = (operation.operations?.length ? operation.operations : [operation])
+                  .map((item) => item.targetPath)
+                store.markSessionNotesOrganized(request.sessionId, {
+                  throughMessageId: request.noteOrganization.throughMessageId,
+                  sourceMessageCount: request.noteOrganization.sourceMessageCount,
+                  organizedAt: Date.now(),
+                  targetPaths
+                })
+                store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({
+                  ...message,
+                  progress: mergeAiProgress(message.progress, {
+                    kind: 'note-organization',
+                    stage: 'complete',
+                    label: `整理完成，已保存 ${files.length} 份笔记`,
+                    status: 'complete'
+                  })
+                }))
+              }
               store.setFileTree(await window.coscribe.project.tree())
               setOperationHistory(await window.coscribe.project.operationHistory())
               const first = files[0]
@@ -545,14 +647,47 @@ export default function App(): React.JSX.Element {
               store.updateMessage(request.sessionId, request.assistantMessageId, {
                 operation: { ...operation, status: 'failed', error: message }
               })
+              if (request.noteOrganization) {
+                store.updateMessage(request.sessionId, request.assistantMessageId, (current) => ({
+                  ...current,
+                  progress: mergeAiProgress(current.progress, {
+                    kind: 'note-organization',
+                    stage: 'writing',
+                    label: '笔记写入失败，整理检查点未推进',
+                    status: 'error'
+                  })
+                }))
+              }
               setAiError(message)
             }).finally(() => setApplyingOperationId(null))
           }
         }
       } else if (event.type === 'stopped') {
-        store.updateMessage(request.sessionId, request.assistantMessageId, { stopped: true })
+        store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({
+          ...message,
+          stopped: true,
+          ...(message.progress ? {
+            progress: mergeAiProgress(message.progress, {
+              kind: message.progress.kind,
+              stage: 'complete',
+              label: '任务已停止，未更新处理检查点',
+              status: 'error'
+            })
+          } : {})
+        }))
       } else if (event.type === 'error') {
-        store.updateMessage(request.sessionId, request.assistantMessageId, { error: event.message })
+        store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({
+          ...message,
+          error: event.message,
+          ...(message.progress ? {
+            progress: mergeAiProgress(message.progress, {
+              kind: message.progress.kind,
+              stage: 'complete',
+              label: '任务失败，未更新处理检查点',
+              status: 'error'
+            })
+          } : {})
+        }))
         setAiError(event.message)
       }
       if (event.type === 'done' || event.type === 'stopped' || event.type === 'error') {
@@ -885,7 +1020,8 @@ export default function App(): React.JSX.Element {
       context
     }
     const assistantMessage: ChatMessage = { id: makeId('message'), role: 'assistant', content: '', createdAt: Date.now() + 1 }
-    const history = appStore.getState().sessions.find((session) => session.id === sessionId)?.messages ?? []
+    const currentSession = appStore.getState().sessions.find((session) => session.id === sessionId)
+    const history = currentSession ? sessionRequestMessages(currentSession) : []
     const forceCompact = forceCompactSessionId === sessionId
     store.addMessage(sessionId, userMessage)
     store.addMessage(sessionId, assistantMessage)
@@ -916,7 +1052,6 @@ export default function App(): React.JSX.Element {
         requestId,
         sessionId,
         messages: [...history, userMessage]
-          .filter((message) => message.role !== 'system')
           .map(({ role, content, attachments }) => ({
             role,
             content,
@@ -951,24 +1086,206 @@ export default function App(): React.JSX.Element {
     }
   }, [])
 
-  const quickNote = useCallback(async (): Promise<void> => {
+  const organizeNewNotes = useCallback(async (): Promise<string> => {
     const store = appStore.getState()
-    await sendAiMessage({
-      content: [
-        '请把本次会话中有长期价值的知识整理为结构化 Markdown 笔记，并立即保存到本地项目。',
-        '结合会话主题、项目目录结构和现有笔记命名，自主选择最合适的保存位置。',
-        '当前打开文档仅供参考，不是默认写入目标；仅当主题明确匹配时才追加，否则创建合适的新笔记或目录。',
-        '内容涉及多个独立主题时，可以一次创建多份互相链接的 Markdown 笔记。',
-        '保留关键结论、解释、步骤、代码和来源；去掉寒暄、重复内容和过程性指令。',
-        '必须调用 CoScribe 文件操作工具，不要只在聊天中返回笔记正文。'
-      ].join('\n'),
-      attachments: [],
-      scope: 'project',
-      referencedFiles: [...store.referencedFiles],
+    const sessionId = store.workspace.currentSessionId
+    const session = store.sessions.find((item) => item.id === sessionId)
+    if (!session || !sessionId) throw new Error('当前没有可整理的会话。')
+    if (streamingRequestId || imageGenerationRequestId || applyingOperationId) throw new Error('请等待当前 AI 任务和笔记写入完成后再整理。')
+    const batch = noteOrganizationBatch(session)
+    if (!batch.throughMessageId || !batch.messages.length) {
+      throw new Error('当前会话自上次整理后没有新增内容。')
+    }
+    const context = store.captureActiveContext('project')
+    if (!context || !state.project) throw new Error('请先打开一个项目。')
+    context.referencedFiles = [...store.referencedFiles]
+    const requestId = makeId('ai')
+    const assistantMessage: ChatMessage = {
+      id: makeId('message'),
+      role: 'assistant',
+      kind: 'note-organization',
+      content: '',
+      createdAt: Date.now(),
+      progress: mergeAiProgress(undefined, {
+        kind: 'note-organization',
+        stage: 'preparing',
+        label: `正在筛选 ${batch.sourceMessageCount} 条新增会话内容`
+      })
+    }
+    store.addMessage(sessionId, assistantMessage)
+    activeRequests.current.set(requestId, {
+      requestId,
+      sessionId,
+      assistantMessageId: assistantMessage.id,
+      autoApplyOperation: true,
       operationMode: 'organize-project-notes',
-      autoApplyOperation: true
+      noteOrganization: {
+        throughMessageId: batch.throughMessageId,
+        sourceMessageCount: batch.sourceMessageCount
+      }
     })
-  }, [sendAiMessage])
+    setStreamingRequestId(requestId)
+    setAiError(null)
+    const instruction = [
+      `只整理本次传入的 ${batch.sourceMessageCount} 条新增会话内容；更早的 ${batch.previouslyOrganizedCount} 条内容已经整理过，禁止重复整理。`,
+      '提炼其中有长期价值的知识并立即保存为结构化 Markdown 笔记。',
+      '结合会话主题、项目目录结构和现有笔记命名，自主选择最合适的保存位置。',
+      '当前打开文档仅供参考，不是默认写入目标；仅当主题明确匹配时才追加，否则创建合适的新笔记或目录。',
+      '内容涉及多个独立主题时，可以一次创建多份互相链接的 Markdown 笔记。',
+      '保留关键结论、解释、步骤、代码和来源；去掉寒暄、重复内容和过程性指令。',
+      '必须调用 CoScribe 文件操作工具，不要只在聊天中返回笔记正文。'
+    ].join('\n')
+    try {
+      await window.coscribe.ai.start({
+        requestId,
+        sessionId,
+        messages: [...batch.messages, { role: 'user', content: instruction }],
+        context,
+        operationMode: 'organize-project-notes',
+        settings: { allowGeneralKnowledge: state.settings.allowGeneralKnowledge }
+      })
+      return `已开始整理 ${batch.sourceMessageCount} 条新增会话内容。`
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : '整理笔记请求无法启动。'
+      store.updateMessage(sessionId, assistantMessage.id, (current) => ({
+        ...current,
+        error: message,
+        progress: mergeAiProgress(current.progress, {
+          kind: 'note-organization', stage: 'complete', label: '整理任务无法启动', status: 'error'
+        })
+      }))
+      activeRequests.current.delete(requestId)
+      setStreamingRequestId(null)
+      setAiError(message)
+      throw new Error(message)
+    }
+  }, [applyingOperationId, imageGenerationRequestId, state.project, state.settings.allowGeneralKnowledge, streamingRequestId])
+
+  const quickNote = useCallback(async (): Promise<void> => {
+    try {
+      await organizeNewNotes()
+    } catch (reason) {
+      setAiError(reason instanceof Error ? reason.message : '无法整理笔记。')
+    }
+  }, [organizeNewNotes])
+
+  const compactSession = useCallback(async (): Promise<string> => {
+    const store = appStore.getState()
+    const sessionId = store.workspace.currentSessionId
+    const session = store.sessions.find((item) => item.id === sessionId)
+    if (!session || !sessionId) throw new Error('当前没有可压缩的会话。')
+    if (streamingRequestId || imageGenerationRequestId || applyingOperationId) throw new Error('请等待当前 AI 任务和笔记写入完成后再压缩会话。')
+    const batch = sessionCompactionBatch(session)
+    if (!batch.throughMessageId || batch.messages.length < 2) throw new Error('至少需要一轮完整对话才能执行全量压缩。')
+    const context = store.captureActiveContext('general')
+    if (!context || !state.project) throw new Error('请先打开一个项目。')
+    const requestId = makeId('ai')
+    const assistantMessage: ChatMessage = {
+      id: makeId('message'),
+      role: 'assistant',
+      kind: 'session-compaction',
+      content: '',
+      createdAt: Date.now(),
+      progress: mergeAiProgress(undefined, {
+        kind: 'session-compaction',
+        stage: 'preparing',
+        label: `正在准备压缩 ${batch.sourceMessageCount} 条会话消息`
+      })
+    }
+    store.addMessage(sessionId, assistantMessage)
+    activeRequests.current.set(requestId, {
+      requestId,
+      sessionId,
+      assistantMessageId: assistantMessage.id,
+      operationMode: 'compact-session',
+      compaction: {
+        throughMessageId: batch.throughMessageId,
+        sourceMessageCount: batch.sourceMessageCount
+      }
+    })
+    setStreamingRequestId(requestId)
+    setAiError(null)
+    try {
+      await window.coscribe.ai.start({
+        requestId,
+        sessionId,
+        messages: [...batch.messages, {
+          role: 'user',
+          content: '现在对以上完整逻辑会话执行全量压缩。只输出供后续继续会话使用的高保真 Markdown 摘要。'
+        }],
+        context,
+        operationMode: 'compact-session',
+        settings: { allowGeneralKnowledge: false }
+      })
+      return `已开始全量压缩 ${batch.sourceMessageCount} 条会话消息。`
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : '全量压缩请求无法启动。'
+      store.updateMessage(sessionId, assistantMessage.id, (current) => ({
+        ...current,
+        error: message,
+        progress: mergeAiProgress(current.progress, {
+          kind: 'session-compaction', stage: 'complete', label: '全量压缩无法启动', status: 'error'
+        })
+      }))
+      activeRequests.current.delete(requestId)
+      setStreamingRequestId(null)
+      setAiError(message)
+      throw new Error(message)
+    }
+  }, [applyingOperationId, imageGenerationRequestId, state.project, streamingRequestId])
+
+  const executeChatCommand = useCallback(async (command: ChatCommandInvocation): Promise<string | void> => {
+    const store = appStore.getState()
+    const currentId = store.workspace.currentSessionId
+    const current = store.sessions.find((session) => session.id === currentId)
+    if (command.name === 'compact') return compactSession()
+    if (command.name === 'note') return organizeNewNotes()
+    if (command.name === 'stop') {
+      if (streamingRequestId) await window.coscribe.ai.stop(streamingRequestId)
+      else if (imageGenerationRequestId) await window.coscribe.images.stop(imageGenerationRequestId)
+      else throw new Error('当前没有正在运行的 AI 任务。')
+      return '已请求停止当前 AI 任务。'
+    }
+    if (command.name === 'quit') {
+      if (streamingRequestId) await window.coscribe.ai.stop(streamingRequestId)
+      if (imageGenerationRequestId) await window.coscribe.images.stop(imageGenerationRequestId)
+      store.setAiVisible(false)
+      return
+    }
+    if (streamingRequestId || imageGenerationRequestId || applyingOperationId) throw new Error('请先停止或等待当前 AI 任务结束。')
+    if (command.name === 'new') {
+      store.createSession(command.argument || '新会话')
+      return '已新建空白会话。'
+    }
+    if (!current || !currentId) throw new Error('当前没有可操作的会话。')
+    if (command.name === 'fork') {
+      store.forkSession(currentId, command.argument || undefined)
+      return `已从“${current.title}”创建独立分支。`
+    }
+    if (command.name === 'resume') {
+      const candidates = store.sessions
+        .filter((session) => session.id !== currentId)
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+      const query = command.argument.toLocaleLowerCase('zh-CN')
+      const target = query
+        ? candidates.find((session) => session.id.toLocaleLowerCase('zh-CN').includes(query) || session.title.toLocaleLowerCase('zh-CN').includes(query))
+        : candidates[0]
+      if (!target) throw new Error(query ? `没有找到匹配“${command.argument}”的会话。` : '没有其他可恢复的会话。')
+      store.setCurrentSession(target.id)
+      return `已恢复会话“${target.title}”。`
+    }
+    if (command.name === 'rename') {
+      if (!command.argument) throw new Error('用法：/rename <新标题>')
+      store.renameSession(currentId, command.argument)
+      return `当前会话已重命名为“${command.argument}”。`
+    }
+    if (command.name === 'clear') {
+      store.clearSession(currentId)
+      setReportedContextUsage(null)
+      setForceCompactSessionId(null)
+      return '当前会话已清空。'
+    }
+  }, [applyingOperationId, compactSession, imageGenerationRequestId, organizeNewNotes, streamingRequestId])
 
   const generateProjectPlan = useCallback(async (goal: string, horizon: string): Promise<void> => {
     if (streamingRequestId || imageGenerationRequestId) {
@@ -1114,8 +1431,9 @@ export default function App(): React.JSX.Element {
     const session = appStore.getState().sessions.find((item) => item.messages.some((candidate) => candidate.id === message.id))
     if (!session) return
     const messageIndex = session.messages.findIndex((candidate) => candidate.id === message.id)
-    const history = session.messages.slice(0, messageIndex)
-    const question = [...history].reverse().find((candidate) => candidate.role === 'user' && candidate.context)
+    const rawHistory = session.messages.slice(0, messageIndex)
+    const history = sessionRequestMessages({ ...session, messages: rawHistory })
+    const question = [...rawHistory].reverse().find((candidate) => candidate.role === 'user' && candidate.context)
     if (!question?.context) {
       setAiError('找不到这条回答发送时的上下文，无法重新生成。')
       return
@@ -1137,7 +1455,6 @@ export default function App(): React.JSX.Element {
         requestId,
         sessionId: session.id,
         messages: history
-          .filter((candidate) => candidate.role !== 'system')
           .map(({ role, content, attachments }) => ({
             role,
             content,
@@ -1666,6 +1983,7 @@ export default function App(): React.JSX.Element {
             }}
             onReferencedFilesChange={state.setReferencedFiles}
             onSend={sendAiMessage}
+            onCommand={executeChatCommand}
             onStop={stopAi}
             onGenerateImage={generateImage}
             onStopImage={stopImage}

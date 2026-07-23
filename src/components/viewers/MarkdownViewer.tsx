@@ -789,7 +789,13 @@ export function MarkdownViewer({
 
   return (
     <section
-      className={cx('vk-viewer', 'vk-markdown-viewer', aiSelectionText && 'has-ai-context-selection', className)}
+      className={cx(
+        'vk-viewer',
+        'vk-markdown-viewer',
+        outlineResizing && 'is-outline-resizing',
+        aiSelectionText && 'has-ai-context-selection',
+        className,
+      )}
       aria-label={`${fileName} Markdown 编辑器`}
       onKeyDownCapture={handleShortcut}
     >

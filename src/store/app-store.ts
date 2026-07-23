@@ -6,6 +6,8 @@ import {
   type AppSettings,
   type ChatMessage,
   type ChatSession,
+  type ChatSessionCompaction,
+  type ChatSessionNoteCheckpoint,
   type ContextScope,
   type ContextSnapshot,
   type FileNode,
@@ -127,9 +129,13 @@ export interface RendererStoreActions {
 
   setSessions: (sessions: ChatSession[]) => void
   createSession: (title?: string, id?: string, now?: number) => string
+  forkSession: (sessionId: string, title?: string, id?: string, now?: number) => string | null
   setCurrentSession: (sessionId: string | null, now?: number) => void
   renameSession: (sessionId: string, title: string, now?: number) => void
   deleteSession: (sessionId: string) => void
+  clearSession: (sessionId: string, now?: number) => void
+  setSessionCompaction: (sessionId: string, compaction: ChatSessionCompaction, now?: number) => void
+  markSessionNotesOrganized: (sessionId: string, checkpoint: ChatSessionNoteCheckpoint, now?: number) => void
   addMessage: (sessionId: string, message: ChatMessage) => void
   updateMessage: (
     sessionId: string,
@@ -178,12 +184,24 @@ function cloneMessage(message: ChatMessage): ChatMessage {
     attachments: message.attachments?.map((attachment) => ({ ...attachment })),
     context: message.context ? cloneContextSnapshot(message.context) : undefined,
     sources: message.sources?.map((source) => ({ ...source })),
-    operation: message.operation ? { ...message.operation } : undefined
+    operation: message.operation ? { ...message.operation } : undefined,
+    progress: message.progress ? {
+      ...message.progress,
+      steps: message.progress.steps.map((step) => ({ ...step }))
+    } : undefined
   }
 }
 
 function cloneSession(session: ChatSession): ChatSession {
-  return { ...session, messages: session.messages.map(cloneMessage) }
+  return {
+    ...session,
+    messages: session.messages.map(cloneMessage),
+    compaction: session.compaction ? { ...session.compaction } : undefined,
+    noteCheckpoint: session.noteCheckpoint ? {
+      ...session.noteCheckpoint,
+      targetPaths: session.noteCheckpoint.targetPaths ? [...session.noteCheckpoint.targetPaths] : undefined
+    } : undefined
+  }
 }
 
 function sortedSessions(sessions: readonly ChatSession[]): ChatSession[] {
@@ -685,6 +703,37 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
     return safeId
   },
 
+  forkSession: (sessionId, title, id = uniqueId('session'), now = Date.now()) => {
+    const source = get().sessions.find((session) => session.id === sessionId)
+    if (!source) return null
+    const safeId = get().sessions.some((session) => session.id === id) ? uniqueId('session') : id
+    const idMap = new Map<string, string>()
+    const messages = source.messages.map((message) => {
+      const nextId = uniqueId('message')
+      idMap.set(message.id, nextId)
+      return { ...cloneMessage(message), id: nextId }
+    })
+    const fork: ChatSession = {
+      ...cloneSession(source),
+      id: safeId,
+      title: title?.trim() || `${source.title} · 分支`,
+      createdAt: now,
+      updatedAt: now,
+      messages,
+      compaction: source.compaction && idMap.has(source.compaction.throughMessageId)
+        ? { ...source.compaction, throughMessageId: idMap.get(source.compaction.throughMessageId)!, createdAt: now }
+        : undefined,
+      noteCheckpoint: source.noteCheckpoint && idMap.has(source.noteCheckpoint.throughMessageId)
+        ? { ...source.noteCheckpoint, throughMessageId: idMap.get(source.noteCheckpoint.throughMessageId)!, organizedAt: now }
+        : undefined
+    }
+    set((state) => ({
+      sessions: sortedSessions([fork, ...state.sessions]),
+      workspace: { ...state.workspace, currentSessionId: safeId }
+    }))
+    return safeId
+  },
+
   setCurrentSession: (sessionId, now = Date.now()) => set((state) => {
     if (sessionId !== null && !state.sessions.some((session) => session.id === sessionId)) return state
     return {
@@ -718,6 +767,37 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
       }
     }
   }),
+
+  clearSession: (sessionId, now = Date.now()) => set((state) => ({
+    sessions: sortedSessions(state.sessions.map((session) => session.id === sessionId
+      ? {
+          ...session,
+          updatedAt: now,
+          messages: [],
+          compaction: undefined,
+          noteCheckpoint: undefined
+        }
+      : session))
+  })),
+
+  setSessionCompaction: (sessionId, compaction, now = Date.now()) => set((state) => ({
+    sessions: sortedSessions(state.sessions.map((session) => session.id === sessionId
+      ? { ...session, updatedAt: now, compaction: { ...compaction } }
+      : session))
+  })),
+
+  markSessionNotesOrganized: (sessionId, checkpoint, now = Date.now()) => set((state) => ({
+    sessions: sortedSessions(state.sessions.map((session) => session.id === sessionId
+      ? {
+          ...session,
+          updatedAt: now,
+          noteCheckpoint: {
+            ...checkpoint,
+            targetPaths: checkpoint.targetPaths ? [...checkpoint.targetPaths] : undefined
+          }
+        }
+      : session))
+  })),
 
   addMessage: (sessionId, message) => set((state) => {
     if (!state.sessions.some((session) => session.id === sessionId)) return state

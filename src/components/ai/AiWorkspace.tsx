@@ -53,6 +53,12 @@ import {
 import { ConversationTurnNavigator } from './ConversationTurnNavigator'
 import { MarkdownMessage } from './MarkdownMessage'
 import { useLocalSpeechInput } from './useLocalSpeechInput'
+import {
+  chatCommandSuggestions,
+  parseChatCommand,
+  type ChatCommandDefinition,
+  type ChatCommandInvocation
+} from '../../lib/chat-commands'
 import '../../styles/ai.css'
 
 export interface AiProjectFileOption {
@@ -105,6 +111,7 @@ export interface AiWorkspaceProps {
   onCompactContext?: () => void
   onReferencedFilesChange: (paths: string[]) => void
   onSend: (payload: AiSendPayload) => void | Promise<void>
+  onCommand?: (command: ChatCommandInvocation) => string | void | Promise<string | void>
   onStop: () => void | Promise<void>
   onGenerateImage?: (payload: ImageGenerationPayload) => void | Promise<void>
   onStopImage?: () => void | Promise<void>
@@ -278,6 +285,7 @@ export function AiWorkspace({
   onCompactContext,
   onReferencedFilesChange,
   onSend,
+  onCommand,
   onStop,
   onGenerateImage,
   onStopImage,
@@ -303,6 +311,9 @@ export function AiWorkspace({
   const [referenceQuery, setReferenceQuery] = useState('')
   const [pendingImages, setPendingImages] = useState<ChatImageAttachment[]>([])
   const [composerError, setComposerError] = useState<string | null>(null)
+  const [commandNotice, setCommandNotice] = useState<string | null>(null)
+  const [commandHelpOpen, setCommandHelpOpen] = useState(false)
+  const [commandIndex, setCommandIndex] = useState(0)
   const [composerMode, setComposerMode] = useState<'chat' | 'image'>('chat')
   const [imageSize, setImageSize] = useState<ImageGenerationPayload['size']>('1024x1024')
   const [imageQuality, setImageQuality] = useState<ImageGenerationPayload['quality']>('medium')
@@ -316,6 +327,8 @@ export function AiWorkspace({
   const hasTurnNavigation = (activeSession?.messages.filter((message) => message.role === 'user').length ?? 0) >= 2
   const currentDraft = draft ?? localDraft
   const isBusy = isStreaming || isGeneratingImage
+  const commandSuggestions = useMemo(() => chatCommandSuggestions(currentDraft), [currentDraft])
+  const visibleCommands = commandHelpOpen ? [...chatCommandSuggestions('/')] : commandSuggestions
 
   useOutsideClose(sessionMenuOpen, sessionMenuRef, () => setSessionMenuOpen(false))
   useOutsideClose(referenceMenuOpen, referenceMenuRef, () => setReferenceMenuOpen(false))
@@ -367,8 +380,16 @@ export function AiWorkspace({
   useEffect(() => {
     setPendingImages([])
     setComposerError(null)
+    setCommandNotice(null)
+    setCommandHelpOpen(false)
+    setCommandIndex(0)
     setComposerMode('chat')
   }, [currentSessionId])
+
+  useEffect(() => {
+    setCommandIndex(0)
+    if (!currentDraft.trimStart().startsWith('/') && !commandHelpOpen) setCommandHelpOpen(false)
+  }, [commandHelpOpen, currentDraft])
 
   useEffect(() => {
     if (!capturedImage) return
@@ -405,6 +426,36 @@ export function AiWorkspace({
 
   const submit = (): void => {
     const content = currentDraft.trim()
+    const parsedCommand = composerMode === 'chat' ? parseChatCommand(content) : null
+    if (parsedCommand?.kind === 'unknown') {
+      setComposerError(`未知命令 ${parsedCommand.command}。输入 /help 查看可用命令。`)
+      return
+    }
+    if (parsedCommand?.kind === 'command') {
+      if (parsedCommand.invocation.name === 'help') {
+        updateDraft('')
+        setComposerError(null)
+        setCommandNotice(null)
+        setCommandHelpOpen(true)
+        return
+      }
+      if (isBusy && parsedCommand.invocation.name !== 'stop' && parsedCommand.invocation.name !== 'quit') {
+        setComposerError('请先停止或等待当前 AI 任务结束。')
+        return
+      }
+      if (!onCommand) {
+        setComposerError('当前版本暂不支持聊天命令。')
+        return
+      }
+      updateDraft('')
+      setComposerError(null)
+      setCommandHelpOpen(false)
+      setCommandNotice(null)
+      void Promise.resolve(onCommand(parsedCommand.invocation))
+        .then((message) => { if (message) setCommandNotice(message) })
+        .catch((reason) => setComposerError(reason instanceof Error ? reason.message : '命令执行失败。'))
+      return
+    }
     if (isBusy || speech.active || disabled || !activeSession) return
     if (composerMode === 'image') {
       if (!content || !isImageConfigured || !onGenerateImage) return
@@ -418,7 +469,15 @@ export function AiWorkspace({
     updateDraft('')
     setPendingImages([])
     setComposerError(null)
+    setCommandNotice(null)
     void onSend({ content, attachments, scope: contextScope, referencedFiles: [...referencedFiles] })
+  }
+
+  const chooseCommand = (definition: ChatCommandDefinition): void => {
+    const next = definition.acceptsArgument ? `${definition.command} ` : definition.command
+    updateDraft(next)
+    setCommandHelpOpen(false)
+    textareaRef.current?.focus()
   }
 
   const addImages = async (files: readonly File[]): Promise<void> => {
@@ -698,9 +757,12 @@ export function AiWorkspace({
               <span style={{ width: `${contextUsage.percent}%` }} />
             </div>
             <p>
-              {contextUsage.compactedMessageCount > 0
+              {activeSession?.compaction
+                ? `已全量压缩 ${activeSession.compaction.sourceMessageCount} 条历史`
+                : contextUsage.compactedMessageCount > 0
                 ? `请求快照已压缩 ${contextUsage.compactedMessageCount} 条早期消息`
                 : `为回答预留 ${formatTokenCount(contextUsage.outputReserveTokens)} tokens`}
+              {activeSession?.noteCheckpoint ? ' · 已跳过已整理内容' : ''}
               {contextUsage.truncated ? ' · 超长内容已安全截断' : ''}
             </p>
           </div>
@@ -904,12 +966,61 @@ export function AiWorkspace({
             onChange={(event) => updateDraft(event.target.value)}
             onPaste={pasteImages}
             onKeyDown={(event) => {
+              if (visibleCommands.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                event.preventDefault()
+                setCommandIndex((current) => event.key === 'ArrowDown'
+                  ? (current + 1) % visibleCommands.length
+                  : (current - 1 + visibleCommands.length) % visibleCommands.length)
+                return
+              }
+              if (visibleCommands.length && event.key === 'Tab' && !event.shiftKey) {
+                event.preventDefault()
+                chooseCommand(visibleCommands[commandIndex] ?? visibleCommands[0]!)
+                return
+              }
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault()
+                const command = parseChatCommand(currentDraft.trim())
+                if ((!command || command.kind === 'unknown') && commandSuggestions.length) {
+                  const selected = commandSuggestions[commandIndex] ?? commandSuggestions[0]
+                  if (selected) {
+                    if (selected.acceptsArgument) {
+                      chooseCommand(selected)
+                    } else {
+                      chooseCommand(selected)
+                    }
+                    return
+                  }
+                }
                 submit()
               }
             }}
           />
+          {(commandHelpOpen || commandSuggestions.length > 0) && (
+            <div className="ai-command-menu" role="listbox" aria-label="聊天命令">
+              <header>
+                <strong>聊天命令</strong>
+                <small>↑↓ 选择 · Tab 补全 · Enter 执行</small>
+                {commandHelpOpen && (
+                  <button type="button" aria-label="关闭聊天命令" onClick={() => setCommandHelpOpen(false)}><X aria-hidden="true" /></button>
+                )}
+              </header>
+              <div className="ai-command-menu__list">
+                {visibleCommands.map((definition, index) => (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={index === commandIndex}
+                    key={definition.name}
+                    onClick={() => chooseCommand(definition)}
+                  >
+                    <code>{definition.usage}</code>
+                    <span>{definition.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="ai-composer__toolbar">
             <input
               ref={imageInputRef}
@@ -1023,7 +1134,7 @@ export function AiWorkspace({
             <button
               className="ai-composer__tool ai-composer__tool--note"
               type="button"
-              disabled={disabled || !activeSession || activeSession.messages.length === 0 || isBusy || speech.active || !isConfigured || composerMode === 'image'}
+              disabled={disabled || !activeSession || activeSession.messages.length === 0 || isBusy || Boolean(applyingOperationId) || speech.active || !isConfigured || composerMode === 'image'}
               aria-label="整理笔记"
               title="将当前会话整理成 Markdown 笔记并保存到本地"
               onClick={() => void onQuickNote?.()}
@@ -1058,6 +1169,7 @@ export function AiWorkspace({
         <p className="ai-composer-wrap__notice">
           {composerMode === 'image' ? '图片生成会消耗独立的 GPT-Image 2 额度。' : '普通文件修改需确认；点击“整理笔记”会在生成后直接保存。'}
         </p>
+        {commandNotice && <p className="ai-composer-wrap__command-notice" role="status">{commandNotice}</p>}
       </footer>
     </aside>
   )
