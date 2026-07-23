@@ -104,10 +104,7 @@ try {
   await page.screenshot({ path: path.join(output, 'workspace-overview.png') })
 
   const preview = page.getByLabel('Markdown 预览')
-  const selectionLine = preview.getByText(
-    '阅读本地资料、追踪上下文，并把 AI 输出沉淀为可迁移的 Markdown。',
-    { exact: true }
-  )
+  const selectionLine = preview.locator('blockquote').first()
   await selectionLine.evaluate((element) => {
     const range = document.createRange()
     range.selectNodeContents(element)
@@ -123,7 +120,7 @@ try {
   await page.screenshot({ path: path.join(output, 'selection-context.png') })
   await selectionCard.getByRole('button', { name: '清除选中内容' }).click()
 
-  await page.locator('.app-titlebar__actions').getByRole('button', { name: '隐藏 AI' }).click()
+  await page.getByRole('button', { name: '收起 AI 侧栏' }).click()
   await page.screenshot({ path: path.join(output, 'markdown-mermaid-code.png') })
 
   await page.locator('.tree-row').filter({ hasText: 'CoScribe 演示.pptx' }).click()
@@ -154,7 +151,7 @@ try {
   await page.getByLabel('网址或搜索内容').fill(`http://127.0.0.1:${port}/article`)
   await page.getByLabel('网址或搜索内容').press('Enter')
   await page.locator('.research-browser__tabbar strong').filter({ hasText: 'Knowledge Research' }).waitFor({ state: 'visible' })
-  await page.locator('.app-titlebar__actions').getByRole('button', { name: '显示 AI' }).click()
+  await page.getByRole('button', { name: '打开 AI 侧栏' }).click()
   await page.getByRole('button', { name: '发送网页正文到 AI' }).click()
   await page.getByLabel('当前 AI 上下文').filter({ hasText: 'Knowledge Research' }).waitFor({ state: 'visible' })
 
@@ -165,13 +162,7 @@ try {
     return window.getBounds()
   })
   const browserScreenshot = path.join(output, 'research-browser.png')
-  if (process.platform === 'darwin') {
-    await new Promise((resolve, reject) => execFile(
-      '/usr/sbin/screencapture',
-      ['-x', `-R${windowBounds.x},${windowBounds.y},${windowBounds.width},${windowBounds.height}`, browserScreenshot],
-      (error) => error ? reject(error) : resolve()
-    ))
-  } else {
+  const captureElectronWindow = async () => {
     const composite = await app.evaluate(async ({ desktopCapturer }) => {
       const sources = await desktopCapturer.getSources({
         types: ['window'],
@@ -181,8 +172,19 @@ try {
       const source = sources.find((candidate) => /CoScribe/iu.test(candidate.name))
       return source?.thumbnail.isEmpty() ? '' : source?.thumbnail.toPNG().toString('base64') ?? ''
     })
-    if (composite) await writeFile(browserScreenshot, Buffer.from(composite, 'base64'))
-    else await page.screenshot({ path: browserScreenshot })
+    if (!composite) return false
+    await writeFile(browserScreenshot, Buffer.from(composite, 'base64'))
+    return true
+  }
+  if (process.platform === 'darwin') {
+    const nativeCaptureSucceeded = await new Promise((resolve) => execFile(
+      '/usr/sbin/screencapture',
+      ['-x', `-R${windowBounds.x},${windowBounds.y},${windowBounds.width},${windowBounds.height}`, browserScreenshot],
+      (error) => resolve(!error)
+    ))
+    if (!nativeCaptureSucceeded && !(await captureElectronWindow())) await page.screenshot({ path: browserScreenshot })
+  } else if (!(await captureElectronWindow())) {
+    await page.screenshot({ path: browserScreenshot })
   }
 
   const images = [

@@ -3,7 +3,7 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-07-20
+- Last refreshed: 2026-07-23
 - Primary product surfaces: project home, three-region desktop workspace, document viewers/editors, AI workspace, settings and status bar.
 - Evidence reviewed: `README.md`, the original product brief, `src/App.tsx`, `src/styles/global.css`, `src/styles/shell.css`, `src/styles/ai.css`, shell and AI components, and Playwright light/dark screenshots.
 
@@ -11,7 +11,7 @@
 
 - Personality: calm, capable, local-first and editorial; CoScribe should feel like a dependable reading and writing partner.
 - Trust signals: ordinary local files, explicit AI write previews, visible sources, reversible actions and precise error messages.
-- Avoid: marketing-style gradients, oversized cards, playful decoration that competes with content, and hidden destructive behavior.
+- Avoid: marketing-style gradients, a gray-green wash, oversized cards, playful decoration that competes with content, and hidden destructive behavior.
 
 ## Product goals
 
@@ -40,11 +40,11 @@
 
 ## Visual language
 
-- Color: Obsidian-inspired neutral surfaces with restrained violet accents and equivalent light/dark contrast.
-- Typography: system UI text for controls, readable document typography for content and monospace for paths/code.
+- Color: neutral graphite and paper surfaces with a restrained ink-amethyst accent; amber and coral are reserved for highlights and status. Avoid decorative gradients and any green cast in base surfaces; functional transparency grids and timeline markers stay restrained and neutral.
+- Typography: Avenir Next/SF Pro/Segoe UI Variable fallbacks for controls, a quiet editorial serif stack for long-form reading, and monospace for paths/code.
 - Spacing/layout rhythm: compact desktop density, 4-8px control rhythm and clear structural dividers.
 - Shape/radius/elevation: small radii and subtle elevation only for transient surfaces.
-- Motion: short functional transitions; no decorative motion.
+- Motion: short functional transitions; no decorative motion. Hover states should clarify structure rather than flash.
 - Imagery/iconography: Lucide line icons and the CoScribe book/spark application mark.
 
 ## Components
@@ -87,7 +87,7 @@
 ## Implementation constraints
 
 - Framework/styling system: Electron, React, TypeScript and repository-local CSS variables; no new design-system dependency.
-- Design-token constraints: extend existing semantic tokens instead of hard-coded theme-specific component colors.
+- Design-token constraints: extend existing semantic tokens instead of hard-coded theme-specific component colors; light and dark themes must share the same semantic roles.
 - Performance constraints: resizing must remain synchronous and avoid layout-heavy observers in pointer-move loops.
 - Compatibility constraints: preserve existing `.vibeknowledge` project metadata and legacy user settings/API credentials during the CoScribe rename.
 - Test/screenshot expectations: unit-test layout calculations; E2E-test expansion beyond 560px, immediate reverse dragging, keyboard reset and light/dark critical surfaces.

@@ -1,29 +1,31 @@
 :root {
-  --bg-app: #e7e9e6;
-  --bg-panel: #f1f3f0;
-  --bg-content: #fafbf9;
+  --bg-app: #eef0f4;
+  --bg-panel: #f6f7fa;
+  --bg-content: #fbfcfe;
   --bg-elevated: #ffffff;
-  --bg-hover: #e4e7e2;
-  --bg-active: #dce9e3;
-  --border: #d4d8d2;
-  --border-strong: #b5bbb4;
-  --text: #282c29;
-  --text-secondary: #59605b;
-  --text-muted: #7a837d;
-  --accent: #3f7665;
-  --accent-hover: #315f51;
-  --accent-soft: #dfece6;
-  --focus: #4c816f;
-  --selection: #d7e9e1;
-  --highlight: #d5a13e;
-  --danger: #a9484d;
-  --warning: #93631e;
-  --success: #34745e;
-  --diff-add-bg: #e2eee9;
-  --diff-remove-bg: #f3e3e4;
-  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
-  --font-display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
-  --font-reading: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
+  --bg-hover: #e8ebf2;
+  --bg-active: #ece9ff;
+  --border: #d7dce6;
+  --border-strong: #b7bfce;
+  --text: #20232a;
+  --text-secondary: #505766;
+  --text-muted: #667080;
+  --accent: #5b4ed0;
+  --accent-hover: #493db4;
+  --accent-soft: #e8e5ff;
+  --on-accent: #ffffff;
+  --focus: #6f60e2;
+  --selection: #d9d5ff;
+  --highlight: #d39638;
+  --danger: #bd4c61;
+  --warning: #8b5d12;
+  --success: #2f826d;
+  --diff-add-bg: #e3f0ec;
+  --diff-remove-bg: #f7e3e8;
+  --shadow-panel: 0 1px 2px rgb(31 36 48 / 5%), 0 8px 24px rgb(31 36 48 / 4%);
+  --font-ui: "Avenir Next", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
+  --font-display: "SF Pro Display", "Avenir Next", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
+  --font-reading: "Charter", "Iowan Old Style", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", Georgia, serif;
   --font-mono: "SFMono-Regular", Menlo, Monaco, "Cascadia Mono", Consolas, monospace;
   font-family: var(--font-ui);
   letter-spacing: 0;
@@ -36,28 +38,30 @@
 }
 
 :root[data-theme='dark'] {
-  --bg-app: #171a18;
-  --bg-panel: #1d211f;
-  --bg-content: #222725;
-  --bg-elevated: #2a302d;
-  --bg-hover: #303734;
-  --bg-active: #263d34;
-  --border: #363e3a;
-  --border-strong: #4b5650;
-  --text: #e5eae7;
-  --text-secondary: #b6beb9;
-  --text-muted: #8e9892;
-  --accent: #7fc2aa;
-  --accent-hover: #9bd3be;
-  --accent-soft: #263c34;
-  --focus: #8bc9b2;
-  --selection: #304c41;
-  --highlight: #d4a64e;
-  --danger: #e4868e;
-  --warning: #deb36d;
-  --success: #72c5a1;
-  --diff-add-bg: #20372f;
-  --diff-remove-bg: #3b292d;
+  --bg-app: #15161b;
+  --bg-panel: #1b1d24;
+  --bg-content: #20232b;
+  --bg-elevated: #282b35;
+  --bg-hover: #303440;
+  --bg-active: #312d52;
+  --border: #383c48;
+  --border-strong: #535967;
+  --text: #eff0f4;
+  --text-secondary: #c2c5cf;
+  --text-muted: #9297a5;
+  --accent: #a49aff;
+  --accent-hover: #b8b0ff;
+  --accent-soft: #302d50;
+  --on-accent: #15161b;
+  --focus: #b2aaff;
+  --selection: #453f6d;
+  --highlight: #e4b15e;
+  --danger: #e7899c;
+  --warning: #e4b56e;
+  --success: #76c8a7;
+  --diff-add-bg: #203a32;
+  --diff-remove-bg: #422d34;
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 22%), 0 12px 28px rgb(0 0 0 / 18%);
   color-scheme: dark;
 }
 
@@ -103,9 +107,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   height: 30px;
   padding: 0 7px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-secondary);
+  transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
 }
 .icon-button:hover { background: var(--bg-hover); color: var(--text); }
 .icon-button.is-active { background: var(--accent-soft); color: var(--accent); }
@@ -113,12 +118,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .primary-button, .secondary-button, .danger-button {
   min-height: 32px;
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 6px 12px;
   font-size: 13px;
   font-weight: 600;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
 }
-.primary-button { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+.primary-button { border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 22%, transparent); }
 .primary-button:hover { background: var(--accent-hover); }
 .secondary-button { border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); }
 .secondary-button:hover { background: var(--bg-hover); }
@@ -130,7 +136,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   width: 100%;
   min-height: 34px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--bg-content);
   padding: 7px 9px;
   font-size: 13px;

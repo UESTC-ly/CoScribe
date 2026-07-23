@@ -39,7 +39,7 @@
 
 .plugin-card.is-active { border-color: color-mix(in srgb, var(--accent) 48%, var(--border)); background: color-mix(in srgb, var(--accent-soft) 35%, var(--bg-content)); }
 .plugin-card > header { display: grid; grid-template-columns: 35px minmax(0, 1fr) 27px; align-items: center; gap: 7px; }
-.plugin-card__icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; color: #f7f3ff; background: linear-gradient(145deg, #7554bd, #4e3588); box-shadow: inset 0 1px rgb(255 255 255 / 18%); }
+.plugin-card__icon { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--accent) 62%, var(--border)); border-radius: 8px; color: var(--on-accent); background: var(--accent); box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 24%, transparent); }
 .plugin-card header > div { min-width: 0; display: grid; gap: 2px; }
 .plugin-card header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .plugin-card header small { color: var(--text-muted); font-size: 9px; }
@@ -75,15 +75,13 @@
   min-height: 0;
   overflow: auto;
   padding: clamp(18px, 3vw, 34px);
-  background:
-    radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 31%),
-    var(--bg-content);
+  background: var(--bg-content);
 }
 
 .planner-hero { max-width: 1240px; margin: 0 auto 18px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .planner-hero__identity { min-width: 0; display: flex; align-items: center; gap: 12px; }
-.planner-hero__identity > span { flex: 0 0 46px; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px; color: #f9f7ff; background: linear-gradient(145deg, #8060c8, #4e3785); box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 18%, transparent), inset 0 1px rgb(255 255 255 / 20%); }
-.planner-hero__identity small, .planner-section-title small, .planner-ai-card__title small { color: var(--accent); font-size: 8.5px; font-weight: 750; letter-spacing: .08em; }
+.planner-hero__identity > span { flex: 0 0 46px; width: 46px; height: 46px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--accent) 56%, var(--border)); border-radius: 12px; color: var(--on-accent); background: var(--accent); box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 22%, transparent); }
+.planner-hero__identity small, .planner-section-title small, .planner-ai-card__title small { color: var(--accent); font-size: 8.5px; font-weight: 750; letter-spacing: 0; }
 .planner-hero h1 { margin: 1px 0 0; font-size: 21px; line-height: 1.2; }
 .planner-hero p { margin: 3px 0 0; color: var(--text-muted); font: 9.5px/1.4 var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .planner-hero .secondary-button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -144,12 +142,12 @@
 .planner-compose input:focus, .planner-compose select:focus, .planner-compose textarea:focus, .planner-ai-card textarea:focus, .planner-ai-card select:focus { border-color: var(--focus); }
 .planner-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .planner-compose .primary-button { margin-top: 2px; }
-.planner-ai-card { overflow: hidden; background: linear-gradient(155deg, color-mix(in srgb, var(--accent-soft) 55%, var(--bg-elevated)), var(--bg-elevated) 62%); }
+.planner-ai-card { overflow: hidden; background: color-mix(in srgb, var(--accent-soft) 42%, var(--bg-elevated)); }
 .planner-ai-card__title { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .planner-ai-card__title > span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--accent); background: var(--bg-elevated); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); }
 .planner-ai-card__title > div { display: grid; gap: 1px; }
 .planner-ai-card__actions { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; margin-top: 7px; }
-.planner-ai-card__actions button { min-height: 31px; border: 1px solid var(--accent); border-radius: 5px; color: #fff; background: var(--accent); font-size: 10.5px; font-weight: 700; }
+.planner-ai-card__actions button { min-height: 31px; border: 1px solid var(--accent); border-radius: 5px; color: var(--on-accent); background: var(--accent); font-size: 10.5px; font-weight: 700; }
 .planner-ai-card__actions button:hover:not(:disabled) { background: var(--accent-hover); }
 .planner-ai-card__actions button:disabled { cursor: not-allowed; opacity: .45; }
 .planner-ai-card > p { margin: 7px 0 0; color: var(--text-muted); font-size: 9px; }
@@ -175,12 +173,12 @@
 .plugin-workspace {
   width: 100%; min-width: 0; min-height: 0; height: 100%; overflow-x: clip; overflow-y: auto;
   padding: clamp(18px, 3vw, 34px); color: var(--text);
-  background: radial-gradient(circle at 86% -4%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 30%), var(--bg-content);
+  background: var(--bg-content);
 }
 .plugin-hero { max-width: 1240px; margin: 0 auto 18px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .plugin-hero__identity { min-width: 0; display: flex; align-items: center; gap: 12px; }
-.plugin-hero__identity > span { flex: 0 0 46px; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px; color: #faf8ff; background: linear-gradient(145deg, #8060c8, #4e3785); box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 16%, transparent), inset 0 1px rgb(255 255 255 / 20%); }
-.plugin-hero__identity small, .plugin-section-title small { color: var(--accent); font-size: 8.5px; font-weight: 760; letter-spacing: .08em; }
+.plugin-hero__identity > span { flex: 0 0 46px; width: 46px; height: 46px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--accent) 56%, var(--border)); border-radius: 12px; color: var(--on-accent); background: var(--accent); box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 22%, transparent); }
+.plugin-hero__identity small, .plugin-section-title small { color: var(--accent); font-size: 8.5px; font-weight: 760; letter-spacing: 0; }
 .plugin-hero h1 { margin: 1px 0 0; font: 720 21px/1.2 var(--font-display); }
 .plugin-hero p { margin: 3px 0 0; color: var(--text-muted); font-size: 9.5px; line-height: 1.45; }
 .plugin-hero .primary-button, .plugin-hero .secondary-button, .plugin-section-title .text-button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -222,7 +220,7 @@
 .flashcard-layout { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(260px, .55fr); gap: 12px; align-items: start; }
 .review-card { min-height: 480px; }
 .flashcard-stage { min-height: 380px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; text-align: center; }
-.flashcard-stage > small, .flashcard-answer small { color: var(--accent); font-size: 8.5px; font-weight: 750; letter-spacing: .08em; }
+.flashcard-stage > small, .flashcard-answer small { color: var(--accent); font-size: 8.5px; font-weight: 750; letter-spacing: 0; }
 .flashcard-stage h3 { max-width: 680px; margin: 10px 0 22px; font: 680 23px/1.4 var(--font-display); }
 .flashcard-answer { width: 100%; max-width: 680px; padding: 18px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 9px; background: var(--accent-soft); }
 .flashcard-answer p { margin: 8px 0 0; font-size: 14px; line-height: 1.65; }
@@ -230,7 +228,7 @@
 .flashcard-grades button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); background: var(--bg-content); font-size: 9.5px; }
 .flashcard-grades button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .flashcard-source { margin-top: 14px; display: inline-flex; align-items: center; gap: 4px; }
-.flashcard-ai-card { background: linear-gradient(155deg, color-mix(in srgb, var(--accent-soft) 55%, var(--bg-elevated)), var(--bg-elevated) 62%); }
+.flashcard-ai-card { background: color-mix(in srgb, var(--accent-soft) 42%, var(--bg-elevated)); }
 .flashcard-ai-card > p { color: var(--text-muted); font-size: 9.5px; line-height: 1.55; }
 .flashcard-ai-card textarea { width: 100%; resize: vertical; border: 1px solid var(--border); border-radius: 6px; padding: 9px; color: var(--text); background: var(--bg-content); font-size: 10.5px; line-height: 1.55; }
 .flashcard-ai-card > .primary-button { width: 100%; margin-top: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
@@ -244,7 +242,7 @@
 .backlink-note-list small { color: var(--text-muted); font-size: 8.5px; }
 .backlink-detail { min-width: 0; padding: 16px; }
 .backlink-detail > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.backlink-detail > header small { color: var(--accent); font-size: 8px; font-weight: 750; letter-spacing: .08em; }
+.backlink-detail > header small { color: var(--accent); font-size: 8px; font-weight: 750; letter-spacing: 0; }
 .backlink-detail > header h2 { margin: 2px 0 0; font-size: 16px; }
 .backlink-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 13px; }
 .backlink-columns > section { min-width: 0; }
@@ -306,7 +304,7 @@
 .research-list-items > button { width: 100%; min-width: 0; display: grid; gap: 4px; margin-bottom: 3px; padding: 10px; border: 0; border-radius: 7px; color: var(--text-secondary); background: transparent; text-align: left; }
 .research-list-items > button:hover { background: var(--bg-hover); }
 .research-list-items > button.is-active { color: var(--text); background: var(--bg-elevated); box-shadow: inset 2px 0 var(--accent), 0 1px 4px rgb(0 0 0 / 5%); }
-.research-list-items small { color: var(--accent); font-size: 7.5px; font-weight: 760; letter-spacing: .06em; }
+.research-list-items small { color: var(--accent); font-size: 7.5px; font-weight: 760; letter-spacing: 0; }
 .research-list-items strong { display: -webkit-box; overflow: hidden; font-size: 10.5px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .research-list-items span { overflow: hidden; color: var(--text-muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
 .research-list-items code { width: fit-content; max-width: 100%; overflow: hidden; color: var(--text-muted); font: 8px/1.3 var(--font-mono); text-overflow: ellipsis; }
@@ -346,7 +344,7 @@
 .matrix-table textarea { min-height: 78px; resize: vertical; padding: 5px; }
 .matrix-table select { min-height: 29px; padding: 4px; background: var(--bg-panel); }
 .matrix-table textarea:focus { background: var(--bg-elevated); box-shadow: 0 0 0 1px var(--focus); }
-.matrix-ai-bar { max-width: 1240px; min-height: 64px; margin: 12px auto 0; display: flex; align-items: center; gap: 10px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 9px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent-soft) 58%, var(--bg-elevated)), var(--bg-elevated)); }
+.matrix-ai-bar { max-width: 1240px; min-height: 64px; margin: 12px auto 0; display: flex; align-items: center; gap: 10px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--accent-soft) 42%, var(--bg-elevated)); }
 .matrix-ai-bar > div { min-width: 0; flex: 1; display: flex; align-items: center; gap: 9px; color: var(--accent); }
 .matrix-ai-bar span { display: grid; gap: 2px; color: var(--text); }
 .matrix-ai-bar small { color: var(--text-muted); font-size: 8.5px; font-weight: 450; }
