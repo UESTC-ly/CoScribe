@@ -82,7 +82,7 @@ export class ReferenceMetadataService {
     const response = await this.fetcher(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, {
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'CoScribe/2.2.0 (https://github.com/UESTC-ly/CoScribe)'
+        'User-Agent': 'CoScribe/2.2.1 (https://github.com/UESTC-ly/CoScribe)'
       },
       signal: AbortSignal.timeout(15_000),
       redirect: 'follow'

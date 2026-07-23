@@ -10,15 +10,18 @@ interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   label: string
   active?: boolean
   compact?: boolean
+  shortcut?: string
 }
 
 export function IconButton({
   label,
   active,
   compact,
+  shortcut,
   className,
   children,
   type = 'button',
+  title,
   ...props
 }: IconButtonProps): React.JSX.Element {
   return (
@@ -28,7 +31,7 @@ export function IconButton({
       className={cx('vk-viewer-icon-button', active && 'is-active', compact && 'is-compact', className)}
       aria-label={label}
       aria-pressed={active === undefined ? undefined : active}
-      title={label}
+      title={title ?? `${label}${shortcut ? `（${shortcut}）` : ''}`}
     >
       {children}
     </button>

@@ -130,7 +130,28 @@ try {
   await page.getByLabel('向 AI 提问').fill('用三点总结当前文档，并保留关键术语。')
   await page.getByRole('button', { name: '发送消息' }).click()
   await page.getByText('这份文档的核心流程可以归纳为三步：').waitFor({ state: 'visible' })
+  await page.locator('.vk-mermaid-svg svg').waitFor({ state: 'visible', timeout: 15_000 })
   await page.screenshot({ path: path.join(output, 'workspace-overview.png') })
+
+  const preview = page.getByLabel('Markdown 预览')
+  const selectionLine = preview.getByText(
+    '阅读本地资料、追踪上下文，并把 AI 输出沉淀为可迁移的 Markdown。',
+    { exact: true }
+  )
+  await selectionLine.evaluate((element) => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  })
+  await page.getByLabel('基于').selectOption('selection')
+  const selectionCard = page.getByRole('region', { name: '已捕获的 AI 选中内容' })
+  await selectionCard.waitFor({ state: 'visible' })
+  await page.getByLabel('向 AI 提问').focus()
+  await page.screenshot({ path: path.join(output, 'selection-context.png') })
+  await selectionCard.getByRole('button', { name: '清除选中内容' }).click()
 
   await page.locator('.app-titlebar__actions').getByRole('button', { name: '隐藏 AI' }).click()
   await page.screenshot({ path: path.join(output, 'markdown-mermaid-code.png') })
@@ -143,6 +164,21 @@ try {
   await page.getByRole('button', { name: '本地文字识别' }).click()
   await page.locator('.vk-ocr-text').waitFor({ state: 'visible', timeout: 90_000 })
   await page.screenshot({ path: path.join(output, 'local-ocr.png') })
+
+  await page.getByRole('button', { name: '插件', exact: true }).click()
+  const referencesCard = page.locator('.plugin-card').filter({ hasText: '文献与引用' })
+  await referencesCard.getByRole('button', { name: '启用并授权文献与引用' }).click()
+  await page.getByRole('button', { name: '授权并启用' }).click()
+  await referencesCard.getByRole('button', { name: '打开插件' }).click()
+  await page.getByRole('region', { name: '文献与引用插件' }).waitFor({ state: 'visible' })
+  await page.getByLabel('题名').fill('Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks')
+  await page.getByLabel('citekey').fill('Lewis2020RAG')
+  await page.getByLabel('作者（分号分隔）').fill('Patrick Lewis; Ethan Perez')
+  await page.getByLabel('年份').fill('2020')
+  await page.getByLabel('标签').fill('RAG, retrieval')
+  await page.getByRole('button', { name: '加入文献库' }).click()
+  await page.getByText('文献元数据已保存在当前项目。').waitFor({ state: 'visible' })
+  await page.screenshot({ path: path.join(output, 'references-workspace.png') })
 
   await page.getByRole('button', { name: '资料浏览器', exact: true }).click()
   await page.getByLabel('网址或搜索内容').fill(`http://127.0.0.1:${port}/article`)
@@ -179,7 +215,15 @@ try {
     else await page.screenshot({ path: browserScreenshot })
   }
 
-  const images = ['workspace-overview.png', 'markdown-mermaid-code.png', 'pptx-reader.png', 'local-ocr.png', 'research-browser.png']
+  const images = [
+    'workspace-overview.png',
+    'selection-context.png',
+    'markdown-mermaid-code.png',
+    'pptx-reader.png',
+    'local-ocr.png',
+    'references-workspace.png',
+    'research-browser.png'
+  ]
   for (const image of images) {
     const bytes = await readFile(path.join(output, image))
     if (bytes.length < 10_000) throw new Error(`README screenshot is unexpectedly small: ${image}`)

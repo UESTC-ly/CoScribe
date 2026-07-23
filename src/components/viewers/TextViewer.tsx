@@ -39,6 +39,9 @@ export function TextViewer({
   wrap,
   onWrapChange,
   onContextChange,
+  aiSelectionText,
+  aiSelectionRevealToken = 0,
+  aiSelectionClearToken = 0,
 }: TextViewerProps): React.JSX.Element {
   const [internalWrap, setInternalWrap] = useState(true)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -80,6 +83,25 @@ export function TextViewer({
     emitContext(0, 0)
   }, [content])
 
+  useEffect(() => {
+    if (aiSelectionClearToken <= 0) return
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const head = textarea.selectionEnd
+    textarea.setSelectionRange(head, head)
+  }, [aiSelectionClearToken])
+
+  useEffect(() => {
+    if (aiSelectionRevealToken <= 0 || !aiSelectionText) return
+    const textarea = textareaRef.current
+    const start = content.indexOf(aiSelectionText)
+    if (!textarea || start < 0) return
+    textarea.setSelectionRange(start, start + aiSelectionText.length)
+    const line = content.slice(0, start).split('\n').length - 1
+    textarea.scrollTop = Math.max(0, line * TEXT_LINE_HEIGHT - textarea.clientHeight / 3)
+    emitContext(start, start + aiSelectionText.length)
+  }, [aiSelectionRevealToken, aiSelectionText, content, emitContext])
+
   const jumpToMatch = useCallback(
     (nextIndex: number) => {
       if (!matches.length) return
@@ -100,10 +122,19 @@ export function TextViewer({
   }, [effectiveWrap, onWrapChange, wrap])
 
   return (
-    <section className={cx('vk-viewer', 'vk-text-viewer', className)} aria-label={`${fileName} 文本查看器`}>
+    <section
+      className={cx('vk-viewer', 'vk-text-viewer', aiSelectionText && 'has-ai-context-selection', className)}
+      aria-label={`${fileName} 文本查看器`}
+      onKeyDownCapture={(event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'f') {
+          event.preventDefault()
+          setSearchOpen(true)
+        }
+      }}
+    >
       <header className="vk-viewer-toolbar">
         <div className="vk-viewer-toolbar-group">
-          <IconButton label="查找" active={searchOpen} onClick={() => setSearchOpen((open) => !open)}>
+          <IconButton label="查找" shortcut="⌘F / Ctrl+F" active={searchOpen} onClick={() => setSearchOpen((open) => !open)}>
             <Search size={17} />
           </IconButton>
           <IconButton label={effectiveWrap ? '关闭自动换行' : '开启自动换行'} active={effectiveWrap} onClick={toggleWrap}>
@@ -141,13 +172,13 @@ export function TextViewer({
           <span className="vk-markdown-search-count">
             {matches.length ? `${searchIndex + 1} / ${matches.length}` : searchQuery ? '0 / 0' : '—'}
           </span>
-          <IconButton label="上一个匹配" compact disabled={!matches.length} onClick={() => jumpToMatch(searchIndex - 1)}>
+          <IconButton label="上一个匹配" shortcut="⇧Enter" compact disabled={!matches.length} onClick={() => jumpToMatch(searchIndex - 1)}>
             <ChevronLeft size={15} />
           </IconButton>
-          <IconButton label="下一个匹配" compact disabled={!matches.length} onClick={() => jumpToMatch(searchIndex + 1)}>
+          <IconButton label="下一个匹配" shortcut="Enter" compact disabled={!matches.length} onClick={() => jumpToMatch(searchIndex + 1)}>
             <ChevronRight size={15} />
           </IconButton>
-          <IconButton label="关闭查找" compact onClick={() => setSearchOpen(false)}>
+          <IconButton label="关闭查找" shortcut="Esc" compact onClick={() => setSearchOpen(false)}>
             <X size={14} />
           </IconButton>
         </div>

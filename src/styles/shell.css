@@ -217,7 +217,7 @@
 .missing-file { height: 100%; display: grid; place-content: center; justify-items: center; gap: 8px; text-align: center; color: var(--text-muted); }
 .missing-file strong { color: var(--warning); }
 
-.resize-handle { position: relative; flex: 0 0 1px; z-index: 20; background: var(--border); cursor: col-resize; }
+.resize-handle { position: relative; flex: 0 0 1px; z-index: 20; background: var(--border); cursor: col-resize; touch-action: none; }
 .resize-handle::after { content: ''; position: absolute; inset: 0 -3px; }
 .resize-handle:hover, .resize-handle.is-resizing, .resize-handle:focus-visible { background: var(--accent); }
 .resize-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

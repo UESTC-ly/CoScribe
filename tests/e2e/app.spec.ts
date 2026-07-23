@@ -54,7 +54,7 @@ async function launchProject(): Promise<void> {
       ...process.env,
       NODE_ENV: 'test',
       COSCRIBE_USER_DATA_DIR: userDataPath,
-      COSCRIBE_E2E_SCREENSHOT_SOURCE: 'app-window'
+      COSCRIBE_E2E_SCREENSHOT_SOURCE: process.env.COSCRIBE_E2E_SCREENSHOT_SOURCE === 'real-screen' ? '' : 'app-window'
     }
   })
   page = await electronApp.firstWindow()
@@ -341,6 +341,42 @@ test('renders Mermaid fenced blocks in Markdown preview', async ({}, testInfo) =
   await page.screenshot({ path: testInfo.outputPath('mermaid-preview-dark.png') })
 })
 
+test('keeps selected Markdown visibly attached to the AI composer after focus moves', async ({}, testInfo) => {
+  await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
+  const preview = page.getByLabel('Markdown 预览')
+  const paragraph = preview.getByText('E2E_SENTINEL 路由把请求映射到处理函数。')
+  await paragraph.evaluate((element) => {
+    const text = element.firstChild
+    if (!text) throw new Error('Selection fixture text node is missing')
+    const range = document.createRange()
+    range.selectNodeContents(text)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  })
+
+  await page.getByLabel('基于').selectOption('selection')
+  const card = page.getByRole('region', { name: '已捕获的 AI 选中内容' })
+  await expect(card).toContainText('E2E_SENTINEL 路由把请求映射到处理函数。')
+  await page.getByLabel('基于').focus()
+  await expect(card).toBeVisible()
+  await expect(preview).toHaveAttribute('data-ai-context-selection', 'true')
+  await expect.poll(async () => page.evaluate(() => {
+    const registry = (CSS as typeof CSS & { highlights?: Map<string, unknown> }).highlights
+    return Boolean(registry?.has('coscribe-ai-context-selection'))
+  })).toBe(true)
+  await expect(card.getByRole('button', { name: '将选中内容加入输入框' })).toHaveAttribute('title', /⌘⇧K/u)
+
+  await card.getByRole('button', { name: '定位选中内容' }).click()
+  await expect(preview).toHaveClass(/is-revealing-ai-selection/u)
+  await page.screenshot({ path: testInfo.outputPath('persistent-ai-selection.png') })
+
+  await card.getByRole('button', { name: '清除选中内容' }).click()
+  await expect(card).toHaveCount(0)
+  await expect(preview).not.toHaveAttribute('data-ai-context-selection')
+})
+
 test('opens DOCX files as a local semantic document', async () => {
   await page.locator('.tree-row').filter({ hasText: '示例文档.docx' }).click()
 
@@ -410,6 +446,37 @@ test('browses an original isolated webpage and saves complete MHTML, semantic Ma
     })
     expect(nativeBounds?.width).toBeGreaterThan(0)
     expect(nativeBounds?.height).toBeGreaterThan(0)
+
+    const navigationSeparator = page.getByRole('separator', { name: '调整项目导航宽度' })
+    const navigationBox = await navigationSeparator.boundingBox()
+    if (!navigationBox) throw new Error('Project navigation resize separator is not visible')
+    await navigationSeparator.dispatchEvent('pointerdown', {
+      button: 0,
+      buttons: 1,
+      clientX: navigationBox.x + navigationBox.width / 2,
+      clientY: navigationBox.y + 120,
+      pointerId: 81,
+      pointerType: 'mouse'
+    })
+    await expect.poll(async () => electronApp.evaluate(({ BrowserWindow }) => {
+      const child = BrowserWindow.getAllWindows()[0].contentView.children.find((candidate) => {
+        const bounds = candidate.getBounds()
+        return bounds.width > 0 && bounds.height > 0
+      })
+      return child?.getVisible()
+    })).toBe(false)
+    await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointercancel', {
+      pointerId: 81,
+      pointerType: 'mouse'
+    })))
+    await expect(page.locator('.app-shell')).not.toHaveClass(/is-panel-resizing/u)
+    await expect.poll(async () => electronApp.evaluate(({ BrowserWindow }) => {
+      const child = BrowserWindow.getAllWindows()[0].contentView.children.find((candidate) => {
+        const bounds = candidate.getBounds()
+        return bounds.width > 0 && bounds.height > 0
+      })
+      return child?.getVisible()
+    })).toBe(true)
 
     const isolation = await electronApp.evaluate(async ({ webContents }, expectedUrl) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === expectedUrl)
@@ -668,21 +735,46 @@ test('decodes streaming speech through the isolated native ASR process', async (
 })
 
 test('drag-selects a screenshot region and adds the crop to chat attachments', async ({}, testInfo) => {
+  await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
+  await expect(page.getByLabel('README.md Markdown 编辑器')).toBeVisible()
   const selectorWindow = electronApp.waitForEvent('window')
   await page.getByRole('button', { name: '截图', exact: true }).click()
   const selector = await selectorWindow
   await selector.waitForLoadState('domcontentloaded')
   await expect(selector.locator('#shade')).toBeVisible()
+  await expect(selector.locator('#screen')).toHaveAttribute('src', /^data:image\/jpeg;base64,/u)
+  await expect.poll(async () => electronApp.evaluate(({ BrowserWindow }) => {
+    const main = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL().startsWith('coscribe-app:'))
+    return Boolean(main?.isVisible())
+  })).toBe(true)
 
   const closed = selector.waitForEvent('close')
-  await selector.mouse.move(80, 80)
+  await selector.mouse.move(700, 250)
   await selector.mouse.down()
-  await selector.mouse.move(360, 260, { steps: 5 })
+  await selector.mouse.move(1_120, 600, { steps: 5 })
   await selector.screenshot({ path: testInfo.outputPath('screenshot-roi-selector.png') })
   await selector.mouse.up()
   await closed
 
-  await expect(page.getByRole('img', { name: /CoScribe-screenshot-/u })).toBeVisible()
+  const attachment = page.getByRole('img', { name: /CoScribe-screenshot-/u })
+  await expect(attachment).toBeVisible()
+  const source = await attachment.getAttribute('src')
+  expect(source).toMatch(/^data:image\/jpeg;base64,/u)
+  const attachmentStats = await electronApp.evaluate(({ nativeImage }, dataUrl) => {
+    const image = nativeImage.createFromDataURL(dataUrl)
+    const size = image.getSize()
+    const bitmap = image.toBitmap()
+    let ink = 0
+    let samples = 0
+    for (let offset = 0; offset + 3 < bitmap.length; offset += 4 * 23) {
+      samples += 1
+      if (bitmap[offset] < 220 || bitmap[offset + 1] < 220 || bitmap[offset + 2] < 220) ink += 1
+    }
+    return { size, inkRatio: samples ? ink / samples : 0 }
+  }, source!)
+  expect(attachmentStats.size.width).toBeGreaterThan(200)
+  expect(attachmentStats.size.height).toBeGreaterThan(150)
+  expect(attachmentStats.inkRatio).toBeGreaterThan(0.01)
 })
 
 test('runs bundled local OCR from the packaged renderer origin', async () => {
@@ -740,6 +832,62 @@ test('expands the AI workspace beyond the old cap without reverse-drag dead spac
   await page.keyboard.press('Home')
   await expect(separator).toHaveAttribute('aria-valuenow', '360')
   await expect.poll(async () => panel.evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBe(360)
+})
+
+test('cleans up cancelled project-navigation drags without leaving a black window', async () => {
+  await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
+  const separator = page.getByRole('separator', { name: '调整项目导航宽度' })
+  const box = await separator.boundingBox()
+  if (!box) throw new Error('Project navigation resize separator is not visible')
+
+  await separator.dispatchEvent('pointerdown', {
+    button: 0,
+    buttons: 1,
+    clientX: box.x + box.width / 2,
+    clientY: box.y + 120,
+    pointerId: 71,
+    pointerType: 'mouse'
+  })
+  await expect(page.locator('.app-shell')).toHaveClass(/is-panel-resizing/u)
+  await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointercancel', {
+    pointerId: 71,
+    pointerType: 'mouse'
+  })))
+  await expect(page.locator('.app-shell')).not.toHaveClass(/is-panel-resizing/u)
+
+  for (let index = 0; index < 12; index += 1) {
+    const current = await separator.boundingBox()
+    if (!current) throw new Error('Project navigation resize separator disappeared')
+    const x = current.x + current.width / 2
+    const y = current.y + 120
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.mouse.move(x + (index % 2 === 0 ? 120 : -120), y, { steps: 3 })
+    await page.mouse.up()
+  }
+
+  const rendered = await electronApp.evaluate(async ({ BrowserWindow }) => {
+    const main = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL().startsWith('coscribe-app:'))
+    if (!main) return { empty: true, visible: false, nonBlackRatio: 0 }
+    const image = await main.webContents.capturePage()
+    const bitmap = image.toBitmap()
+    let nonBlack = 0
+    let samples = 0
+    for (let offset = 0; offset + 3 < bitmap.length; offset += 4 * 97) {
+      samples += 1
+      if (bitmap[offset] > 18 || bitmap[offset + 1] > 18 || bitmap[offset + 2] > 18) nonBlack += 1
+    }
+    return {
+      empty: image.isEmpty(),
+      visible: main.isVisible(),
+      nonBlackRatio: samples ? nonBlack / samples : 0
+    }
+  })
+  expect(rendered.empty).toBe(false)
+  expect(rendered.visible).toBe(true)
+  expect(rendered.nonBlackRatio).toBeGreaterThan(0.08)
+  await expect(page.locator('.app-shell')).not.toHaveClass(/is-panel-resizing/u)
+  await expect(page.getByLabel('README.md Markdown 编辑器')).toBeVisible()
 })
 
 test('resizes the Markdown outline and keeps narrow AI tools on one line', async ({}, testInfo) => {

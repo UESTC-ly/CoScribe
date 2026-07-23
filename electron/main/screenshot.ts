@@ -4,9 +4,9 @@ import { MAX_CHAT_IMAGE_BYTES } from '../../src/shared/chat-images'
 import type { ChatImageAttachment } from '../../src/shared/types'
 import { screenshotCropBounds, type ScreenshotRegion } from './screenshot-region'
 
-const CAPTURE_SETTLE_MS = 180
 const CAPTURE_RETRY_DELAYS_MS = [0, 140, 320] as const
 const MIN_SELECTION_SIZE = 8
+const SELECTION_TIMEOUT_MS = 5 * 60 * 1_000
 
 interface ScreenshotSelection extends ScreenshotRegion {
   viewportWidth: number
@@ -17,11 +17,12 @@ const SELECTION_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
   <style>
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; cursor: crosshair; user-select: none; -webkit-app-region: no-drag; }
-    body { background: transparent; }
+    body { background: #111318; }
+    #screen { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
     #shade { position: fixed; inset: 0; background: rgba(8, 10, 14, 0.34); }
     #selection { position: fixed; display: none; border: 2px solid rgba(255, 255, 255, 0.96); background: rgba(255, 255, 255, 0.04); box-shadow: 0 0 0 100vmax rgba(8, 10, 14, 0.42); }
     #selection.active { display: block; }
@@ -29,6 +30,7 @@ const SELECTION_HTML = `<!doctype html>
   </style>
 </head>
 <body>
+  <img id="screen" alt="" draggable="false">
   <div id="shade"></div>
   <div id="selection"><span id="size"></span></div>
 </body>
@@ -47,7 +49,9 @@ const SELECTION_SCRIPT = `(() => new Promise((resolve) => {
     window.removeEventListener('pointerdown', pointerDown, true)
     window.removeEventListener('pointermove', pointerMove, true)
     window.removeEventListener('pointerup', pointerUp, true)
+    window.removeEventListener('pointercancel', pointerCancel, true)
     window.removeEventListener('keydown', keyDown, true)
+    window.removeEventListener('blur', cancel, true)
     window.removeEventListener('contextmenu', preventMenu, true)
   }
   const finish = (value) => {
@@ -85,7 +89,7 @@ const SELECTION_SCRIPT = `(() => new Promise((resolve) => {
       y: clamp(event.clientY, window.innerHeight),
       pointerId: event.pointerId
     }
-    document.body.setPointerCapture?.(event.pointerId)
+    try { document.body.setPointerCapture?.(event.pointerId) } catch {}
     shade.style.display = 'none'
     box.classList.add('active')
     render(event.clientX, event.clientY)
@@ -99,24 +103,31 @@ const SELECTION_SCRIPT = `(() => new Promise((resolve) => {
     if (!start || event.pointerId !== start.pointerId) return
     event.preventDefault()
     render(event.clientX, event.clientY)
-    document.body.releasePointerCapture?.(event.pointerId)
+    try { document.body.releasePointerCapture?.(event.pointerId) } catch {}
     if (!current || current.width < ${MIN_SELECTION_SIZE} || current.height < ${MIN_SELECTION_SIZE}) {
       reset()
       return
     }
     finish({ ...current, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
   }
+  function pointerCancel(event) {
+    if (!start || event.pointerId !== start.pointerId) return
+    finish(null)
+  }
   function keyDown(event) {
     if (event.key !== 'Escape') return
     event.preventDefault()
     finish(null)
   }
+  function cancel() { finish(null) }
   function preventMenu(event) { event.preventDefault() }
 
   window.addEventListener('pointerdown', pointerDown, true)
   window.addEventListener('pointermove', pointerMove, true)
   window.addEventListener('pointerup', pointerUp, true)
+  window.addEventListener('pointercancel', pointerCancel, true)
   window.addEventListener('keydown', keyDown, true)
+  window.addEventListener('blur', cancel, true)
   window.addEventListener('contextmenu', preventMenu, true)
 }))()`
 
@@ -149,6 +160,16 @@ function encodeScreenshot(image: NativeImage): Buffer {
   throw new Error('截图文件过大，无法加入聊天。请降低显示器分辨率后重试。')
 }
 
+function screenshotPreviewDataUrl(image: NativeImage, display: Display): string {
+  if (image.isEmpty()) throw new Error('没有获取到屏幕预览。请检查系统的屏幕录制权限。')
+  const width = Math.max(1, Math.round(display.bounds.width))
+  const height = Math.max(1, Math.round(display.bounds.height))
+  const preview = image.resize({ width, height, quality: 'good' })
+  const bytes = preview.toJPEG(86)
+  if (!bytes.length) throw new Error('无法生成截图选区预览。')
+  return `data:image/jpeg;base64,${bytes.toString('base64')}`
+}
+
 async function captureDisplayImage(display: Display, captureSize: { width: number; height: number }): Promise<NativeImage> {
   for (const retryDelay of CAPTURE_RETRY_DELAYS_MS) {
     if (retryDelay > 0) await delay(retryDelay)
@@ -179,7 +200,7 @@ export class ScreenshotService {
     return capture
   }
 
-  private async selectRegion(display: Display): Promise<ScreenshotSelection | null> {
+  private async selectRegion(display: Display, previewDataUrl: string): Promise<ScreenshotSelection | null> {
     const overlay = new BrowserWindow({
       x: display.bounds.x,
       y: display.bounds.y,
@@ -187,7 +208,7 @@ export class ScreenshotService {
       height: display.bounds.height,
       show: false,
       frame: false,
-      transparent: true,
+      transparent: false,
       resizable: false,
       movable: false,
       minimizable: false,
@@ -195,7 +216,7 @@ export class ScreenshotService {
       fullscreenable: false,
       skipTaskbar: true,
       hasShadow: false,
-      backgroundColor: '#00000000',
+      backgroundColor: '#111318',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -205,18 +226,28 @@ export class ScreenshotService {
       }
     })
     overlay.setMenuBarVisibility(false)
-    overlay.setAlwaysOnTop(true, 'screen-saver')
+    overlay.setAlwaysOnTop(true, 'pop-up-menu')
     overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
+    let timeout: NodeJS.Timeout | null = null
     try {
       await overlay.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SELECTION_HTML)}`)
       overlay.webContents.on('will-navigate', (event) => event.preventDefault())
+      await overlay.webContents.executeJavaScript(`(() => {
+        const image = document.getElementById('screen')
+        image.src = ${JSON.stringify(previewDataUrl)}
+        return image.decode()
+      })()`, true)
       const closed = new Promise<null>((resolve) => overlay.once('closed', () => resolve(null)))
       const selected = overlay.webContents.executeJavaScript(SELECTION_SCRIPT, true).catch(() => null)
+      const timedOut = new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), SELECTION_TIMEOUT_MS)
+        timeout.unref()
+      })
       overlay.show()
       overlay.focus()
-      const value = await Promise.race([selected, closed])
+      const value = await Promise.race([selected, closed, timedOut])
       if (value === null) return null
       if (!value || typeof value !== 'object') throw new Error('截图区域无效。')
       const candidate = value as Record<string, unknown>
@@ -226,6 +257,7 @@ export class ScreenshotService {
       }
       return candidate as unknown as ScreenshotSelection
     } finally {
+      if (timeout) clearTimeout(timeout)
       if (!overlay.isDestroyed()) overlay.destroy()
     }
   }
@@ -239,20 +271,15 @@ export class ScreenshotService {
       width: Math.max(1, Math.round(display.size.width * display.scaleFactor)),
       height: Math.max(1, Math.round(display.size.height * display.scaleFactor))
     }
-    // Screen Recording consent is controlled by macOS and cannot be granted by
-    // Playwright. The explicit E2E source keeps the real overlay/crop/attachment
-    // path deterministic without weakening production capture permissions.
-    const e2eImage = process.env.COSCRIBE_E2E_SCREENSHOT_SOURCE === 'app-window'
+    // Capture the visible display before opening the selector. This preserves
+    // the current note in the screenshot and prevents the selector itself from
+    // appearing in the captured pixels.
+    const displayImage = process.env.COSCRIBE_E2E_SCREENSHOT_SOURCE === 'app-window'
       ? await window.webContents.capturePage()
-      : null
+      : await captureDisplayImage(display, captureSize)
 
-    window.hide()
     try {
-      await delay(CAPTURE_SETTLE_MS)
-      const displayImage = e2eImage && !e2eImage.isEmpty()
-        ? e2eImage
-        : await captureDisplayImage(display, captureSize)
-      const selection = await this.selectRegion(display)
+      const selection = await this.selectRegion(display, screenshotPreviewDataUrl(displayImage, display))
       if (!selection) return null
       const crop = screenshotCropBounds(
         selection,
@@ -279,7 +306,7 @@ export class ScreenshotService {
     } finally {
       if (!window.isDestroyed()) {
         if (window.isMinimized()) window.restore()
-        window.show()
+        if (!window.isVisible()) window.show()
         window.focus()
       }
     }

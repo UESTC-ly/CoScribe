@@ -1,6 +1,6 @@
 {
   "name": "coscribe",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "CoScribe：以本地项目为核心的 AI 学习与内容工作台",
   "private": true,
   "type": "module",
@@ -13,6 +13,7 @@
   },
   "homepage": "https://github.com/UESTC-ly/CoScribe#readme",
   "bugs": "https://github.com/UESTC-ly/CoScribe/issues",
+  "desktopName": "CoScribe",
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
@@ -30,8 +31,10 @@
     "dist:dir": "npm run build && electron-builder --dir",
     "dist:mac:arm64": "npm run fetch:asr-model && npm run build && electron-builder --mac dmg zip --arm64",
     "dist:win:x64": "npm run build && electron-builder --win nsis --x64",
+    "dist:linux:x64": "npm run build && electron-builder --linux AppImage deb --x64",
     "verify:package:mac": "node scripts/verify-packaged-app.mjs release/mac-arm64/CoScribe.app",
-    "verify:package:win": "node scripts/verify-packaged-windows.mjs release/win-unpacked"
+    "verify:package:win": "node scripts/verify-packaged-windows.mjs release/win-unpacked",
+    "verify:package:linux": "node scripts/verify-packaged-linux.mjs release/linux-unpacked"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -95,25 +98,39 @@
       "LICENSE",
       "THIRD_PARTY_NOTICES.md",
       "resources/ocr/LICENSE-APACHE-2.0.txt",
-      "!node_modules/sherpa-onnx-darwin-arm64/libonnxruntime.dylib",
-      "!node_modules/sherpa-onnx-darwin-arm64/libsherpa-onnx-cxx-api.dylib"
-    ],
-    "asarUnpack": [
-      "node_modules/sherpa-onnx-darwin-arm64/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": ".cache/asr/sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16",
-        "to": "asr/sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16",
-        "filter": [
-          "*.onnx",
-          "tokens.txt"
-        ]
-      }
+      "!node_modules/sherpa-onnx-*{,/**/*}"
     ],
     "mac": {
       "category": "public.app-category.education",
       "icon": "assets/app-icon.icns",
+      "extraResources": [
+        {
+          "from": "node_modules/sherpa-onnx-node",
+          "to": "node_modules/sherpa-onnx-node",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "node_modules/sherpa-onnx-darwin-arm64",
+          "to": "node_modules/sherpa-onnx-darwin-arm64",
+          "filter": [
+            "index.js",
+            "package.json",
+            "sherpa-onnx.node",
+            "libsherpa-onnx-c-api.dylib",
+            "libonnxruntime.1.24.4.dylib"
+          ]
+        },
+        {
+          "from": ".cache/asr/sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16",
+          "to": "asr/sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16",
+          "filter": [
+            "*.onnx",
+            "tokens.txt"
+          ]
+        }
+      ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "CoScribe 使用麦克风在本机将语音实时转为聊天输入，不会上传原始录音。",
         "NSAppleEventsUsageDescription": "CoScribe 仅在你明确点击同步时，将选定计划写入 macOS 日历或提醒事项。"
@@ -124,10 +141,16 @@
       ]
     },
     "win": {
+      "icon": "assets/app-icon.png",
+      "artifactName": "CoScribe-Setup-${version}-${arch}.${ext}",
       "target": "nsis"
     },
     "linux": {
       "category": "Education",
+      "icon": "assets/app-icon.png",
+      "maintainer": "LiYang <liyang.126@foxmail.com>",
+      "syncDesktopName": true,
+      "artifactName": "CoScribe-${version}-x64.${ext}",
       "target": [
         "AppImage",
         "deb"

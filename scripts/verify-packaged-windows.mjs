@@ -7,8 +7,9 @@ const require = createRequire(import.meta.url)
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const unpackedPath = path.resolve(process.argv[2] ?? 'release/win-unpacked')
 const executablePath = path.join(unpackedPath, 'CoScribe.exe')
-const asarPath = path.join(unpackedPath, 'resources', 'app.asar')
-const installerPath = path.resolve(process.argv[3] ?? `release/CoScribe Setup ${packageJson.version}.exe`)
+const resourcesPath = path.join(unpackedPath, 'resources')
+const asarPath = path.join(resourcesPath, 'app.asar')
+const installerPath = path.resolve(process.argv[3] ?? `release/CoScribe-Setup-${packageJson.version}-x64.exe`)
 
 for (const required of [executablePath, asarPath, installerPath]) {
   if (!existsSync(required)) throw new Error(`找不到 Windows x64 成品：${required}`)
@@ -66,6 +67,11 @@ if (duplicated.length) throw new Error(`Windows 成品重复打包了 renderer �
 
 const sourceMaps = entries.filter((entry) => entry.endsWith('.map'))
 if (sourceMaps.length) throw new Error(`Windows 成品仍包含 ${sourceMaps.length} 个 source map。`)
+
+const speechEntries = entries.filter((entry) => entry.startsWith('/node_modules/sherpa-onnx-'))
+if (speechEntries.length || existsSync(path.join(resourcesPath, 'asr')) || existsSync(path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', 'sherpa-onnx-darwin-arm64'))) {
+  throw new Error('Windows 成品误带了仅供 Apple Silicon macOS 使用的本地语音模型或运行库。')
+}
 
 const asarMiB = statSync(asarPath).size / 1024 / 1024
 const installerMiB = statSync(installerPath).size / 1024 / 1024

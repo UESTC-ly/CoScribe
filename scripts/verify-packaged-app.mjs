@@ -24,7 +24,6 @@ const requiredEntries = [
   '/node_modules/mammoth/package.json',
   '/node_modules/pdfjs-dist/legacy/build/pdf.mjs',
   '/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
-  '/node_modules/sherpa-onnx-node/package.json',
   '/out/renderer/assets/ocr/models/PP-OCRv6_small_det_onnx_infer.tar',
   '/out/renderer/assets/ocr/models/PP-OCRv6_small_rec_onnx_infer.tar',
   '/out/renderer/assets/ocr/ort/ort-wasm-simd-threaded.jsep.mjs',
@@ -74,7 +73,11 @@ for (const [name, size] of speechModelFiles) {
   if (!existsSync(file) || statSync(file).size !== size) throw new Error(`成品缺少或损坏本地语音模型：${name}`)
 }
 
-const speechRuntimeRoot = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', 'sherpa-onnx-darwin-arm64')
+const speechPackageRoot = path.join(resourcesPath, 'node_modules', 'sherpa-onnx-node')
+for (const name of ['package.json', 'sherpa-onnx.js']) {
+  if (!existsSync(path.join(speechPackageRoot, name))) throw new Error(`成品缺少本地语音包装层：${name}`)
+}
+const speechRuntimeRoot = path.join(resourcesPath, 'node_modules', 'sherpa-onnx-darwin-arm64')
 for (const name of ['sherpa-onnx.node', 'libsherpa-onnx-c-api.dylib', 'libonnxruntime.1.24.4.dylib']) {
   if (!existsSync(path.join(speechRuntimeRoot, name))) throw new Error(`成品缺少本地语音运行库：${name}`)
 }
@@ -84,13 +87,15 @@ for (const duplicate of ['libsherpa-onnx-cxx-api.dylib', 'libonnxruntime.dylib']
 
 const executablePath = path.join(appPath, 'Contents', 'MacOS', path.basename(appPath, '.app'))
 const runtimeProbe = [
+  'const { createRequire } = require("node:module")',
   'const { pathToFileURL } = require("node:url")',
   'const root = process.argv[1]',
+  'const appRequire = createRequire(root + "/out/main/index.js")',
   'Promise.all([',
   '  import(pathToFileURL(root + "/node_modules/chokidar/index.js").href),',
   '  Promise.resolve(require(root + "/node_modules/mammoth/lib/index.js")),',
   '  import(pathToFileURL(root + "/node_modules/pdfjs-dist/legacy/build/pdf.mjs").href),',
-  '  Promise.resolve(require(root + "/node_modules/sherpa-onnx-node/sherpa-onnx.js"))',
+  '  Promise.resolve(appRequire("sherpa-onnx-node"))',
   ']).then(([chokidar, mammoth, pdfjs, sherpa]) => {',
   '  if (typeof chokidar.watch !== "function" || typeof mammoth.extractRawText !== "function" || typeof pdfjs.getDocument !== "function" || typeof sherpa.OnlineRecognizer !== "function") process.exit(2)',
   '}).catch((error) => { console.error(error); process.exit(1) })'

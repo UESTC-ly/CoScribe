@@ -68,6 +68,9 @@ export interface PdfViewerProps {
   onToggleBookmark?: (page: number, bookmarked: boolean) => void
   onAnnotationOpen?: (annotation: PdfViewerAnnotation) => void
   onError?: (error: Error) => void
+  aiSelectionText?: string
+  aiSelectionRevealToken?: number
+  aiSelectionClearToken?: number
 }
 
 export type MarkdownViewMode = 'edit' | 'preview' | 'both'
@@ -137,6 +140,9 @@ export interface MarkdownViewerProps {
     localContent: string,
   ) => void
   onError?: (error: Error) => void
+  aiSelectionText?: string
+  aiSelectionRevealToken?: number
+  aiSelectionClearToken?: number
 }
 
 export interface ImageViewerState {
@@ -175,6 +181,9 @@ export interface DocxViewerProps {
   onContextChange?: (context: DocxViewerContext) => void
   onOpenLink?: (url: string) => void
   onOpenExternal?: () => void
+  aiSelectionText?: string
+  aiSelectionRevealToken?: number
+  aiSelectionClearToken?: number
 }
 
 export interface PptxViewerContext {
@@ -191,6 +200,9 @@ export interface PptxViewerProps {
   onContextChange?: (context: PptxViewerContext) => void
   onOpenExternal?: () => void
   onError?: (error: Error) => void
+  aiSelectionText?: string
+  aiSelectionRevealToken?: number
+  aiSelectionClearToken?: number
 }
 
 export interface TextViewerContext {
@@ -208,6 +220,9 @@ export interface TextViewerProps {
   wrap?: boolean
   onWrapChange?: (wrap: boolean) => void
   onContextChange?: (context: TextViewerContext) => void
+  aiSelectionText?: string
+  aiSelectionRevealToken?: number
+  aiSelectionClearToken?: number
 }
 
 export interface UnsupportedViewerProps {

@@ -187,7 +187,7 @@ export class McpService {
   }
 
   private async connect(config: McpServerConfig): Promise<ConnectedClient> {
-    const client = new Client({ name: 'CoScribe', version: '2.2.0' }, { capabilities: {} })
+    const client = new Client({ name: 'CoScribe', version: '2.2.1' }, { capabilities: {} })
     if (config.transport === 'stdio') {
       let cwd = config.cwd
       if (cwd) {

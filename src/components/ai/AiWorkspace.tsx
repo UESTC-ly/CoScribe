@@ -3,10 +3,12 @@ import {
   AlertTriangle,
   AtSign,
   ChevronDown,
+  CornerDownLeft,
   FileText,
   Image as ImageIcon,
   ImagePlus,
   KeyRound,
+  LocateFixed,
   Loader2,
   Mic,
   MessageSquarePlus,
@@ -20,6 +22,7 @@ import {
   Settings2,
   Sparkles,
   Square,
+  TextQuote,
   WandSparkles,
   X
 } from 'lucide-react'
@@ -102,6 +105,8 @@ export interface AiWorkspaceProps {
   onQuickNote?: () => void | Promise<void>
   onOpenSource: (source: SourceRef) => void
   onOpenContext: (context: ContextSnapshot) => void
+  onLocateSelection?: (context: ContextSnapshot) => void
+  onClearSelection?: (context: ContextSnapshot) => void
   onAcceptOperation: (operation: FileOperationProposal) => void | Promise<void>
   onRejectOperation: (operation: FileOperationProposal) => void | Promise<void>
   onOpenSettings?: () => void
@@ -263,6 +268,8 @@ export function AiWorkspace({
   onQuickNote,
   onOpenSource,
   onOpenContext,
+  onLocateSelection,
+  onClearSelection,
   onAcceptOperation,
   onRejectOperation,
   onOpenSettings,
@@ -294,6 +301,7 @@ export function AiWorkspace({
   useOutsideClose(referenceMenuOpen, referenceMenuRef, () => setReferenceMenuOpen(false))
 
   const contextSummary = activeContextLabel(context, contextScope, projectName)
+  const capturedSelection = context?.scope === 'selection' ? context.selection?.trim() ?? '' : ''
   const selectionAvailable = Boolean(context?.selection?.trim())
   const documentAvailable = Boolean(context?.documentPath || context?.documentName)
   const sortedSessions = useMemo(
@@ -311,6 +319,13 @@ export function AiWorkspace({
   const updateDraft = (value: string): void => {
     if (draft === undefined) setLocalDraft(value)
     onDraftChange?.(value)
+  }
+  const insertCapturedSelection = (): void => {
+    if (!capturedSelection) return
+    updateDraft(currentDraft.trim()
+      ? `${currentDraft.trimEnd()}\n\n${capturedSelection}`
+      : capturedSelection)
+    textareaRef.current?.focus()
   }
   const speech = useLocalSpeechInput({
     draft: currentDraft,
@@ -698,6 +713,46 @@ export function AiWorkspace({
       </div>
 
       <footer className="ai-composer-wrap">
+        {composerMode === 'chat' && context && capturedSelection && (
+          <section className="ai-selection-context" role="region" aria-label="已捕获的 AI 选中内容">
+            <header>
+              <span className="ai-selection-context__icon"><TextQuote aria-hidden="true" /></span>
+              <span className="ai-selection-context__identity">
+                <strong>AI 选中内容</strong>
+                <small>{context.documentName || fileName(context.documentPath) || '当前内容'} · {capturedSelection.length} 字</small>
+              </span>
+              <span className="ai-selection-context__actions">
+                <button
+                  type="button"
+                  aria-label="定位选中内容"
+                  title="定位到原文"
+                  onClick={() => (onLocateSelection ?? onOpenContext)(context)}
+                >
+                  <LocateFixed aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="将选中内容加入输入框"
+                  title="将选中内容加入输入框（⌘⇧K / Ctrl+Shift+K）"
+                  onClick={insertCapturedSelection}
+                >
+                  <CornerDownLeft aria-hidden="true" />
+                </button>
+                {onClearSelection && (
+                  <button
+                    type="button"
+                    aria-label="清除选中内容"
+                    title="清除此条 AI 上下文"
+                    onClick={() => onClearSelection(context)}
+                  >
+                    <X aria-hidden="true" />
+                  </button>
+                )}
+              </span>
+            </header>
+            <blockquote>“{capturedSelection.slice(0, 180)}{capturedSelection.length > 180 ? '…' : ''}”</blockquote>
+          </section>
+        )}
         {pendingImages.length > 0 && (
           <div className="ai-images-selected" aria-label="待发送图片">
             {pendingImages.map((attachment) => (
@@ -819,7 +874,7 @@ export function AiWorkspace({
               type="button"
               disabled={disabled || !activeSession || isBusy || speech.active}
               aria-label="截图"
-              title="框选屏幕区域并加入聊天（⌘/Ctrl + Shift + 8，Esc 取消）"
+              title="框选屏幕区域并加入聊天（⌘⇧8 / Ctrl+Shift+8；Esc 取消）"
               onClick={() => void onCaptureScreenshot?.()}
             >
               <ScanLine aria-hidden="true" />
@@ -907,7 +962,7 @@ export function AiWorkspace({
                 className="ai-composer__send"
                 type="button"
                 aria-label={composerMode === 'image' ? '生成图片' : '发送消息'}
-                title={composerMode === 'image' ? '生成图片' : '发送消息'}
+                title={composerMode === 'image' ? '生成图片（Enter）' : '发送消息（Enter）'}
                 disabled={
                   disabled || !activeSession || speech.active ||
                   (composerMode === 'image'

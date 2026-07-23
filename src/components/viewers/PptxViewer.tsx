@@ -5,6 +5,7 @@ import { PptxRenderer } from 'pptx-svg'
 
 import { cx, IconButton, ToolbarDivider, ViewerNotice, ViewerSpinner } from './ViewerChrome'
 import type { PptxViewerProps } from './types'
+import { usePersistentDomSelection } from './usePersistentDomSelection'
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 2.5
@@ -37,7 +38,10 @@ export function PptxViewer({
   fileName = 'PowerPoint 演示文稿',
   onContextChange,
   onOpenExternal,
-  onError
+  onError,
+  aiSelectionText,
+  aiSelectionRevealToken = 0,
+  aiSelectionClearToken = 0,
 }: PptxViewerProps): React.JSX.Element {
   const [renderer, setRenderer] = useState<PptxRenderer | null>(null)
   const [slideCount, setSlideCount] = useState(0)
@@ -52,6 +56,13 @@ export function PptxViewer({
   const onErrorRef = useRef(onError)
   onContextChangeRef.current = onContextChange
   onErrorRef.current = onError
+  const persistentSelection = usePersistentDomSelection({
+    rootRef: slideRef,
+    selectionText: aiSelectionText,
+    revealToken: aiSelectionRevealToken,
+    clearToken: aiSelectionClearToken,
+    contentKey: svg,
+  })
 
   useEffect(() => {
     const controller = new AbortController()
@@ -113,10 +124,7 @@ export function PptxViewer({
   }, [renderer, slideCount, text])
 
   const publishSelection = (): void => {
-    const selection = window.getSelection()
-    const selected = selection && slideRef.current?.contains(selection.anchorNode)
-      ? selection.toString().trim()
-      : ''
+    const selected = persistentSelection.captureSelection()
     onContextChangeRef.current?.({
       selection: selected,
       visibleText: textForSlide(text, slideIndex + 1),
@@ -132,11 +140,11 @@ export function PptxViewer({
           <Presentation size={16} />
           <strong className="vk-pptx-title" title={fileName}>{fileName}</strong>
           <ToolbarDivider />
-          <IconButton label="上一页幻灯片" disabled={slideIndex <= 0} onClick={() => showSlide(slideIndex - 1)}>
+          <IconButton label="上一页幻灯片" shortcut="← / Page Up" disabled={slideIndex <= 0} onClick={() => showSlide(slideIndex - 1)}>
             <ChevronLeft size={17} />
           </IconButton>
           <span className="vk-pptx-page">{slideCount ? slideIndex + 1 : 0} / {slideCount}</span>
-          <IconButton label="下一页幻灯片" disabled={slideIndex >= slideCount - 1} onClick={() => showSlide(slideIndex + 1)}>
+          <IconButton label="下一页幻灯片" shortcut="→ / Page Down" disabled={slideIndex >= slideCount - 1} onClick={() => showSlide(slideIndex + 1)}>
             <ChevronRight size={17} />
           </IconButton>
           <ToolbarDivider />

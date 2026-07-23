@@ -56,6 +56,9 @@ interface EditorPaneProps {
   onConvertPowerPoint: (path: string) => Promise<void>
   onResolveConflict: (path: string, resolution: MarkdownConflictResolution) => void
   onError: (message: string) => void
+  aiSelectionText?: string
+  aiSelectionRevealToken?: number
+  aiSelectionClearToken?: number
 }
 
 function extension(path: string): string {
@@ -121,6 +124,9 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
             if (bookmarked && !existing) props.onAddAnnotation({ id: crypto.randomUUID(), path: activeTab.path, page, kind: 'bookmark', createdAt: Date.now() })
           }}
           onError={(error) => props.onError(`无法打开 PDF：${error.message}`)}
+          aiSelectionText={props.aiSelectionText}
+          aiSelectionRevealToken={props.aiSelectionRevealToken}
+          aiSelectionClearToken={props.aiSelectionClearToken}
         />
       )
     }
@@ -158,6 +164,9 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
           })}
           onResolveExternalChange={(resolution) => props.onResolveConflict(activeTab.path, resolution)}
           onError={(error) => props.onError(`Markdown 编辑器错误：${error.message}`)}
+          aiSelectionText={props.aiSelectionText}
+          aiSelectionRevealToken={props.aiSelectionRevealToken}
+          aiSelectionClearToken={props.aiSelectionClearToken}
         />
       )
     }
@@ -195,6 +204,9 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
             else if (/^(?:https?:|mailto:)/iu.test(url)) window.open(url, '_blank', 'noopener,noreferrer')
           }}
           onOpenExternal={() => props.onOpenExternal(activeTab.path)}
+          aiSelectionText={props.aiSelectionText}
+          aiSelectionRevealToken={props.aiSelectionRevealToken}
+          aiSelectionClearToken={props.aiSelectionClearToken}
         />
       )
     }
@@ -213,6 +225,9 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
           })}
           onOpenExternal={() => props.onOpenExternal(activeTab.path)}
           onError={(error) => props.onError(`无法打开 PowerPoint：${error.message}`)}
+          aiSelectionText={props.aiSelectionText}
+          aiSelectionRevealToken={props.aiSelectionRevealToken}
+          aiSelectionClearToken={props.aiSelectionClearToken}
         />
       )
     }
@@ -243,7 +258,16 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
     }
 
     if (activeTab.kind === 'text') {
-      return <TextViewer content={document.content} fileName={activeTab.name} onContextChange={(context) => props.onContext(activeTab.path, { selection: context.selection, visibleText: context.visibleText, documentText: document.content })} />
+      return (
+        <TextViewer
+          content={document.content}
+          fileName={activeTab.name}
+          onContextChange={(context) => props.onContext(activeTab.path, { selection: context.selection, visibleText: context.visibleText, documentText: document.content })}
+          aiSelectionText={props.aiSelectionText}
+          aiSelectionRevealToken={props.aiSelectionRevealToken}
+          aiSelectionClearToken={props.aiSelectionClearToken}
+        />
+      )
     }
 
     return <UnsupportedViewer fileName={activeTab.name} extension={extension(activeTab.path)} onReveal={() => props.onReveal(activeTab.path)} onOpenExternal={() => props.onOpenExternal(activeTab.path)} />

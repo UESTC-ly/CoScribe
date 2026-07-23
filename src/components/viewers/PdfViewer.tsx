@@ -208,6 +208,24 @@ function AnnotationMarks({
   )
 }
 
+function AiSelectionRects({ selection }: { selection: PdfTextSelection }): React.JSX.Element {
+  return (
+    <div className="vk-pdf-ai-selection" aria-label="AI 上下文选区">
+      {selection.rects.map((rect, index) => (
+        <span
+          key={`${rect.left}:${rect.top}:${index}`}
+          style={{
+            left: `${rect.left * 100}%`,
+            top: `${rect.top * 100}%`,
+            width: `${rect.width * 100}%`,
+            height: `${rect.height * 100}%`,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
 export function PdfViewer({
   file,
   filePath,
@@ -227,6 +245,9 @@ export function PdfViewer({
   onToggleBookmark,
   onAnnotationOpen,
   onError,
+  aiSelectionText,
+  aiSelectionRevealToken = 0,
+  aiSelectionClearToken = 0,
 }: PdfViewerProps): React.JSX.Element {
   const initial = { ...initialReadingState, ...readingState }
   const [documentProxy, setDocumentProxy] = useState<PdfDocumentLike | null>(null)
@@ -248,6 +269,7 @@ export function PdfViewer({
   const [searchQuery, setSearchQuery] = useState('')
   const [pageInput, setPageInput] = useState(String(mainPage))
   const [selection, setSelection] = useState<PdfTextSelection | null>(null)
+  const [selectionRevealing, setSelectionRevealing] = useState(false)
   const [highlightColor, setHighlightColor] = useState<PdfAnnotationColor>('amber')
   const [loadError, setLoadError] = useState<Error | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -368,6 +390,20 @@ export function PdfViewer({
     },
     [geometry.offsets, numPages],
   )
+
+  useEffect(() => {
+    if (aiSelectionClearToken <= 0) return
+    window.getSelection()?.removeAllRanges()
+    setSelection(null)
+  }, [aiSelectionClearToken])
+
+  useEffect(() => {
+    if (aiSelectionRevealToken <= 0 || !selection) return
+    jumpToPage(selection.page)
+    setSelectionRevealing(true)
+    const timeout = window.setTimeout(() => setSelectionRevealing(false), 1_100)
+    return () => window.clearTimeout(timeout)
+  }, [aiSelectionRevealToken, jumpToPage, selection])
 
   const updateViewport = useCallback(() => {
     const element = scrollRef.current
@@ -604,7 +640,16 @@ export function PdfViewer({
   for (let index = thumbnailStart; index <= thumbnailEnd; index += 1) thumbnailPages.push(index + 1)
 
   return (
-    <section className={cx('vk-viewer', 'vk-pdf-viewer', className)} aria-label={`${fileName} PDF 阅读器`}>
+    <section
+      className={cx(
+        'vk-viewer',
+        'vk-pdf-viewer',
+        aiSelectionText && 'has-ai-context-selection',
+        selectionRevealing && 'is-revealing-ai-selection',
+        className,
+      )}
+      aria-label={`${fileName} PDF 阅读器`}
+    >
       <header className="vk-viewer-toolbar vk-pdf-toolbar">
         <div className="vk-viewer-toolbar-group">
           <IconButton
@@ -936,6 +981,9 @@ export function PdfViewer({
                       }}
                     />
                     <span className="vk-pdf-page-number" aria-hidden="true">{page}</span>
+                    {selection?.page === page && selection.rects.length > 0 && (
+                      <AiSelectionRects selection={selection} />
+                    )}
                     <AnnotationMarks annotations={pageAnnotations} onOpen={onAnnotationOpen} />
                   </article>
                 )

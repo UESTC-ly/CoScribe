@@ -255,7 +255,7 @@ export class WebTrackerService {
   private async fetchPage(source: WebTrackedSource): Promise<CapturedPage> {
     const headers: Record<string, string> = {
       Accept: 'text/html,application/xhtml+xml,text/plain;q=0.9',
-      'User-Agent': 'CoScribe/2.2.0 WebTracker'
+      'User-Agent': 'CoScribe/2.2.1 WebTracker'
     }
     if (source.etag) headers['If-None-Match'] = source.etag
     if (source.lastModified) headers['If-Modified-Since'] = source.lastModified

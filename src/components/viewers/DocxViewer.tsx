@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { ViewerNotice } from './ViewerChrome'
 import type { DocxViewerProps } from './types'
+import { usePersistentDomSelection } from './usePersistentDomSelection'
 
 export function DocxViewer({
   html,
@@ -12,12 +13,22 @@ export function DocxViewer({
   warnings = [],
   onContextChange,
   onOpenLink,
-  onOpenExternal
+  onOpenExternal,
+  aiSelectionText,
+  aiSelectionRevealToken = 0,
+  aiSelectionClearToken = 0,
 }: DocxViewerProps): React.JSX.Element {
   const [copied, setCopied] = useState(false)
   const contentRef = useRef<HTMLElement>(null)
   const onContextChangeRef = useRef(onContextChange)
   onContextChangeRef.current = onContextChange
+  const persistentSelection = usePersistentDomSelection({
+    rootRef: contentRef,
+    selectionText: aiSelectionText,
+    revealToken: aiSelectionRevealToken,
+    clearToken: aiSelectionClearToken,
+    contentKey: text,
+  })
   const safeHtml = useMemo(() => DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
@@ -29,10 +40,7 @@ export function DocxViewer({
   }, [text])
 
   const publishSelection = (): void => {
-    const selection = window.getSelection()
-    const selected = selection && contentRef.current?.contains(selection.anchorNode)
-      ? selection.toString().trim()
-      : ''
+    const selected = persistentSelection.captureSelection()
     onContextChangeRef.current?.({ selection: selected, visibleText: text.slice(0, 20_000), documentText: text })
   }
 

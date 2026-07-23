@@ -166,7 +166,12 @@ export function MarkdownMessage({
             title="返回发送这条消息时的内容"
           >
             <FileText aria-hidden="true" />
-            <span>基于：{formatContext(message.context)}</span>
+            <span>
+              <strong>基于：{formatContext(message.context)}</strong>
+              {message.context.scope === 'selection' && message.context.selection && (
+                <small>“{message.context.selection.slice(0, 110)}{message.context.selection.length > 110 ? '…' : ''}”</small>
+              )}
+            </span>
             <ExternalLink aria-hidden="true" />
           </button>
         )}

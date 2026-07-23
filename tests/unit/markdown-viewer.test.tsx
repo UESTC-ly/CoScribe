@@ -150,4 +150,70 @@ describe('MarkdownViewer preview', () => {
     })))
     expect(onContextChange.mock.calls.at(-1)?.[0].documentText).not.toContain('FIRST_DOCUMENT_CONTEXT')
   })
+
+  it('keeps a preview selection as persistent AI context after focus leaves the document', async () => {
+    const ranges = new Map<string, unknown>()
+    const set = vi.fn((name: string, value: unknown) => ranges.set(name, value))
+    const remove = vi.fn((name: string) => ranges.delete(name))
+    Object.defineProperty(globalThis, 'CSS', {
+      configurable: true,
+      value: { highlights: { set, delete: remove } },
+    })
+    Object.defineProperty(globalThis, 'Highlight', {
+      configurable: true,
+      value: class Highlight {
+        constructor(..._ranges: Range[]) {}
+      },
+    })
+    const onContextChange = vi.fn()
+    const view = render(
+      <MarkdownViewer
+        documentId="selection-note"
+        value={'# 选区测试\n\n路由把请求映射到处理函数。'}
+        onContextChange={onContextChange}
+        aiSelectionText="路由把请求映射到处理函数。"
+        aiSelectionClearToken={0}
+      />,
+    )
+    const preview = screen.getByLabelText('Markdown 预览')
+    const paragraph = within(preview).getByText('路由把请求映射到处理函数。')
+    const textNode = paragraph.firstChild as Text
+    const range = document.createRange()
+    range.setStart(textNode, 0)
+    range.setEnd(textNode, textNode.data.length)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    fireEvent.mouseUp(preview)
+    await waitFor(() => expect(onContextChange).toHaveBeenCalledWith(expect.objectContaining({
+      selection: '路由把请求映射到处理函数。',
+    })))
+    expect(preview).toHaveAttribute('data-ai-context-selection', 'true')
+    expect(set).toHaveBeenCalledWith('coscribe-ai-context-selection', expect.anything())
+
+    fireEvent.blur(preview)
+    expect(preview).toHaveAttribute('data-ai-context-selection', 'true')
+
+    view.rerender(
+      <MarkdownViewer
+        documentId="selection-note"
+        value={'# 选区测试\n\n路由把请求映射到处理函数。'}
+        onContextChange={onContextChange}
+        aiSelectionText=""
+        aiSelectionClearToken={1}
+      />,
+    )
+    await waitFor(() => expect(preview).not.toHaveAttribute('data-ai-context-selection'))
+    expect(remove).toHaveBeenCalledWith('coscribe-ai-context-selection')
+  })
+
+  it('includes active keyboard shortcuts in Markdown toolbar hover titles', () => {
+    render(<MarkdownViewer value="# 快捷键" onSave={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: '查找' })).toHaveAttribute('title', expect.stringContaining('⌘F'))
+    expect(screen.getByRole('button', { name: '撤销' })).toHaveAttribute('title', expect.stringContaining('⌘Z'))
+    expect(screen.getByRole('button', { name: '重做' })).toHaveAttribute('title', expect.stringContaining('⇧⌘Z'))
+    expect(screen.getByRole('button', { name: '保存' })).toHaveAttribute('title', expect.stringContaining('⌘S'))
+  })
 })

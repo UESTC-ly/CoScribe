@@ -33,6 +33,7 @@ import 'katex/dist/katex.min.css'
 import { cx, IconButton, ToolbarDivider } from './ViewerChrome'
 import { MermaidDiagram } from './MermaidDiagram'
 import { SyntaxCodeBlock } from './SyntaxCodeBlock'
+import { usePersistentDomSelection } from './usePersistentDomSelection'
 import { clampMarkdownOutlineWidth, PANEL_LAYOUT } from '../../lib/panel-layout'
 import type {
   MarkdownExternalChange,
@@ -226,6 +227,9 @@ export function MarkdownViewer({
   onReadingStateChange,
   onResolveExternalChange,
   onError,
+  aiSelectionText,
+  aiSelectionRevealToken = 0,
+  aiSelectionClearToken = 0,
 }: MarkdownViewerProps): React.JSX.Element {
   const [draft, setDraft] = useState(value)
   const [internalMode, setInternalMode] = useState<MarkdownViewMode>(defaultMode)
@@ -249,20 +253,55 @@ export function MarkdownViewer({
   const [compareOpen, setCompareOpen] = useState(false)
   const editorRef = useRef<ReactCodeMirrorRef>(null)
   const previewRef = useRef<HTMLDivElement>(null)
+  const outlineElementRef = useRef<HTMLElement>(null)
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
   const onErrorRef = useRef(onError)
   const onContextChangeRef = useRef(onContextChange)
   const onReadingStateChangeRef = useRef(onReadingStateChange)
   const draftRef = useRef(draft)
+  const selectionRef = useRef('')
   const lastPropValueRef = useRef(value)
   const lastSavedValueRef = useRef(value)
   const saveSequenceRef = useRef(0)
-  const outlineResizeCleanupRef = useRef<(() => void) | null>(null)
+  const outlineResizeCleanupRef = useRef<((commit?: boolean) => void) | null>(null)
   const documentIdentity = documentId ?? fileName
   const previousDocumentIdentityRef = useRef(documentIdentity)
   const effectiveMode = mode ?? internalMode
   const editorExtensions = useMemo(() => [markdown()], [])
+  const selectionContentKey = useMemo(
+    () => ({ documentIdentity, draft }),
+    [documentIdentity, draft],
+  )
+  const previewSelection = usePersistentDomSelection({
+    rootRef: previewRef,
+    selectionText: aiSelectionText,
+    revealToken: aiSelectionRevealToken,
+    clearToken: aiSelectionClearToken,
+    contentKey: selectionContentKey,
+  })
+
+  useEffect(() => {
+    if (aiSelectionClearToken <= 0) return
+    selectionRef.current = ''
+    const view = editorRef.current?.view
+    if (!view) return
+    const head = view.state.selection.main.head
+    view.dispatch({ selection: { anchor: head } })
+  }, [aiSelectionClearToken])
+
+  useEffect(() => {
+    if (aiSelectionRevealToken <= 0 || !aiSelectionText) return
+    const view = editorRef.current?.view
+    if (!view) return
+    const start = draftRef.current.indexOf(aiSelectionText)
+    if (start < 0) return
+    selectionRef.current = aiSelectionText
+    view.dispatch({
+      selection: { anchor: start, head: start + aiSelectionText.length },
+      scrollIntoView: true,
+    })
+  }, [aiSelectionRevealToken, aiSelectionText])
 
   onChangeRef.current = onChange
   onSaveRef.current = onSave
@@ -296,6 +335,7 @@ export function MarkdownViewer({
     setSaveError(null)
     setSavedAt(null)
     setCursor(0)
+    selectionRef.current = ''
     setEditorScrollTop(0)
     setOutlineWidth(clampMarkdownOutlineWidth(restoredOutlineWidth ?? PANEL_LAYOUT.markdownOutlineDefaultWidth))
     setCollapsedOutlineIds(new Set())
@@ -309,7 +349,7 @@ export function MarkdownViewer({
     setOutlineWidth(clampMarkdownOutlineWidth(restoredOutlineWidth ?? PANEL_LAYOUT.markdownOutlineDefaultWidth))
   }, [restoredOutlineWidth])
 
-  useEffect(() => () => outlineResizeCleanupRef.current?.(), [])
+  useEffect(() => () => outlineResizeCleanupRef.current?.(false), [])
 
   useEffect(() => {
     if (lastPropValueRef.current === value) return
@@ -361,13 +401,14 @@ export function MarkdownViewer({
   )
 
   const emitContext = useCallback(
-    (nextCursor: number, selection: string, visibleText: string) => {
+    (nextCursor: number, selection: string | undefined, visibleText: string) => {
+      if (selection !== undefined) selectionRef.current = selection
       const heading = headingAt(outline, nextCursor)
       setCurrentHeading(heading)
       const context: MarkdownViewerContext = {
         mode: effectiveMode,
         cursor: nextCursor,
-        selection,
+        selection: selectionRef.current,
         heading,
         visibleText,
         sectionText: sectionAt(draftRef.current, outline, heading),
@@ -384,7 +425,7 @@ export function MarkdownViewer({
     onContextChangeRef.current?.({
       mode: effectiveMode,
       cursor,
-      selection: '',
+      selection: selectionRef.current,
       heading,
       visibleText: sectionAt(draft, outline, heading).slice(0, 4000),
       sectionText: sectionAt(draft, outline, heading),
@@ -474,29 +515,71 @@ export function MarkdownViewer({
   const beginOutlineResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     event.preventDefault()
-    outlineResizeCleanupRef.current?.()
+    outlineResizeCleanupRef.current?.(true)
     const startX = event.clientX
     const startWidth = outlineWidth
     const pointerId = event.pointerId
-    event.currentTarget.setPointerCapture?.(pointerId)
+    const handle = event.currentTarget
+    const outlineElement = outlineElementRef.current
+    let latestWidth = startWidth
+    let animationFrame: number | null = null
+    let finished = false
+    try { handle.setPointerCapture?.(pointerId) } catch { /* Window listeners remain as a fallback. */ }
     setOutlineResizing(true)
 
+    const paint = (): void => {
+      animationFrame = null
+      if (!outlineElement) return
+      outlineElement.style.width = `${latestWidth}px`
+      outlineElement.style.flexBasis = `${latestWidth}px`
+    }
     const move = (next: PointerEvent): void => {
       if (next.pointerId !== pointerId) return
-      setOutlineWidth(clampMarkdownOutlineWidth(startWidth + next.clientX - startX))
+      next.preventDefault()
+      latestWidth = clampMarkdownOutlineWidth(startWidth + next.clientX - startX)
+      if (animationFrame === null) animationFrame = window.requestAnimationFrame(paint)
     }
-    const end = (next?: PointerEvent): void => {
-      if (next && next.pointerId !== pointerId) return
+    const finish = (commit = true): void => {
+      if (finished) return
+      finished = true
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame)
+      paint()
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', end)
-      window.removeEventListener('pointercancel', end)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('blur', blur)
+      handle.removeEventListener('lostpointercapture', lost)
+      try {
+        if (handle.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId)
+      } catch {
+        // Chromium may already have released capture after pointerup/cancel.
+      }
+      if (commit) {
+        setOutlineWidth(latestWidth)
+      } else {
+        latestWidth = startWidth
+        paint()
+      }
       outlineResizeCleanupRef.current = null
       setOutlineResizing(false)
     }
-    outlineResizeCleanupRef.current = end
+    const end = (next: PointerEvent): void => {
+      if (next.pointerId === pointerId) finish(true)
+    }
+    const cancel = (next: PointerEvent): void => {
+      if (next.pointerId === pointerId) finish(true)
+    }
+    const lost = (next: PointerEvent): void => {
+      if (next.pointerId === pointerId && next.buttons === 0) finish(true)
+    }
+    const blur = (): void => finish(true)
+
+    outlineResizeCleanupRef.current = finish
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', end)
-    window.addEventListener('pointercancel', end)
+    window.addEventListener('pointercancel', cancel)
+    window.addEventListener('blur', blur)
+    handle.addEventListener('lostpointercapture', lost)
   }, [outlineWidth])
 
   const resizeOutlineFromKeyboard = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -558,7 +641,7 @@ export function MarkdownViewer({
     const root = previewRef.current
     if (!root) return
     const browserSelection = window.getSelection()
-    const selectedText = browserSelection?.toString().trim() ?? ''
+    const selectedText = previewSelection.captureSelection()
     const anchorNode = browserSelection?.anchorNode
     const anchorElement = anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement
     const headingElement = anchorElement?.closest<HTMLElement>('[data-markdown-offset]')
@@ -567,7 +650,7 @@ export function MarkdownViewer({
     const visibleText = sectionAt(draftRef.current, outline, heading).slice(0, 4000)
     setCursor(offset)
     emitContext(offset, selectedText, visibleText)
-  }, [currentHeading?.offset, emitContext, outline])
+  }, [currentHeading?.offset, emitContext, outline, previewSelection])
 
   const handlePreviewScroll = useCallback(() => {
     const root = previewRef.current
@@ -583,7 +666,7 @@ export function MarkdownViewer({
     const heading = headingAt(outline, activeOffset)
     setCursor(activeOffset)
     setEditorScrollTop(root.scrollTop)
-    emitContext(activeOffset, '', sectionAt(draftRef.current, outline, heading).slice(0, 4000))
+    emitContext(activeOffset, undefined, sectionAt(draftRef.current, outline, heading).slice(0, 4000))
   }, [emitContext, outline])
 
   const markdownComponents = useMemo<Components>(() => {
@@ -668,7 +751,7 @@ export function MarkdownViewer({
 
   return (
     <section
-      className={cx('vk-viewer', 'vk-markdown-viewer', className)}
+      className={cx('vk-viewer', 'vk-markdown-viewer', aiSelectionText && 'has-ai-context-selection', className)}
       aria-label={`${fileName} Markdown 编辑器`}
       onKeyDownCapture={handleShortcut}
     >
@@ -683,16 +766,17 @@ export function MarkdownViewer({
           </IconButton>
           <IconButton
             label="查找"
+            shortcut="⌘F / Ctrl+F"
             active={searchOpen}
             onClick={() => setSearchOpen((open) => !open)}
           >
             <Search size={17} />
           </IconButton>
           <ToolbarDivider />
-          <IconButton label="撤销" disabled={readOnly} onClick={() => editorRef.current?.view && undo(editorRef.current.view)}>
+          <IconButton label="撤销" shortcut="⌘Z / Ctrl+Z" disabled={readOnly} onClick={() => editorRef.current?.view && undo(editorRef.current.view)}>
             <Undo2 size={17} />
           </IconButton>
-          <IconButton label="重做" disabled={readOnly} onClick={() => editorRef.current?.view && redo(editorRef.current.view)}>
+          <IconButton label="重做" shortcut="⇧⌘Z / Ctrl+Shift+Z" disabled={readOnly} onClick={() => editorRef.current?.view && redo(editorRef.current.view)}>
             <Redo2 size={17} />
           </IconButton>
         </div>
@@ -739,6 +823,7 @@ export function MarkdownViewer({
             className="vk-viewer-text-button is-emphasis"
             disabled={readOnly || !onSave || saveStatus === 'saving'}
             onClick={() => void performSave('manual')}
+            title="保存（⌘S / Ctrl+S）"
           >
             <Save size={15} /> 保存
           </button>
@@ -770,13 +855,13 @@ export function MarkdownViewer({
           <span className="vk-markdown-search-count">
             {searchMatches.length ? `${searchIndex + 1} / ${searchMatches.length}` : searchQuery ? '0 / 0' : '—'}
           </span>
-          <IconButton label="上一个匹配" compact disabled={!searchMatches.length} onClick={() => jumpToSearchMatch(searchIndex - 1)}>
+          <IconButton label="上一个匹配" shortcut="⇧Enter" compact disabled={!searchMatches.length} onClick={() => jumpToSearchMatch(searchIndex - 1)}>
             <ChevronLeft size={15} />
           </IconButton>
-          <IconButton label="下一个匹配" compact disabled={!searchMatches.length} onClick={() => jumpToSearchMatch(searchIndex + 1)}>
+          <IconButton label="下一个匹配" shortcut="Enter" compact disabled={!searchMatches.length} onClick={() => jumpToSearchMatch(searchIndex + 1)}>
             <ChevronRight size={15} />
           </IconButton>
-          <IconButton label="关闭查找" compact onClick={() => setSearchOpen(false)}>
+          <IconButton label="关闭查找" shortcut="Esc" compact onClick={() => setSearchOpen(false)}>
             <X size={14} />
           </IconButton>
         </div>
@@ -819,6 +904,7 @@ export function MarkdownViewer({
         {outlineOpen && (
           <>
             <aside
+              ref={outlineElementRef}
               className="vk-markdown-outline"
               aria-label="Markdown 大纲"
               style={{ width: outlineWidth, flexBasis: outlineWidth }}
@@ -907,7 +993,7 @@ export function MarkdownViewer({
                     .join('\n')
                   setCursor(main.head)
                   setEditorScrollTop(update.view.scrollDOM.scrollTop)
-                  emitContext(main.head, selected, visibleText)
+                  emitContext(main.head, update.selectionSet ? selected : undefined, visibleText)
                 }}
               />
             </div>

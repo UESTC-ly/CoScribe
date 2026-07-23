@@ -235,6 +235,47 @@ describe('AiWorkspace', () => {
     expect(onContextScopeChange).toHaveBeenCalledWith('project')
   })
 
+  it('keeps a captured selection visible beside the composer and exposes locate, insert, and clear actions', () => {
+    const onLocateSelection = vi.fn()
+    const onClearSelection = vi.fn()
+    const selectionContext: ContextSnapshot = {
+      ...context,
+      scope: 'selection',
+      selection: '路由把请求映射到处理函数。',
+    }
+    render(<AiWorkspace {...buildProps({
+      context: selectionContext,
+      contextScope: 'selection',
+      onLocateSelection,
+      onClearSelection,
+    })} />)
+
+    const card = screen.getByRole('region', { name: '已捕获的 AI 选中内容' })
+    expect(card.querySelector('blockquote')).toHaveTextContent('路由把请求映射到处理函数。')
+    expect(within(card).getByText(/LangGraph\.pdf · 13 字/u)).toBeVisible()
+
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+    fireEvent.focus(textbox)
+    expect(card).toBeVisible()
+
+    const insert = within(card).getByRole('button', { name: '将选中内容加入输入框' })
+    expect(insert).toHaveAttribute('title', expect.stringContaining('⌘⇧K'))
+    fireEvent.click(insert)
+    expect(textbox).toHaveValue('路由把请求映射到处理函数。')
+
+    fireEvent.click(within(card).getByRole('button', { name: '定位选中内容' }))
+    expect(onLocateSelection).toHaveBeenCalledWith(selectionContext)
+    fireEvent.click(within(card).getByRole('button', { name: '清除选中内容' }))
+    expect(onClearSelection).toHaveBeenCalledWith(selectionContext)
+  })
+
+  it('shows keyboard shortcuts in hover titles for composer actions', () => {
+    render(<AiWorkspace {...buildProps({ onCaptureScreenshot: vi.fn() })} />)
+
+    expect(screen.getByRole('button', { name: '截图' })).toHaveAttribute('title', expect.stringContaining('⌘⇧8'))
+    expect(screen.getByRole('button', { name: '发送消息' })).toHaveAttribute('title', expect.stringContaining('Enter'))
+  })
+
   it('keeps an unconfigured AI visibly disabled while retaining the setup action', () => {
     const onOpenSettings = vi.fn()
     render(<AiWorkspace {...buildProps({ isConfigured: false, onOpenSettings })} />)

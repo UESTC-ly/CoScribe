@@ -236,7 +236,7 @@ export function BrowserWorkspace({
         </form>
 
         <span className="research-browser__tool-separator" />
-        <button className="icon-button" type="button" disabled={!hasPage || state.loading || busy !== null} onClick={() => void extract('selection')} title="把网页选中内容发送到 AI（Cmd/Ctrl+Shift+K）" aria-label="发送网页选中内容到 AI"><TextSelect size={16} /></button>
+        <button className="icon-button" type="button" disabled={!hasPage || state.loading || busy !== null} onClick={() => void extract('selection')} title="把网页选中内容发送到 AI（⌘⇧K / Ctrl+Shift+K）" aria-label="发送网页选中内容到 AI"><TextSelect size={16} /></button>
         <button className="icon-button" type="button" disabled={!hasPage || state.loading || busy !== null} onClick={() => void extract('article')} title="把网页正文发送到 AI" aria-label="发送网页正文到 AI"><FileText size={16} /></button>
         <button className="icon-button" type="button" disabled={!hasPage || state.loading || busy !== null} onClick={() => onCiteSource(state)} title="引用当前网页来源" aria-label="引用当前网页来源"><Quote size={16} /></button>
         <button className="icon-button" type="button" disabled={!hasPage || state.loading || busy !== null} onClick={() => void save('archive')} title="保存完整网页归档（MHTML，不受 AI 正文长度限制）" aria-label="保存完整网页归档"><Archive size={16} /></button>

@@ -101,6 +101,12 @@ interface ActiveAiRequest {
   operationMode?: AiSendPayload['operationMode']
 }
 
+interface AiSelectionCommand {
+  path: string | null
+  revealToken: number
+  clearToken: number
+}
+
 function makeId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`
 }
@@ -194,12 +200,19 @@ export default function App(): React.JSX.Element {
   const [operationHistory, setOperationHistory] = useState<AiOperationHistoryEntry[]>([])
   const [undoingOperationId, setUndoingOperationId] = useState<string | null>(null)
   const [pendingWebContext, setPendingWebContext] = useState<ContextSnapshot | null>(null)
+  const [aiSelectionCommand, setAiSelectionCommand] = useState<AiSelectionCommand>({
+    path: null,
+    revealToken: 0,
+    clearToken: 0
+  })
   const [resizing, setResizing] = useState<'left' | 'ai' | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const activeRequests = useRef(new Map<string, ActiveAiRequest>())
   const stoppedImageRequests = useRef(new Set<string>())
   const hydratedProjectPath = useRef<string | null>(null)
   const refreshTimer = useRef<number | null>(null)
+  const appShellRef = useRef<HTMLDivElement>(null)
+  const panelResizeCleanupRef = useRef<((commit: boolean) => void) | null>(null)
 
   const setStore = appStore.getState
 
@@ -208,6 +221,8 @@ export default function App(): React.JSX.Element {
     window.addEventListener('resize', updateViewportWidth)
     return () => window.removeEventListener('resize', updateViewportWidth)
   }, [])
+
+  useEffect(() => () => panelResizeCleanupRef.current?.(false), [])
 
   const hydrateProject = useCallback(async (project: ProjectInfo): Promise<void> => {
     setHydrated(false)
@@ -706,6 +721,31 @@ export default function App(): React.JSX.Element {
     openPath(context.documentPath, context.kind === 'folder' ? undefined : context.kind, { page: context.pdfPage })
   }
 
+  const locateSelection = (context: ContextSnapshot): void => {
+    if (context.documentPath) {
+      setAiSelectionCommand((current) => ({
+        path: context.documentPath!,
+        revealToken: current.revealToken + 1,
+        clearToken: current.clearToken
+      }))
+    }
+    openContext(context)
+  }
+
+  const clearSelection = (context: ContextSnapshot): void => {
+    if (context.documentPath) {
+      setStore().setDocumentContext(context.documentPath, { selection: '' })
+      setAiSelectionCommand((current) => ({
+        path: context.documentPath!,
+        revealToken: current.revealToken,
+        clearToken: current.clearToken + 1
+      }))
+    }
+    if (context.webUrl) setPendingWebContext(null)
+    window.getSelection()?.removeAllRanges()
+    setContextScope('visible')
+  }
+
   const sendWebCaptureToAi = useCallback((capture: ResearchBrowserExtractResult): void => {
     const store = appStore.getState()
     if (!store.project) return
@@ -774,6 +814,18 @@ export default function App(): React.JSX.Element {
     const history = appStore.getState().sessions.find((session) => session.id === sessionId)?.messages ?? []
     store.addMessage(sessionId, userMessage)
     store.addMessage(sessionId, assistantMessage)
+    if (context.scope === 'selection') {
+      if (context.documentPath) {
+        store.setDocumentContext(context.documentPath, { selection: '' })
+        setAiSelectionCommand((current) => ({
+          path: context.documentPath!,
+          revealToken: current.revealToken,
+          clearToken: current.clearToken + 1
+        }))
+      }
+      window.getSelection()?.removeAllRanges()
+      setContextScope('visible')
+    }
     setPendingWebContext(null)
     activeRequests.current.set(requestId, {
       requestId,
@@ -1170,25 +1222,91 @@ export default function App(): React.JSX.Element {
   const beginResize = (side: 'left' | 'ai', event: React.PointerEvent): void => {
     if (event.button !== 0) return
     event.preventDefault()
+    panelResizeCleanupRef.current?.(true)
     const startX = event.clientX
     const current = appStore.getState().workspace
     const maximum = maximumAiPanelWidth(window.innerWidth, current.leftWidth)
     const startWidth = side === 'left'
       ? clampProjectNavigatorWidth(current.leftWidth)
       : clampAiPanelWidth(current.aiWidth, maximum)
-    setResizing(side)
-    const move = (next: PointerEvent): void => {
-      const delta = next.clientX - startX
+    const handle = event.currentTarget as HTMLElement
+    const pointerId = event.pointerId
+    const shell = appShellRef.current
+    let latestWidth = startWidth
+    let animationFrame: number | null = null
+    let finished = false
+
+    const paint = (): void => {
+      animationFrame = null
+      if (!shell) return
       if (side === 'left') {
-        setStore().setPanelWidths({ leftWidth: startWidth + delta })
+        shell.style.setProperty('--left-width', `${latestWidth}px`)
+        shell.style.setProperty('--ai-max-width', `${maximumAiPanelWidth(window.innerWidth, latestWidth)}px`)
       } else {
-        const nextMaximum = maximumAiPanelWidth(window.innerWidth, appStore.getState().workspace.leftWidth)
-        setStore().setPanelWidths({ aiWidth: clampAiPanelWidth(startWidth - delta, nextMaximum) })
+        shell.style.setProperty('--ai-width', `${latestWidth}px`)
       }
     }
-    const end = (): void => { setResizing(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end) }
+    const schedulePaint = (): void => {
+      if (animationFrame !== null) return
+      animationFrame = window.requestAnimationFrame(paint)
+    }
+    setResizing(side)
+    const move = (next: PointerEvent): void => {
+      if (next.pointerId !== pointerId) return
+      next.preventDefault()
+      const delta = next.clientX - startX
+      if (side === 'left') {
+        latestWidth = clampProjectNavigatorWidth(startWidth + delta)
+      } else {
+        const nextMaximum = maximumAiPanelWidth(window.innerWidth, appStore.getState().workspace.leftWidth)
+        latestWidth = clampAiPanelWidth(startWidth - delta, nextMaximum)
+      }
+      schedulePaint()
+    }
+    const finish = (commit: boolean): void => {
+      if (finished) return
+      finished = true
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame)
+      paint()
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('blur', blur)
+      handle.removeEventListener('lostpointercapture', lost)
+      try {
+        if (handle.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId)
+      } catch {
+        // Chromium may already have released capture after pointerup/cancel.
+      }
+      if (!commit) {
+        latestWidth = startWidth
+        paint()
+      } else if (side === 'left') {
+        setStore().setPanelWidths({ leftWidth: latestWidth })
+      } else {
+        setStore().setPanelWidths({ aiWidth: latestWidth })
+      }
+      panelResizeCleanupRef.current = null
+      setResizing(null)
+    }
+    const end = (next: PointerEvent): void => {
+      if (next.pointerId === pointerId) finish(true)
+    }
+    const cancel = (next: PointerEvent): void => {
+      if (next.pointerId === pointerId) finish(true)
+    }
+    const lost = (next: PointerEvent): void => {
+      if (next.pointerId === pointerId && next.buttons === 0) finish(true)
+    }
+    const blur = (): void => finish(true)
+
+    panelResizeCleanupRef.current = finish
+    try { handle.setPointerCapture?.(pointerId) } catch { /* Window listeners remain as a fallback. */ }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', cancel)
+    window.addEventListener('blur', blur)
+    handle.addEventListener('lostpointercapture', lost)
   }
 
   const resizeAiFromKeyboard = (event: React.KeyboardEvent<HTMLDivElement>): void => {
@@ -1229,40 +1347,48 @@ export default function App(): React.JSX.Element {
   const specialWorkspaceActive = browserActive || Boolean(activePluginId)
   const activePlugin = activePluginId ? trustedPlugin(activePluginId) : undefined
 
-  const paneProps = (pane: PaneId, tabs: OpenTab[]) => ({
-    projectPath: state.project!.path,
-    pane,
-    tabs,
-    activeTabId: state.workspace.panes[pane].activeTabId,
-    focused: state.workspace.activePane === pane,
-    workspace: state.workspace,
-    documents: state.documents,
-    annotations: state.annotations,
-    settings: state.settings,
-    dirtyPaths,
-    onFocus: () => state.focusPane(pane),
-    onActivate: (tabId: string) => state.setActiveTab(pane, tabId),
-    onClose: requestCloseTab,
-    onDropTab: dropTab,
-    onEnsureDocument: ensureDocument,
-    onUpdateDocument: state.updateDocument,
-    onSaveMarkdown: saveMarkdown,
-    onPdfState: (path: string, value: typeof state.workspace.pdf[string]) => state.updatePdfState(path, value),
-    onMarkdownState: (path: string, value: typeof state.workspace.markdown[string]) => state.updateMarkdownState(path, value),
-    onContext: state.setDocumentContext,
-    onAddAnnotation: state.addAnnotation,
-    onDeleteAnnotation: state.deleteAnnotation,
-    onRequestComment: requestPdfComment,
-    onReveal: (path: string) => void window.coscribe.file.reveal(path),
-    onOpenExternal: (path: string) => void window.coscribe.file.openExternal(path).catch((reason) => setError(reason instanceof Error ? reason.message : '系统无法打开文件')),
-    onOpenProjectPath: (path: string) => openPath(path),
-    onConvertPowerPoint: convertPowerPoint,
-    onResolveConflict: (path: string, resolution: 'use-external' | 'keep-local') => state.resolveDocumentConflict(path, resolution === 'use-external' ? 'reload' : 'keep'),
-    onError: setError
-  })
+  const paneProps = (pane: PaneId, tabs: OpenTab[]) => {
+    const paneActiveTab = tabs.find((tab) => tab.id === state.workspace.panes[pane].activeTabId)
+    const selectionMatches = Boolean(paneActiveTab && aiSelectionCommand.path === paneActiveTab.path)
+    return {
+      projectPath: state.project!.path,
+      pane,
+      tabs,
+      activeTabId: state.workspace.panes[pane].activeTabId,
+      focused: state.workspace.activePane === pane,
+      workspace: state.workspace,
+      documents: state.documents,
+      annotations: state.annotations,
+      settings: state.settings,
+      dirtyPaths,
+      onFocus: () => state.focusPane(pane),
+      onActivate: (tabId: string) => state.setActiveTab(pane, tabId),
+      onClose: requestCloseTab,
+      onDropTab: dropTab,
+      onEnsureDocument: ensureDocument,
+      onUpdateDocument: state.updateDocument,
+      onSaveMarkdown: saveMarkdown,
+      onPdfState: (path: string, value: typeof state.workspace.pdf[string]) => state.updatePdfState(path, value),
+      onMarkdownState: (path: string, value: typeof state.workspace.markdown[string]) => state.updateMarkdownState(path, value),
+      onContext: state.setDocumentContext,
+      onAddAnnotation: state.addAnnotation,
+      onDeleteAnnotation: state.deleteAnnotation,
+      onRequestComment: requestPdfComment,
+      onReveal: (path: string) => void window.coscribe.file.reveal(path),
+      onOpenExternal: (path: string) => void window.coscribe.file.openExternal(path).catch((reason) => setError(reason instanceof Error ? reason.message : '系统无法打开文件')),
+      onOpenProjectPath: (path: string) => openPath(path),
+      onConvertPowerPoint: convertPowerPoint,
+      onResolveConflict: (path: string, resolution: 'use-external' | 'keep-local') => state.resolveDocumentConflict(path, resolution === 'use-external' ? 'reload' : 'keep'),
+      onError: setError,
+      aiSelectionText: paneActiveTab ? state.documentContexts[paneActiveTab.path]?.selection : undefined,
+      aiSelectionRevealToken: selectionMatches ? aiSelectionCommand.revealToken : 0,
+      aiSelectionClearToken: selectionMatches ? aiSelectionCommand.clearToken : 0
+    }
+  }
 
   return (
     <div
+      ref={appShellRef}
       className={`app-shell ${resizing ? 'is-panel-resizing' : ''}`}
       style={{
         '--left-width': `${visibleLeftWidth}px`,
@@ -1333,7 +1459,7 @@ export default function App(): React.JSX.Element {
           <Suspense fallback={<div className="workspace-loading"><span className="viewer-spinner" /><strong>正在载入工作区…</strong></div>}>
             {browserActive ? (
               <BrowserWorkspace
-                suspended={settingsOpen || Boolean(prompt) || Boolean(confirm)}
+                suspended={settingsOpen || Boolean(prompt) || Boolean(confirm) || Boolean(resizing)}
                 onClose={() => setBrowserActive(false)}
                 onSendToAi={sendWebCaptureToAi}
                 onCiteSource={citeWebSource}
@@ -1425,6 +1551,18 @@ export default function App(): React.JSX.Element {
             onNewSession={() => { state.createSession() }}
             onRenameSession={state.renameSession}
             onContextScopeChange={(scope) => {
+              if (scope !== 'selection') {
+                const selected = appStore.getState().captureActiveContext('selection')
+                if (selected?.selection?.trim() && selected.documentPath) {
+                  setStore().setDocumentContext(selected.documentPath, { selection: '' })
+                  setAiSelectionCommand((current) => ({
+                    path: selected.documentPath!,
+                    revealToken: current.revealToken,
+                    clearToken: current.clearToken + 1
+                  }))
+                  window.getSelection()?.removeAllRanges()
+                }
+              }
               setContextScope(scope)
               if (pendingWebContext && scope !== pendingWebContext.scope) setPendingWebContext(null)
             }}
@@ -1442,6 +1580,8 @@ export default function App(): React.JSX.Element {
             onQuickNote={quickNote}
             onOpenSource={openSource}
             onOpenContext={openContext}
+            onLocateSelection={locateSelection}
+            onClearSelection={clearSelection}
             onAcceptOperation={acceptOperation}
             onRejectOperation={rejectOperation}
             onRegenerateMessage={regenerateAiMessage}
