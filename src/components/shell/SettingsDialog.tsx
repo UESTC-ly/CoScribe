@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 import { BrainCircuit, Eye, EyeOff, Image as ImageIcon, KeyRound, MessageSquareCode, RotateCcw } from 'lucide-react'
-import { REASONING_EFFORTS, SELECTABLE_AI_MODELS, type AppSettings } from '../../shared/types'
+import {
+  REASONING_EFFORTS,
+  SELECTABLE_AI_MODELS,
+  SELECTABLE_ANTHROPIC_MODELS,
+  type AppSettings
+} from '../../shared/types'
 import { Dialog } from './Dialog'
 
 const REASONING_LABELS: Record<AppSettings['reasoningEffort'], string> = {
@@ -22,12 +27,14 @@ interface SettingsDialogProps {
 export function SettingsDialog({ open, settings, onSave, onClose }: SettingsDialogProps): React.JSX.Element | null {
   const [draft, setDraft] = useState(settings)
   const [showKey, setShowKey] = useState(false)
+  const [showAnthropicKey, setShowAnthropicKey] = useState(false)
   const [showImageKey, setShowImageKey] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     setDraft(settings)
     setShowKey(false)
+    setShowAnthropicKey(false)
     setShowImageKey(false)
   }, [settings, open])
 
@@ -43,6 +50,18 @@ export function SettingsDialog({ open, settings, onSave, onClose }: SettingsDial
       setSaving(false)
     }
   }
+  const selectProvider = (provider: AppSettings['aiProvider']): void => {
+    setDraft((current) => ({
+      ...current,
+      aiProvider: provider,
+      ...(provider === 'anthropic' && current.reasoningEffort === 'ultra'
+        ? { reasoningEffort: 'max' as const }
+        : {})
+    }))
+  }
+  const reasoningEfforts = draft.aiProvider === 'anthropic'
+    ? REASONING_EFFORTS.filter((effort) => effort !== 'ultra')
+    : REASONING_EFFORTS
 
   return (
     <Dialog
@@ -64,46 +83,87 @@ export function SettingsDialog({ open, settings, onSave, onClose }: SettingsDial
         <section>
           <header>
             <KeyRound size={16} />
-            <div><h3>AI 服务</h3><p>支持 OpenAI-compatible 的 Responses 与 Chat Completions 接口。</p></div>
+            <div><h3>AI 服务</h3><p>分别保存 OpenAI-compatible 与 Anthropic Messages 配置，切换模型时无需反复改地址和密钥。</p></div>
           </header>
+          <div className="settings-provider-tabs" role="tablist" aria-label="AI 服务提供方">
+            <button type="button" role="tab" aria-selected={draft.aiProvider === 'openai'} onClick={() => selectProvider('openai')}>
+              <strong>OpenAI 格式</strong><small>Responses / Chat Completions</small>
+            </button>
+            <button type="button" role="tab" aria-selected={draft.aiProvider === 'anthropic'} onClick={() => selectProvider('anthropic')}>
+              <strong>Anthropic 格式</strong><small>Messages API</small>
+            </button>
+          </div>
           <div className="settings-grid">
-            <label className="field-label span-2">
-              服务地址
-              <input className="field" value={draft.baseUrl} onChange={(event) => patch('baseUrl', event.target.value)} placeholder="https://api.openai.com/v1" />
-            </label>
-            <label className="field-label">
-              接口协议
-              <select className="field" value={draft.apiProtocol} onChange={(event) => patch('apiProtocol', event.target.value as AppSettings['apiProtocol'])}>
-                <option value="auto">自动</option>
-                <option value="responses">Responses API</option>
-                <option value="chat-completions">Chat Completions</option>
-              </select>
-            </label>
+            {draft.aiProvider === 'openai' ? (
+              <>
+                <label className="field-label span-2">
+                  OpenAI-compatible 服务地址
+                  <input className="field" value={draft.baseUrl} onChange={(event) => patch('baseUrl', event.target.value)} placeholder="https://api.openai.com/v1" />
+                </label>
+                <label className="field-label">
+                  接口协议
+                  <select className="field" value={draft.apiProtocol} onChange={(event) => patch('apiProtocol', event.target.value as AppSettings['apiProtocol'])}>
+                    <option value="auto">自动识别</option>
+                    <option value="responses">Responses API</option>
+                    <option value="chat-completions">Chat Completions</option>
+                  </select>
+                </label>
+                <label className="field-label">
+                  模型
+                  <input className="field" list="openai-model-options" value={draft.model} onChange={(event) => patch('model', event.target.value)} placeholder="gpt-5.6-terra" />
+                  <datalist id="openai-model-options">{SELECTABLE_AI_MODELS.map((model) => <option key={model} value={model} />)}</datalist>
+                </label>
+                <label className="field-label span-2">
+                  OpenAI API Key
+                  <div className="field-password">
+                    <input
+                      className="field"
+                      type={showKey ? 'text' : 'password'}
+                      value={draft.apiKey ?? ''}
+                      onChange={(event) => patch('apiKey', event.target.value)}
+                      placeholder={draft.hasApiKey ? '已安全保存；留空则保持不变' : 'sk-…'}
+                    />
+                    <button type="button" className="icon-button" onClick={() => setShowKey((value) => !value)} aria-label={showKey ? '隐藏密钥' : '显示密钥'}>
+                      {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="field-label span-2">
+                  Anthropic 服务地址
+                  <input className="field" value={draft.anthropicBaseUrl} onChange={(event) => patch('anthropicBaseUrl', event.target.value)} placeholder="https://api.anthropic.com" />
+                  <small className="field-caption">自动请求 /v1/messages；也支持填入第三方代理的版本路径或完整 messages 地址。</small>
+                </label>
+                <label className="field-label span-2">
+                  Anthropic 模型
+                  <input className="field" list="anthropic-model-options" value={draft.anthropicModel} onChange={(event) => patch('anthropicModel', event.target.value)} placeholder="claude-sonnet-4-6" />
+                  <datalist id="anthropic-model-options">{SELECTABLE_ANTHROPIC_MODELS.map((model) => <option key={model} value={model} />)}</datalist>
+                </label>
+                <label className="field-label span-2">
+                  Anthropic API Key
+                  <div className="field-password">
+                    <input
+                      className="field"
+                      type={showAnthropicKey ? 'text' : 'password'}
+                      value={draft.anthropicApiKey ?? ''}
+                      onChange={(event) => patch('anthropicApiKey', event.target.value)}
+                      placeholder={draft.hasAnthropicApiKey ? '已安全保存；留空则保持不变' : 'sk-ant-…'}
+                    />
+                    <button type="button" className="icon-button" onClick={() => setShowAnthropicKey((value) => !value)} aria-label={showAnthropicKey ? '隐藏 Anthropic 密钥' : '显示 Anthropic 密钥'}>
+                      {showAnthropicKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                </label>
+              </>
+            )}
             <label className="field-label">
               思考强度
               <select className="field" value={draft.reasoningEffort} onChange={(event) => patch('reasoningEffort', event.target.value as AppSettings['reasoningEffort'])}>
-                {REASONING_EFFORTS.map((effort) => <option key={effort} value={effort}>{REASONING_LABELS[effort]}</option>)}
+                {reasoningEfforts.map((effort) => <option key={effort} value={effort}>{REASONING_LABELS[effort]}</option>)}
               </select>
-            </label>
-            <label className="field-label span-2">
-              模型
-              <input className="field" list="ai-model-options" value={draft.model} onChange={(event) => patch('model', event.target.value)} placeholder="gpt-5.6-terra" />
-              <datalist id="ai-model-options">{SELECTABLE_AI_MODELS.map((model) => <option key={model} value={model} />)}</datalist>
-            </label>
-            <label className="field-label span-2">
-              API Key
-              <div className="field-password">
-                <input
-                  className="field"
-                  type={showKey ? 'text' : 'password'}
-                  value={draft.apiKey ?? ''}
-                  onChange={(event) => patch('apiKey', event.target.value)}
-                  placeholder={draft.hasApiKey ? '已安全保存；留空则保持不变' : 'sk-…'}
-                />
-                <button type="button" className="icon-button" onClick={() => setShowKey((value) => !value)} aria-label={showKey ? '隐藏密钥' : '显示密钥'}>
-                  {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
+              {draft.aiProvider === 'anthropic' && <small className="field-caption">Anthropic 使用 output_config.effort；不提供 ultra，切换时会使用 max。</small>}
             </label>
           </div>
         </section>
@@ -217,6 +277,35 @@ export function SettingsDialog({ open, settings, onSave, onClose }: SettingsDial
                 <option value="project">当前项目</option>
                 <option value="general">仅模型知识</option>
               </select>
+            </label>
+            <label className="field-label">
+              上下文窗口（tokens）
+              <input
+                className="field"
+                type="number"
+                min="0"
+                max="2000000"
+                step="1024"
+                value={draft.contextWindowTokens}
+                onChange={(event) => patch('contextWindowTokens', Number(event.target.value))}
+              />
+              <small className="field-caption">0 使用模型预设；第三方模型可在这里覆盖。</small>
+            </label>
+            <label className="field-label">
+              为回答预留（tokens）
+              <input
+                className="field"
+                type="number"
+                min="1024"
+                max="128000"
+                step="1024"
+                value={draft.contextOutputReserveTokens}
+                onChange={(event) => patch('contextOutputReserveTokens', Number(event.target.value))}
+              />
+            </label>
+            <label className="check-row span-2">
+              <input type="checkbox" checked={draft.contextAutoCompact} onChange={(event) => patch('contextAutoCompact', event.target.checked)} />
+              <span><strong>自动压缩早期会话</strong><small>仅压缩发送给模型的请求快照，界面中的原始聊天不会删除。</small></span>
             </label>
             <div />
             <label className="check-row">

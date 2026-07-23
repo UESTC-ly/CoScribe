@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Check, Copy, Download, ExternalLink, FileText, RotateCcw, Sparkles, Square } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
@@ -134,7 +134,7 @@ function MessageActions({
   )
 }
 
-export function MarkdownMessage({
+export const MarkdownMessage = memo(function MarkdownMessage({
   message,
   streaming = false,
   operationBusy = false,
@@ -250,4 +250,4 @@ export function MarkdownMessage({
       </div>
     </article>
   )
-}
+})

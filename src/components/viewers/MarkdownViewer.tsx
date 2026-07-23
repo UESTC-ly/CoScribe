@@ -266,6 +266,14 @@ export function MarkdownViewer({
   const lastSavedValueRef = useRef(value)
   const saveSequenceRef = useRef(0)
   const outlineResizeCleanupRef = useRef<((commit?: boolean) => void) | null>(null)
+  const previewScrollFrameRef = useRef<number | null>(null)
+  const editorContextFrameRef = useRef<number | null>(null)
+  const pendingEditorContextRef = useRef<{
+    cursor: number
+    scrollTop: number
+    selection?: string
+    visibleText: string
+  } | null>(null)
   const documentIdentity = documentId ?? fileName
   const previousDocumentIdentityRef = useRef(documentIdentity)
   const effectiveMode = mode ?? internalMode
@@ -420,6 +428,30 @@ export function MarkdownViewer({
     },
     [effectiveMode, outline],
   )
+
+  const scheduleEditorContext = useCallback((next: {
+    cursor: number
+    scrollTop: number
+    selection?: string
+    visibleText: string
+  }) => {
+    pendingEditorContextRef.current = next
+    if (editorContextFrameRef.current !== null) return
+    editorContextFrameRef.current = window.requestAnimationFrame(() => {
+      editorContextFrameRef.current = null
+      const pending = pendingEditorContextRef.current
+      pendingEditorContextRef.current = null
+      if (!pending) return
+      setCursor(pending.cursor)
+      setEditorScrollTop(pending.scrollTop)
+      emitContext(pending.cursor, pending.selection, pending.visibleText)
+    })
+  }, [emitContext])
+
+  useEffect(() => () => {
+    if (previewScrollFrameRef.current !== null) window.cancelAnimationFrame(previewScrollFrameRef.current)
+    if (editorContextFrameRef.current !== null) window.cancelAnimationFrame(editorContextFrameRef.current)
+  }, [])
 
   useEffect(() => {
     const heading = headingAt(outline, cursor)
@@ -655,20 +687,24 @@ export function MarkdownViewer({
   }, [currentHeading?.offset, emitContext, outline, previewSelection])
 
   const handlePreviewScroll = useCallback(() => {
-    const root = previewRef.current
-    if (!root) return
-    const headings = Array.from(root.querySelectorAll<HTMLElement>('[data-markdown-offset]'))
-    const rootTop = root.getBoundingClientRect().top
-    let activeOffset = 0
-    for (const element of headings) {
-      if (element.getBoundingClientRect().top - rootTop <= 72) {
-        activeOffset = Number(element.dataset.markdownOffset ?? 0)
-      } else break
-    }
-    const heading = headingAt(outline, activeOffset)
-    setCursor(activeOffset)
-    setEditorScrollTop(root.scrollTop)
-    emitContext(activeOffset, undefined, sectionAt(draftRef.current, outline, heading).slice(0, 4000))
+    if (previewScrollFrameRef.current !== null) return
+    previewScrollFrameRef.current = window.requestAnimationFrame(() => {
+      previewScrollFrameRef.current = null
+      const root = previewRef.current
+      if (!root) return
+      const headings = Array.from(root.querySelectorAll<HTMLElement>('[data-markdown-offset]'))
+      const rootTop = root.getBoundingClientRect().top
+      let activeOffset = 0
+      for (const element of headings) {
+        if (element.getBoundingClientRect().top - rootTop <= 72) {
+          activeOffset = Number(element.dataset.markdownOffset ?? 0)
+        } else break
+      }
+      const heading = headingAt(outline, activeOffset)
+      setCursor(activeOffset)
+      setEditorScrollTop(root.scrollTop)
+      emitContext(activeOffset, undefined, sectionAt(draftRef.current, outline, heading).slice(0, 4000))
+    })
   }, [emitContext, outline])
 
   const markdownComponents = useMemo<Components>(() => {
@@ -993,9 +1029,12 @@ export function MarkdownViewer({
                   const visibleText = update.view.visibleRanges
                     .map((range) => update.state.sliceDoc(range.from, range.to))
                     .join('\n')
-                  setCursor(main.head)
-                  setEditorScrollTop(update.view.scrollDOM.scrollTop)
-                  emitContext(main.head, update.selectionSet ? selected : undefined, visibleText)
+                  scheduleEditorContext({
+                    cursor: main.head,
+                    scrollTop: update.view.scrollDOM.scrollTop,
+                    selection: update.selectionSet ? selected : undefined,
+                    visibleText
+                  })
                 }}
               />
             </div>

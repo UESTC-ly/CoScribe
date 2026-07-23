@@ -4,7 +4,6 @@ import {
   Columns3,
   CircleHelp,
   FileCheck2,
-  PanelRightClose,
   PanelRightOpen,
   Save,
   Settings as SettingsIcon
@@ -28,6 +27,7 @@ import {
   maximumAiPanelWidth,
   PANEL_LAYOUT
 } from './lib/panel-layout'
+import { nextNavigatorState } from './lib/workspace-state'
 import {
   appStore,
   selectActiveDocument,
@@ -45,6 +45,7 @@ import type {
   ChatMessage,
   ContextScope,
   ContextSnapshot,
+  ContextWindowUsage,
   FileKind,
   FileNode,
   FileOperationProposal,
@@ -60,6 +61,7 @@ import type {
   SourceRef
 } from './shared/types'
 import { DEFAULT_SETTINGS } from './shared/types'
+import { planContextWindow } from './lib/context-window'
 import './styles/shell.css'
 
 const AiWorkspace = lazy(() => import('./components/ai/AiWorkspace').then((module) => ({ default: module.AiWorkspace })))
@@ -166,7 +168,12 @@ function hasRemoteCredential(url: string, hasApiKey: boolean): boolean {
 }
 
 function isAiConfigured(settings: AppSettings): boolean {
-  return Boolean(settings.baseUrl.trim() && settings.model.trim()) && hasRemoteCredential(settings.baseUrl, settings.hasApiKey)
+  if (settings.aiProvider === 'anthropic') {
+    return Boolean(settings.anthropicBaseUrl.trim() && settings.anthropicModel.trim()) &&
+      hasRemoteCredential(settings.anthropicBaseUrl, settings.hasAnthropicApiKey)
+  }
+  return Boolean(settings.baseUrl.trim() && settings.model.trim()) &&
+    hasRemoteCredential(settings.baseUrl, settings.hasApiKey)
 }
 
 function isImageConfigured(settings: AppSettings): boolean {
@@ -203,6 +210,11 @@ export default function App(): React.JSX.Element {
   const [operationHistory, setOperationHistory] = useState<AiOperationHistoryEntry[]>([])
   const [undoingOperationId, setUndoingOperationId] = useState<string | null>(null)
   const [pendingWebContext, setPendingWebContext] = useState<ContextSnapshot | null>(null)
+  const [forceCompactSessionId, setForceCompactSessionId] = useState<string | null>(null)
+  const [reportedContextUsage, setReportedContextUsage] = useState<{
+    sessionId: string
+    usage: ContextWindowUsage
+  } | null>(null)
   const [aiSelectionCommand, setAiSelectionCommand] = useState<AiSelectionCommand>({
     path: null,
     revealToken: 0,
@@ -218,6 +230,60 @@ export default function App(): React.JSX.Element {
   const panelResizeCleanupRef = useRef<((commit: boolean) => void) | null>(null)
 
   const setStore = appStore.getState
+  const budgetSession = useMemo(
+    () => state.sessions.find((session) => session.id === state.workspace.currentSessionId) ?? null,
+    [state.sessions, state.workspace.currentSessionId]
+  )
+  const budgetActiveTab = selectActiveTab(state)
+  const budgetDocumentContext = budgetActiveTab ? state.documentContexts[budgetActiveTab.path] : undefined
+  const budgetModel = state.settings.aiProvider === 'anthropic'
+    ? state.settings.anthropicModel
+    : state.settings.model
+  const activeContextUsage = useMemo(() => {
+    if (
+      reportedContextUsage &&
+      reportedContextUsage.sessionId === budgetSession?.id &&
+      reportedContextUsage.usage.provider === state.settings.aiProvider &&
+      reportedContextUsage.usage.model === budgetModel
+    ) {
+      return reportedContextUsage.usage
+    }
+    return planContextWindow({
+      provider: state.settings.aiProvider,
+      model: budgetModel,
+      messages: (budgetSession?.messages ?? [])
+        .filter((message) => message.role !== 'system')
+        .map((message) => ({
+          role: message.role,
+          content: message.attachments?.length
+            ? [
+                { type: 'text', text: message.content },
+                ...message.attachments.map(() => ({ type: 'image' }))
+              ]
+            : message.content
+        })),
+      systemPrompt: [
+        state.settings.customSystemPrompt,
+        JSON.stringify(pendingWebContext ?? budgetDocumentContext ?? {})
+      ].filter(Boolean).join('\n'),
+      windowTokens: state.settings.contextWindowTokens || undefined,
+      outputReserveTokens: state.settings.contextOutputReserveTokens,
+      autoCompact: state.settings.contextAutoCompact,
+      forceCompact: Boolean(budgetSession && forceCompactSessionId === budgetSession.id)
+    }).usage
+  }, [
+    budgetDocumentContext,
+    budgetModel,
+    budgetSession,
+    forceCompactSessionId,
+    pendingWebContext,
+    reportedContextUsage,
+    state.settings.aiProvider,
+    state.settings.contextAutoCompact,
+    state.settings.contextOutputReserveTokens,
+    state.settings.contextWindowTokens,
+    state.settings.customSystemPrompt
+  ])
 
   useEffect(() => {
     const updateViewportWidth = (): void => setViewportWidth(window.innerWidth)
@@ -433,6 +499,10 @@ export default function App(): React.JSX.Element {
         scheduleFlush()
         return
       }
+      if (event.type === 'context-usage') {
+        setReportedContextUsage({ sessionId: request.sessionId, usage: event.usage })
+        return
+      }
       if (event.type === 'done' || event.type === 'stopped' || event.type === 'error') flush(event.requestId)
       if (event.type === 'done') {
         store.updateMessage(request.sessionId, request.assistantMessageId, { sources: event.sources, operation: event.operation })
@@ -488,6 +558,7 @@ export default function App(): React.JSX.Element {
       if (event.type === 'done' || event.type === 'stopped' || event.type === 'error') {
         activeRequests.current.delete(event.requestId)
         setStreamingRequestId((current) => current === event.requestId ? null : current)
+        setReportedContextUsage((current) => current?.sessionId === request.sessionId ? null : current)
       }
     })
     return () => {
@@ -697,7 +768,7 @@ export default function App(): React.JSX.Element {
     if (result.path) openPath(result.path, result.kind === 'folder' ? undefined : result.kind, { page: result.page, line: result.line })
   }
 
-  const openSource = (source: SourceRef): void => {
+  const openSource = useCallback((source: SourceRef): void => {
     if (source.kind === 'session') return
     if (source.kind === 'general') return
     if (source.kind === 'web') {
@@ -712,9 +783,9 @@ export default function App(): React.JSX.Element {
         : 'text',
       { page: source.page, line: source.line }
     )
-  }
+  }, [openPath])
 
-  const openContext = (context: ContextSnapshot): void => {
+  const openContext = useCallback((context: ContextSnapshot): void => {
     if (context.webUrl) {
       setBrowserActive(true)
       void window.coscribe.browser.navigate(context.webUrl).catch((reason) => setError(reason instanceof Error ? reason.message : '无法重新打开网页上下文'))
@@ -722,9 +793,9 @@ export default function App(): React.JSX.Element {
     }
     if (!context.documentPath) return
     openPath(context.documentPath, context.kind === 'folder' ? undefined : context.kind, { page: context.pdfPage })
-  }
+  }, [openPath])
 
-  const locateSelection = (context: ContextSnapshot): void => {
+  const locateSelection = useCallback((context: ContextSnapshot): void => {
     if (context.documentPath) {
       setAiSelectionCommand((current) => ({
         path: context.documentPath!,
@@ -733,9 +804,9 @@ export default function App(): React.JSX.Element {
       }))
     }
     openContext(context)
-  }
+  }, [openContext])
 
-  const clearSelection = (context: ContextSnapshot): void => {
+  const clearSelection = useCallback((context: ContextSnapshot): void => {
     if (context.documentPath) {
       setStore().setDocumentContext(context.documentPath, { selection: '' })
       setAiSelectionCommand((current) => ({
@@ -747,7 +818,7 @@ export default function App(): React.JSX.Element {
     if (context.webUrl) setPendingWebContext(null)
     window.getSelection()?.removeAllRanges()
     setContextScope('visible')
-  }
+  }, [])
 
   const sendWebCaptureToAi = useCallback((capture: ResearchBrowserExtractResult): void => {
     const store = appStore.getState()
@@ -815,6 +886,7 @@ export default function App(): React.JSX.Element {
     }
     const assistantMessage: ChatMessage = { id: makeId('message'), role: 'assistant', content: '', createdAt: Date.now() + 1 }
     const history = appStore.getState().sessions.find((session) => session.id === sessionId)?.messages ?? []
+    const forceCompact = forceCompactSessionId === sessionId
     store.addMessage(sessionId, userMessage)
     store.addMessage(sessionId, assistantMessage)
     if (context.scope === 'selection') {
@@ -853,9 +925,11 @@ export default function App(): React.JSX.Element {
               : {})
           })),
         context,
+        ...(forceCompact ? { contextPolicy: { forceCompact: true } } : {}),
         ...(payload.operationMode ? { operationMode: payload.operationMode } : {}),
         settings: { allowGeneralKnowledge: state.settings.allowGeneralKnowledge }
       })
+      if (forceCompact) setForceCompactSessionId(null)
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'AI 请求无法启动'
       store.updateMessage(sessionId, assistantMessage.id, { error: message })
@@ -863,7 +937,7 @@ export default function App(): React.JSX.Element {
       setStreamingRequestId(null)
       setAiError(message)
     }
-  }, [pendingWebContext, state.project, state.settings.allowGeneralKnowledge])
+  }, [forceCompactSessionId, pendingWebContext, state.project, state.settings.allowGeneralKnowledge])
 
   const captureScreenshot = useCallback(async (): Promise<void> => {
     try {
@@ -1190,7 +1264,7 @@ export default function App(): React.JSX.Element {
   }, [refreshTree])
 
   const saveQuickAiSettings = useCallback(async (
-    patch: Partial<Pick<AppSettings, 'model' | 'reasoningEffort'>>
+    patch: Partial<Pick<AppSettings, 'aiProvider' | 'model' | 'anthropicModel' | 'reasoningEffort'>>
   ): Promise<void> => {
     const current = appStore.getState().settings
     try {
@@ -1199,6 +1273,13 @@ export default function App(): React.JSX.Element {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '无法保存 AI 模型设置')
     }
+  }, [])
+
+  const toggleNavigatorSection = useCallback((section: typeof state.workspace.navSection): void => {
+    const store = setStore()
+    const next = nextNavigatorState(store.workspace, section)
+    store.setNavSection(next.navSection)
+    store.setNavVisible(next.navVisible)
   }, [])
 
   const requestPdfComment = (path: string, selection: PdfTextSelection): void => runPrompt({
@@ -1228,7 +1309,7 @@ export default function App(): React.JSX.Element {
     panelResizeCleanupRef.current?.(true)
     const startX = event.clientX
     const current = appStore.getState().workspace
-    const maximum = maximumAiPanelWidth(window.innerWidth, current.leftWidth)
+    const maximum = maximumAiPanelWidth(window.innerWidth, current.leftWidth, current.navVisible)
     const startWidth = side === 'left'
       ? clampProjectNavigatorWidth(current.leftWidth)
       : clampAiPanelWidth(current.aiWidth, maximum)
@@ -1244,7 +1325,7 @@ export default function App(): React.JSX.Element {
       if (!shell) return
       if (side === 'left') {
         shell.style.setProperty('--left-width', `${latestWidth}px`)
-        shell.style.setProperty('--ai-max-width', `${maximumAiPanelWidth(window.innerWidth, latestWidth)}px`)
+        shell.style.setProperty('--ai-max-width', `${maximumAiPanelWidth(window.innerWidth, latestWidth, true)}px`)
       } else {
         shell.style.setProperty('--ai-width', `${latestWidth}px`)
       }
@@ -1261,7 +1342,8 @@ export default function App(): React.JSX.Element {
       if (side === 'left') {
         latestWidth = clampProjectNavigatorWidth(startWidth + delta)
       } else {
-        const nextMaximum = maximumAiPanelWidth(window.innerWidth, appStore.getState().workspace.leftWidth)
+        const nextWorkspace = appStore.getState().workspace
+        const nextMaximum = maximumAiPanelWidth(window.innerWidth, nextWorkspace.leftWidth, nextWorkspace.navVisible)
         latestWidth = clampAiPanelWidth(startWidth - delta, nextMaximum)
       }
       schedulePaint()
@@ -1316,7 +1398,7 @@ export default function App(): React.JSX.Element {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
     event.preventDefault()
     const current = appStore.getState().workspace
-    const maximum = maximumAiPanelWidth(window.innerWidth, current.leftWidth)
+    const maximum = maximumAiPanelWidth(window.innerWidth, current.leftWidth, current.navVisible)
     const visibleWidth = clampAiPanelWidth(current.aiWidth, maximum)
     const step = event.shiftKey ? 64 : 24
     const nextWidth = event.key === 'Home'
@@ -1341,7 +1423,7 @@ export default function App(): React.JSX.Element {
   const dirtyPaths = new Set(selectDirtyDocuments(state).map((document) => document.path))
   const activeContext = pendingWebContext ?? state.captureActiveContext(contextScope)
   const visibleLeftWidth = clampProjectNavigatorWidth(state.workspace.leftWidth)
-  const aiMaximumWidth = maximumAiPanelWidth(viewportWidth, visibleLeftWidth)
+  const aiMaximumWidth = maximumAiPanelWidth(viewportWidth, visibleLeftWidth, state.workspace.navVisible)
   const visibleAiWidth = clampAiPanelWidth(state.workspace.aiWidth, aiMaximumWidth)
   const isConfigured = isAiConfigured(state.settings)
   const imageConfigured = isImageConfigured(state.settings)
@@ -1404,14 +1486,13 @@ export default function App(): React.JSX.Element {
         <div className="app-titlebar__center">{browserActive ? '单标签资料浏览器' : activePlugin ? '按需加载的可信内置插件' : activeDocument?.dirty ? '未保存' : activeTab ? '本地文件' : '项目工作区'}</div>
         <div className="app-titlebar__actions">
           <button className={`icon-button ${state.workspace.split ? 'is-active' : ''}`} disabled={specialWorkspaceActive} onClick={toggleSplit} title={specialWorkspaceActive ? '当前工作区使用单内容区域' : state.workspace.split ? '关闭分屏' : '左右分屏'} aria-label={state.workspace.split ? '关闭分屏' : '左右分屏'}>{state.workspace.split ? <Columns3 size={16} /> : <Columns2 size={16} />}</button>
-          <button className={`icon-button ${state.workspace.aiVisible ? 'is-active' : ''}`} onClick={() => state.setAiVisible(!state.workspace.aiVisible)} title={state.workspace.aiVisible ? '隐藏 AI' : '显示 AI'} aria-label={state.workspace.aiVisible ? '隐藏 AI' : '显示 AI'}>{state.workspace.aiVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}</button>
           <button className="icon-button" onClick={() => setGuideOpen(true)} title="使用指南" aria-label="使用指南"><CircleHelp size={16} /></button>
           <button className="icon-button" onClick={() => setSettingsOpen(true)} title="设置" aria-label="设置"><SettingsIcon size={16} /></button>
         </div>
       </header>
       <div className="app-body">
-        <ActivityRail active={state.workspace.navSection} aiVisible={state.workspace.aiVisible} browserActive={browserActive} onChange={state.setNavSection} onToggleBrowser={() => setBrowserActive((active) => { const next = !active; if (next) setActivePluginId(null); return next })} onToggleAi={() => state.setAiVisible(!state.workspace.aiVisible)} onSettings={() => setSettingsOpen(true)} />
-        <ProjectNavigator
+        <ActivityRail active={state.workspace.navSection} navVisible={state.workspace.navVisible} browserActive={browserActive} onChange={toggleNavigatorSection} onToggleBrowser={() => setBrowserActive((active) => { const next = !active; if (next) setActivePluginId(null); return next })} onSettings={() => setSettingsOpen(true)} />
+        {state.workspace.navVisible && <ProjectNavigator
           section={state.workspace.navSection}
           projectName={state.project.name}
           projectPath={state.project.path}
@@ -1457,8 +1538,9 @@ export default function App(): React.JSX.Element {
           activePluginId={activePluginId}
           onOpenPlugin={openPlugin}
           onTogglePlugin={togglePlugin}
-        />
-        <div className={`resize-handle ${resizing === 'left' ? 'is-resizing' : ''}`} onPointerDown={(event) => beginResize('left', event)} role="separator" aria-orientation="vertical" aria-label="调整项目导航宽度" />
+          onClose={() => state.setNavVisible(false)}
+        />}
+        {state.workspace.navVisible && <div className={`resize-handle ${resizing === 'left' ? 'is-resizing' : ''}`} onPointerDown={(event) => beginResize('left', event)} role="separator" aria-orientation="vertical" aria-label="调整项目导航宽度" />}
         <main className="workspace">
           <Suspense fallback={<div className="workspace-loading"><span className="viewer-spinner" /><strong>正在载入工作区…</strong></div>}>
             {browserActive ? (
@@ -1540,6 +1622,8 @@ export default function App(): React.JSX.Element {
             currentSessionId={currentSession?.id ?? null}
             context={activeContext}
             contextScope={contextScope}
+            contextUsage={activeContextUsage}
+            manualContextCompression={forceCompactSessionId === currentSession?.id}
             referencedFiles={state.referencedFiles}
             availableFiles={projectFiles.map((file) => ({ path: file.path, name: file.name, kind: file.kind }))}
             isStreaming={Boolean(streamingRequestId)}
@@ -1570,6 +1654,12 @@ export default function App(): React.JSX.Element {
               setContextScope(scope)
               if (pendingWebContext && scope !== pendingWebContext.scope) setPendingWebContext(null)
             }}
+            onCompactContext={() => {
+              if (currentSession) {
+                setForceCompactSessionId((current) => current === currentSession.id ? null : currentSession.id)
+                setReportedContextUsage(null)
+              }
+            }}
             onDraftChange={(value) => {
               setChatDraft(value)
               if (!value.trim()) setPendingWebContext(null)
@@ -1589,10 +1679,23 @@ export default function App(): React.JSX.Element {
             onAcceptOperation={acceptOperation}
             onRejectOperation={rejectOperation}
             onRegenerateMessage={regenerateAiMessage}
+            onClose={() => state.setAiVisible(false)}
             onOpenSettings={() => setSettingsOpen(true)}
             onDismissError={() => setAiError(null)}
           /></Suspense>
         </>}
+        {!state.workspace.aiVisible && (
+          <button
+            type="button"
+            className="ai-panel-reveal"
+            onClick={() => state.setAiVisible(true)}
+            title="打开 AI 侧栏"
+            aria-label="打开 AI 侧栏"
+          >
+            <PanelRightOpen size={15} />
+            <span>AI</span>
+          </button>
+        )}
       </div>
       <footer className="app-statusbar">
         <span className={`status-item ${activeDocument?.dirty ? 'is-warning' : 'is-ok'}`}>{activeDocument?.dirty ? <Save size={11} /> : <FileCheck2 size={11} />}{activeDocument?.dirty ? '尚未保存' : '文件已同步'}</span>
@@ -1601,7 +1704,9 @@ export default function App(): React.JSX.Element {
         <span className="app-statusbar__spacer" />
         {state.searchProgress && !state.searchProgress.done && <span className="status-item">正在搜索 {state.searchProgress.scanned}{state.searchProgress.total ? `/${state.searchProgress.total}` : ''}</span>}
         <ModelSwitcher
-          model={state.settings.model}
+          provider={state.settings.aiProvider}
+          openAiModel={state.settings.model}
+          anthropicModel={state.settings.anthropicModel}
           reasoningEffort={state.settings.reasoningEffort}
           isConfigured={isConfigured}
           onChange={saveQuickAiSettings}

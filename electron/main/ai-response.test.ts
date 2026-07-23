@@ -4,12 +4,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   AiService,
   aiConversationMessages,
+  aiRequestHeaders,
+  anthropicMessagesEndpoint,
+  anthropicMessagesRequestBody,
+  anthropicReasoningRequestFields,
+  anthropicResult,
+  anthropicStreamEvent,
   chatEndpoint,
   imageGenerationEndpoint,
   imageGenerationRequestBody,
   imageGenerationResult,
   parseAiJsonResponse,
   reasoningRequestFields,
+  resolveActiveAiRequestTarget,
   resolveAiRequestTarget,
   responsesEndpoint,
   responsesResult
@@ -76,6 +83,29 @@ describe('AI endpoint resolution', () => {
     })
   })
 
+  it('builds an Anthropic Messages endpoint and resolves the active provider profile', () => {
+    expect(anthropicMessagesEndpoint('https://api.anthropic.com')).toBe('https://api.anthropic.com/v1/messages')
+    expect(anthropicMessagesEndpoint('https://proxy.example.com/anthropic/v1/')).toBe(
+      'https://proxy.example.com/anthropic/v1/messages'
+    )
+    expect(anthropicMessagesEndpoint('https://proxy.example.com/v1/messages?ignored=1')).toBe(
+      'https://proxy.example.com/v1/messages'
+    )
+    expect(resolveActiveAiRequestTarget({
+      aiProvider: 'anthropic',
+      baseUrl: 'https://api.openai.com/v1',
+      apiProtocol: 'auto',
+      model: 'gpt-5.6-terra',
+      anthropicBaseUrl: 'https://api.anthropic.com',
+      anthropicModel: 'claude-sonnet-4-6'
+    })).toEqual({
+      provider: 'anthropic',
+      protocol: 'anthropic-messages',
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      model: 'claude-sonnet-4-6'
+    })
+  })
+
   it('builds the GPT-Image endpoint from a host or versioned third-party base', () => {
     expect(imageGenerationEndpoint('https://images.example.com')).toBe(
       'https://images.example.com/v1/images/generations'
@@ -117,6 +147,27 @@ describe('AI conversation image mapping', () => {
       content: [
         { type: 'text', text: '请分析我发送的图片。' },
         { type: 'image_url', image_url: { url: tinyPng.dataUrl, detail: 'auto' } }
+      ]
+    }])
+  })
+
+  it('maps user image attachments to Anthropic base64 content blocks', () => {
+    expect(aiConversationMessages('anthropic-messages', [{
+      role: 'user',
+      content: '解释这张图',
+      attachments: [tinyPng]
+    }])).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'text', text: '解释这张图' },
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: 'image/png',
+            data: 'iVBORw0KGgo='
+          }
+        }
       ]
     }])
   })
@@ -369,6 +420,102 @@ describe('AI reasoning request fields', () => {
   it('uses the protocol-specific reasoning field without renaming the effort', () => {
     expect(reasoningRequestFields('responses', 'max')).toEqual({ reasoning: { effort: 'max' } })
     expect(reasoningRequestFields('chat-completions', 'xhigh')).toEqual({ reasoning_effort: 'xhigh' })
+    expect(anthropicReasoningRequestFields('high')).toEqual({ output_config: { effort: 'high' } })
+    expect(anthropicReasoningRequestFields('ultra')).toEqual({ output_config: { effort: 'max' } })
+  })
+})
+
+describe('Anthropic Messages API parsing', () => {
+  const operationInput = {
+    kind: 'create',
+    targetPath: 'notes.md',
+    proposedContent: '# Notes',
+    summary: 'Create notes'
+  }
+
+  it('uses official Messages request fields and authentication headers', () => {
+    const body = anthropicMessagesRequestBody({
+      model: 'claude-sonnet-4-6',
+      effort: 'high',
+      maxTokens: 8_192,
+      system: 'system prompt',
+      messages: [
+        { role: 'system', content: 'must not be duplicated' },
+        { role: 'user', content: 'hello' }
+      ],
+      tool: {
+        name: 'propose_markdown_operation',
+        description: 'preview changes',
+        inputSchema: { type: 'object' }
+      }
+    })
+
+    expect(body).toEqual({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8_192,
+      stream: true,
+      output_config: { effort: 'high' },
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{
+        name: 'propose_markdown_operation',
+        description: 'preview changes',
+        input_schema: { type: 'object' }
+      }],
+      tool_choice: { type: 'auto' }
+    })
+    expect(aiRequestHeaders('anthropic', 'sk-ant-test')).toEqual({
+      Accept: 'text/event-stream, application/json',
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': 'sk-ant-test'
+    })
+    expect(aiRequestHeaders('openai', 'sk-test')).toEqual({
+      Accept: 'text/event-stream, application/json',
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer sk-test'
+    })
+  })
+
+  it('extracts text and tool-use blocks from a completed message', () => {
+    expect(anthropicResult({
+      type: 'message',
+      content: [
+        { type: 'text', text: '整理完成。' },
+        { type: 'tool_use', id: 'tool-1', name: 'propose_markdown_operation', input: operationInput }
+      ]
+    })).toEqual({
+      content: '整理完成。',
+      tool: {
+        name: 'propose_markdown_operation',
+        arguments: JSON.stringify(operationInput)
+      }
+    })
+  })
+
+  it('reconstructs Anthropic text and tool deltas', () => {
+    const tools = new Map<number, { name: string; arguments: string }>()
+    expect(anthropicStreamEvent({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text: '完成' }
+    }, tools)).toEqual({ delta: '完成' })
+    anthropicStreamEvent({
+      type: 'content_block_start',
+      index: 1,
+      content_block: { type: 'tool_use', id: 'tool-1', name: 'propose_markdown_operation', input: {} }
+    }, tools)
+    anthropicStreamEvent({
+      type: 'content_block_delta',
+      index: 1,
+      delta: { type: 'input_json_delta', partial_json: JSON.stringify(operationInput) }
+    }, tools)
+    expect(anthropicStreamEvent({ type: 'content_block_stop', index: 1 }, tools)).toEqual({
+      tool: {
+        name: 'propose_markdown_operation',
+        arguments: JSON.stringify(operationInput)
+      }
+    })
   })
 })
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowLeft, FilePlus2, FolderPlus, Highlighter, MessageSquarePlus, RefreshCw, Search, X } from 'lucide-react'
+import { ArrowLeft, FilePlus2, FolderPlus, Highlighter, MessageSquarePlus, PanelLeftClose, RefreshCw, Search, X } from 'lucide-react'
 import type { AiOperationHistoryEntry, Annotation, ChatSession, FileNode, PluginPermission, SearchProgress, SearchResult, WorkspaceState } from '../../shared/types'
 import { PluginCatalogView } from '../../plugins'
 import '../../styles/plugins.css'
@@ -51,6 +51,7 @@ interface ProjectNavigatorProps {
   activePluginId: string | null
   onOpenPlugin: (pluginId: string) => void
   onTogglePlugin: (pluginId: string, enabled: boolean) => void | Promise<void>
+  onClose: () => void
 }
 
 const sectionLabels: Record<NavSection, string> = {
@@ -138,7 +139,10 @@ export function ProjectNavigator(props: ProjectNavigatorProps): React.JSX.Elemen
       </header>
       <div className="navigator-section-header">
         <h2>{sectionLabels[props.section]}</h2>
-        {props.section === 'files' && <div><button className="icon-button" onClick={props.onCreateMarkdown} aria-label="新建 Markdown" title="新建 Markdown"><FilePlus2 size={15} /></button><button className="icon-button" onClick={props.onCreateFolder} aria-label="新建文件夹" title="新建文件夹"><FolderPlus size={15} /></button><button className="icon-button" onClick={props.onRefresh} aria-label="刷新文件树" title="刷新"><RefreshCw size={15} /></button></div>}
+        <div>
+          {props.section === 'files' && <><button className="icon-button" onClick={props.onCreateMarkdown} aria-label="新建 Markdown" title="新建 Markdown"><FilePlus2 size={15} /></button><button className="icon-button" onClick={props.onCreateFolder} aria-label="新建文件夹" title="新建文件夹"><FolderPlus size={15} /></button><button className="icon-button" onClick={props.onRefresh} aria-label="刷新文件树" title="刷新"><RefreshCw size={15} /></button></>}
+          <button className="icon-button" onClick={props.onClose} aria-label="收起左侧栏" title="收起左侧栏"><PanelLeftClose size={15} /></button>
+        </div>
       </div>
       <div className="navigator-content">
         {props.section === 'files' && (props.tree.length ? <FileTree nodes={props.tree} activePath={props.activePath} onOpen={props.onOpenNode} onRename={props.onRenameNode} onMove={props.onMoveNode} onTrash={props.onTrashNode} onReveal={props.onRevealNode} onImport={props.onImportFiles} onMovePath={props.onMovePath} /> : <div className="empty-state"><FilePlus2 size={23} /><strong>这个项目文件夹没有文件</strong><span>新建项目会创建空目录；已有 Markdown 请从首页使用“打开已有文件夹”。</span><button className="secondary-button" onClick={props.onCreateMarkdown}>新建 Markdown</button></div>)}

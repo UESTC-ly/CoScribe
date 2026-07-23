@@ -2,16 +2,24 @@ import { useEffect, useRef, useState } from 'react'
 import { Bot, Check, ChevronDown } from 'lucide-react'
 
 import {
+  SELECTABLE_ANTHROPIC_MODELS,
   SELECTABLE_AI_MODELS,
+  type AiProvider,
   type ReasoningEffort,
-  type SelectableAiModel
 } from '../../shared/types'
 
 interface ModelSwitcherProps {
-  model: string
+  provider: AiProvider
+  openAiModel: string
+  anthropicModel: string
   reasoningEffort: ReasoningEffort
   isConfigured: boolean
-  onChange: (patch: { model?: SelectableAiModel; reasoningEffort?: ReasoningEffort }) => Promise<void> | void
+  onChange: (patch: {
+    aiProvider?: AiProvider
+    model?: string
+    anthropicModel?: string
+    reasoningEffort?: ReasoningEffort
+  }) => Promise<void> | void
 }
 
 const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string; apiLabel: string }> = [
@@ -32,7 +40,14 @@ const STATUS_LABELS: Record<ReasoningEffort, string> = {
   max: 'Max'
 }
 
-export function ModelSwitcher({ model, reasoningEffort, isConfigured, onChange }: ModelSwitcherProps): React.JSX.Element {
+export function ModelSwitcher({
+  provider,
+  openAiModel,
+  anthropicModel,
+  reasoningEffort,
+  isConfigured,
+  onChange
+}: ModelSwitcherProps): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -70,6 +85,10 @@ export function ModelSwitcher({ model, reasoningEffort, isConfigured, onChange }
       setSaving(false)
     }
   }
+  const model = provider === 'anthropic' ? anthropicModel : openAiModel
+  const reasoningOptions = provider === 'anthropic'
+    ? REASONING_OPTIONS.filter((option) => option.value !== 'ultra')
+    : REASONING_OPTIONS
 
   const moveMenuFocus = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
@@ -100,6 +119,7 @@ export function ModelSwitcher({ model, reasoningEffort, isConfigured, onChange }
         onClick={() => setOpen((value) => !value)}
       >
         <Bot size={11} />
+        <span className="model-switcher__provider">{provider === 'anthropic' ? 'Claude' : 'OpenAI'}</span>
         <span className="model-switcher__model">{model}</span>
         <span className="model-switcher__effort">{STATUS_LABELS[reasoningEffort]}</span>
         <ChevronDown size={10} aria-hidden="true" />
@@ -114,25 +134,46 @@ export function ModelSwitcher({ model, reasoningEffort, isConfigured, onChange }
           onKeyDown={moveMenuFocus}
         >
           <section className="model-switcher__section" role="group" aria-labelledby="model-switcher-models">
-            <h3 id="model-switcher-models">模型</h3>
+            <h3 id="model-switcher-models">OpenAI 格式</h3>
             {SELECTABLE_AI_MODELS.map((option) => (
               <button
                 key={option}
                 type="button"
                 role="menuitemradio"
-                aria-checked={model === option}
+                aria-checked={provider === 'openai' && openAiModel === option}
                 disabled={saving}
-                onClick={() => void choose({ model: option })}
+                onClick={() => void choose({ aiProvider: 'openai', model: option })}
               >
                 <span>{option}</span>
-                {model === option && <Check size={13} aria-hidden="true" />}
+                {provider === 'openai' && openAiModel === option && <Check size={13} aria-hidden="true" />}
+              </button>
+            ))}
+          </section>
+          <div className="model-switcher__separator" />
+          <section className="model-switcher__section" role="group" aria-labelledby="model-switcher-anthropic-models">
+            <h3 id="model-switcher-anthropic-models">Anthropic Messages</h3>
+            {SELECTABLE_ANTHROPIC_MODELS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                aria-checked={provider === 'anthropic' && anthropicModel === option}
+                disabled={saving}
+                onClick={() => void choose({
+                  aiProvider: 'anthropic',
+                  anthropicModel: option,
+                  ...(reasoningEffort === 'ultra' ? { reasoningEffort: 'max' } : {})
+                })}
+              >
+                <span>{option}</span>
+                {provider === 'anthropic' && anthropicModel === option && <Check size={13} aria-hidden="true" />}
               </button>
             ))}
           </section>
           <div className="model-switcher__separator" />
           <section className="model-switcher__section" role="group" aria-labelledby="model-switcher-reasoning">
             <h3 id="model-switcher-reasoning">思考强度</h3>
-            {REASONING_OPTIONS.map((option) => (
+            {reasoningOptions.map((option) => (
               <button
                 key={option.value}
                 type="button"

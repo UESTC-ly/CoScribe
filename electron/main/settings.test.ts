@@ -29,5 +29,27 @@ describe('v2 settings boundaries', () => {
     expect(settings.projectMemoryEnabled).toBe(true)
     expect(settings.enabledPlugins).toEqual(['planner'])
     expect(settings.pluginGrants).toEqual(DEFAULT_SETTINGS.pluginGrants)
+    expect(settings.aiProvider).toBe('openai')
+    expect(settings.anthropicBaseUrl).toBe('https://api.anthropic.com')
+    expect(settings.contextAutoCompact).toBe(true)
+  })
+
+  it('sanitizes Anthropic and context-window preferences', () => {
+    const settings = sanitizeSettings({
+      ...DEFAULT_SETTINGS,
+      aiProvider: 'anthropic',
+      anthropicBaseUrl: 'https://proxy.example.com/anthropic/v1/',
+      anthropicModel: `  claude-custom-${'x'.repeat(240)} `,
+      contextWindowTokens: 4_000,
+      contextOutputReserveTokens: 999_999,
+      contextAutoCompact: false
+    })
+
+    expect(settings.aiProvider).toBe('anthropic')
+    expect(settings.anthropicBaseUrl).toBe('https://proxy.example.com/anthropic/v1')
+    expect(settings.anthropicModel.length).toBe(200)
+    expect(settings.contextWindowTokens).toBe(8_192)
+    expect(settings.contextOutputReserveTokens).toBe(128_000)
+    expect(settings.contextAutoCompact).toBe(false)
   })
 })

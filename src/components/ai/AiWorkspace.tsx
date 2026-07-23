@@ -10,10 +10,13 @@ import {
   KeyRound,
   LocateFixed,
   Loader2,
+  Gauge,
   Mic,
   MessageSquarePlus,
   MessageSquareCode,
+  Minimize2,
   NotebookPen,
+  PanelRightClose,
   Pencil,
   Plus,
   ScanLine,
@@ -34,6 +37,7 @@ import type {
   ChatSession,
   ContextScope,
   ContextSnapshot,
+  ContextWindowUsage,
   FileKind,
   FileOperationProposal,
   SourceRef
@@ -78,6 +82,8 @@ export interface AiWorkspaceProps {
   currentSessionId: string | null
   context: ContextSnapshot | null
   contextScope: ContextScope
+  contextUsage?: ContextWindowUsage
+  manualContextCompression?: boolean
   referencedFiles: readonly string[]
   availableFiles: readonly AiProjectFileOption[]
   isStreaming: boolean
@@ -96,6 +102,7 @@ export interface AiWorkspaceProps {
   onNewSession: () => void | Promise<void>
   onRenameSession: (sessionId: string, title: string) => void | Promise<void>
   onContextScopeChange: (scope: ContextScope) => void
+  onCompactContext?: () => void
   onReferencedFilesChange: (paths: string[]) => void
   onSend: (payload: AiSendPayload) => void | Promise<void>
   onStop: () => void | Promise<void>
@@ -113,6 +120,7 @@ export interface AiWorkspaceProps {
   onOpenSettings?: () => void
   onDismissError?: () => void
   onRegenerateMessage?: (message: ChatMessage) => void | Promise<void>
+  onClose?: () => void
 }
 
 function attachmentId(): string {
@@ -167,6 +175,12 @@ const scopeOptions: Array<{
 function fileName(path?: string): string {
   if (!path) return ''
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
+}
+
+function formatTokenCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}k`
+  return value.toLocaleString('zh-CN')
 }
 
 function activeContextLabel(
@@ -241,6 +255,8 @@ export function AiWorkspace({
   currentSessionId,
   context,
   contextScope,
+  contextUsage,
+  manualContextCompression = false,
   referencedFiles,
   availableFiles,
   isStreaming,
@@ -259,6 +275,7 @@ export function AiWorkspace({
   onNewSession,
   onRenameSession,
   onContextScopeChange,
+  onCompactContext,
   onReferencedFilesChange,
   onSend,
   onStop,
@@ -275,7 +292,8 @@ export function AiWorkspace({
   onRejectOperation,
   onOpenSettings,
   onDismissError,
-  onRegenerateMessage
+  onRegenerateMessage,
+  onClose
 }: AiWorkspaceProps): React.JSX.Element {
   const [localDraft, setLocalDraft] = useState('')
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false)
@@ -527,6 +545,17 @@ export function AiWorkspace({
           >
             <MessageSquareCode aria-hidden="true" />
           </button>
+          {onClose && (
+            <button
+              className="ai-icon-button"
+              type="button"
+              title="收起 AI 侧栏"
+              aria-label="收起 AI 侧栏"
+              onClick={onClose}
+            >
+              <PanelRightClose aria-hidden="true" />
+            </button>
+          )}
 
           {sessionMenuOpen && (
             <div className="ai-session-menu" role="menu" aria-label="切换会话">
@@ -637,6 +666,45 @@ export function AiWorkspace({
         <p className="ai-context__explain">
           {scopeOptions.find((option) => option.value === contextScope)?.description}
         </p>
+        {contextUsage && (
+          <div className={clsx('ai-context-budget', `is-${contextUsage.status}`)}>
+            <div className="ai-context-budget__header">
+              <span>
+                <Gauge aria-hidden="true" />
+                <strong>{formatTokenCount(contextUsage.estimatedInputTokens)}</strong>
+                <small>/ {formatTokenCount(contextUsage.maximumInputTokens)} 预估输入</small>
+              </span>
+              {onCompactContext && activeSession && activeSession.messages.length > 2 && (
+                <button
+                  type="button"
+                  className={clsx(manualContextCompression && 'is-active')}
+                  disabled={isBusy}
+                  onClick={onCompactContext}
+                  title="只压缩下次发送给模型的早期会话；界面原始聊天不会删除"
+                >
+                  <Minimize2 aria-hidden="true" />
+                  {manualContextCompression ? '已启用压缩' : '压缩早期历史'}
+                </button>
+              )}
+            </div>
+            <div
+              className="ai-context-budget__track"
+              role="progressbar"
+              aria-label="上下文窗口占用"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={contextUsage.percent}
+            >
+              <span style={{ width: `${contextUsage.percent}%` }} />
+            </div>
+            <p>
+              {contextUsage.compactedMessageCount > 0
+                ? `请求快照已压缩 ${contextUsage.compactedMessageCount} 条早期消息`
+                : `为回答预留 ${formatTokenCount(contextUsage.outputReserveTokens)} tokens`}
+              {contextUsage.truncated ? ' · 超长内容已安全截断' : ''}
+            </p>
+          </div>
+        )}
       </section>
 
       {error && (

@@ -1,15 +1,14 @@
-import { Blocks, Bot, BrainCircuit, FileText, Globe2, Highlighter, History, MessageSquareText, PanelRight, Search, Settings } from 'lucide-react'
+import { Blocks, Bot, BrainCircuit, FileText, Globe2, Highlighter, History, MessageSquareText, Search, Settings } from 'lucide-react'
 import type { WorkspaceState } from '../../shared/types'
 
 type NavSection = WorkspaceState['navSection']
 
 interface ActivityRailProps {
   active: NavSection
-  aiVisible: boolean
+  navVisible: boolean
   browserActive: boolean
   onChange: (section: NavSection) => void
   onToggleBrowser: () => void
-  onToggleAi: () => void
   onSettings: () => void
 }
 
@@ -23,13 +22,13 @@ const actions: { id: NavSection; label: string; icon: typeof FileText }[] = [
   { id: 'plugins', label: '插件', icon: Blocks }
 ]
 
-export function ActivityRail({ active, aiVisible, browserActive, onChange, onToggleBrowser, onToggleAi, onSettings }: ActivityRailProps): React.JSX.Element {
+export function ActivityRail({ active, navVisible, browserActive, onChange, onToggleBrowser, onSettings }: ActivityRailProps): React.JSX.Element {
   return (
     <nav className="activity-rail" aria-label="项目功能">
       <div className="activity-rail__brand" aria-label="CoScribe"><Bot size={19} /></div>
       <div className="activity-rail__main">
         {actions.map(({ id, label, icon: Icon }) => (
-          <button key={id} className={`activity-button ${active === id ? 'is-active' : ''}`} onClick={() => onChange(id)} aria-label={label} aria-current={active === id ? 'page' : undefined} title={label}>
+          <button key={id} className={`activity-button ${navVisible && active === id ? 'is-active' : ''}`} onClick={() => onChange(id)} aria-label={label} aria-pressed={navVisible && active === id} title={navVisible && active === id ? `${label} · 再次点击收起` : `打开${label}`}>
             <Icon size={18} /><span>{label}</span>
           </button>
         ))}
@@ -38,7 +37,6 @@ export function ActivityRail({ active, aiVisible, browserActive, onChange, onTog
         </button>
       </div>
       <div className="activity-rail__bottom">
-        <button className={`activity-button ${aiVisible ? 'is-active' : ''}`} onClick={onToggleAi} aria-label={aiVisible ? '隐藏 AI' : '显示 AI'} title={aiVisible ? '隐藏 AI' : '显示 AI'}><PanelRight size={18} /><span>AI</span></button>
         <button className="activity-button" onClick={onSettings} aria-label="设置" title="设置"><Settings size={18} /><span>设置</span></button>
       </div>
     </nav>

@@ -58,6 +58,7 @@ export interface WorkspaceState {
   pdf: Record<string, PdfReadingState>
   markdown: Record<string, MarkdownReadingState>
   navSection: 'files' | 'sessions' | 'search' | 'annotations' | 'memory' | 'operations' | 'plugins'
+  navVisible: boolean
   aiVisible: boolean
   leftWidth: number
   aiWidth: number
@@ -577,23 +578,40 @@ export interface FileChangeEvent {
 }
 
 export interface AiSettings {
+  aiProvider: AiProvider
   baseUrl: string
   model: string
   apiProtocol: AiProtocol
   reasoningEffort: ReasoningEffort
   hasApiKey: boolean
+  anthropicBaseUrl: string
+  anthropicModel: string
+  hasAnthropicApiKey: boolean
 }
 
+export type AiProvider = 'openai' | 'anthropic'
 export type AiProtocol = 'auto' | 'responses' | 'chat-completions'
 export const SELECTABLE_AI_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'] as const
+export const SELECTABLE_ANTHROPIC_MODELS = [
+  'claude-sonnet-5',
+  'claude-fable-5',
+  'claude-mythos-5',
+  'claude-opus-4-8',
+  'claude-opus-4-7',
+  'claude-opus-4-6',
+  'claude-sonnet-4-6',
+  'claude-haiku-4-5'
+] as const
 // The picker mirrors the six GPT-5.6 levels requested by the UI. The API also supports `none`, but this app keeps it out of the reasoning picker.
 export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'ultra', 'max'] as const
 
 export type SelectableAiModel = (typeof SELECTABLE_AI_MODELS)[number]
+export type SelectableAnthropicModel = (typeof SELECTABLE_ANTHROPIC_MODELS)[number]
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
 
 export interface AppSettings extends AiSettings {
   apiKey?: string
+  anthropicApiKey?: string
   imageBaseUrl: string
   imageApiKey?: string
   hasImageApiKey: boolean
@@ -613,6 +631,26 @@ export interface AppSettings extends AiSettings {
   enabledPlugins: string[]
   /** Permissions accepted by the user for each enabled built-in plugin. */
   pluginGrants: Record<string, PluginPermission[]>
+  /** 0 selects the provider/model preset. */
+  contextWindowTokens: number
+  contextOutputReserveTokens: number
+  contextAutoCompact: boolean
+}
+
+export interface ContextWindowUsage {
+  provider: AiProvider
+  model: string
+  windowTokens: number
+  maximumInputTokens: number
+  outputReserveTokens: number
+  estimatedInputTokens: number
+  estimatedSystemTokens: number
+  estimatedMessageTokens: number
+  percent: number
+  status: 'comfortable' | 'watch' | 'critical'
+  compactedMessageCount: number
+  truncated: boolean
+  forced: boolean
 }
 
 export interface AiRequest {
@@ -621,11 +659,15 @@ export interface AiRequest {
   messages: Pick<ChatMessage, 'role' | 'content' | 'attachments'>[]
   context: ContextSnapshot
   operationMode?: AiOperationMode
+  contextPolicy?: {
+    forceCompact?: boolean
+  }
   settings?: Partial<Pick<AppSettings, 'allowGeneralKnowledge'>>
 }
 
 export type AiStreamEvent =
   | { requestId: string; type: 'start' }
+  | { requestId: string; type: 'context-usage'; usage: ContextWindowUsage }
   | { requestId: string; type: 'delta'; text: string }
   | { requestId: string; type: 'done'; sources: SourceRef[]; operation?: FileOperationProposal }
   | { requestId: string; type: 'stopped' }
@@ -801,6 +843,7 @@ export const DEFAULT_WORKSPACE_STATE: WorkspaceState = {
   pdf: {},
   markdown: {},
   navSection: 'files',
+  navVisible: true,
   aiVisible: true,
   leftWidth: 260,
   aiWidth: 360,
@@ -808,11 +851,15 @@ export const DEFAULT_WORKSPACE_STATE: WorkspaceState = {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  aiProvider: 'openai',
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-5.6-terra',
   apiProtocol: 'auto',
   reasoningEffort: 'medium',
   hasApiKey: false,
+  anthropicBaseUrl: 'https://api.anthropic.com',
+  anthropicModel: 'claude-sonnet-4-6',
+  hasAnthropicApiKey: false,
   imageBaseUrl: 'https://api.openai.com/v1',
   hasImageApiKey: false,
   theme: 'system',
@@ -828,5 +875,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enabledPlugins: ['planner'],
   pluginGrants: {
     planner: ['project:read', 'project:write', 'ai:request']
-  }
+  },
+  contextWindowTokens: 0,
+  contextOutputReserveTokens: 8_192,
+  contextAutoCompact: true
 }

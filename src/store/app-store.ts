@@ -103,6 +103,7 @@ export interface RendererStoreActions {
   updatePdfState: (path: string, patch: Partial<PdfReadingState>) => void
   updateMarkdownState: (path: string, patch: Partial<MarkdownReadingState>) => void
   setNavSection: (section: WorkspaceState['navSection']) => void
+  setNavVisible: (visible: boolean) => void
   setAiVisible: (visible: boolean) => void
   setPanelWidths: (widths: { leftWidth?: number; aiWidth?: number }) => void
   restoreWorkspace: (persisted: unknown, options?: WorkspaceRestoreOptions) => void
@@ -210,6 +211,22 @@ function clampIndex(index: number | undefined, length: number): number {
 function activeTabFor(state: Pick<RendererStoreState, 'workspace'>): OpenTab | undefined {
   const pane = state.workspace.panes[state.workspace.activePane]
   return state.workspace.tabs.find((tab) => tab.id === pane.activeTabId)
+}
+
+function sameContextPatch(
+  current: DocumentContextState | undefined,
+  patch: Partial<Omit<DocumentContextState, 'updatedAt'>>
+): boolean {
+  if (!current) return false
+  return (Object.keys(patch) as Array<keyof typeof patch>).every((key) => {
+    const next = patch[key]
+    const previous = current[key]
+    if (Array.isArray(next) || Array.isArray(previous)) {
+      if (!Array.isArray(next) || !Array.isArray(previous) || next.length !== previous.length) return false
+      return next.every((value, index) => value === previous[index])
+    }
+    return next === previous
+  })
 }
 
 function createInitialState(): RendererStoreState {
@@ -422,6 +439,7 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
   }),
 
   setNavSection: (navSection) => set((state) => ({ workspace: { ...state.workspace, navSection } })),
+  setNavVisible: (navVisible) => set((state) => ({ workspace: { ...state.workspace, navVisible } })),
   setAiVisible: (aiVisible) => set((state) => ({ workspace: { ...state.workspace, aiVisible } })),
   setPanelWidths: ({ leftWidth, aiWidth }) => set((state) => ({
     workspace: {
@@ -585,7 +603,9 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
 
   setDocumentContext: (path, patch, updatedAt = Date.now()) => set((state) => {
     const key = normalizedKey(path)
-    const current = state.documentContexts[key] ?? { updatedAt }
+    const existing = state.documentContexts[key]
+    if (sameContextPatch(existing, patch)) return state
+    const current = existing ?? { updatedAt }
     const next: DocumentContextState = { ...current, ...patch, updatedAt }
     if (Object.prototype.hasOwnProperty.call(patch, 'visiblePages')) {
       next.visiblePages = patch.visiblePages ? [...patch.visiblePages] : undefined

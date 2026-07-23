@@ -9,7 +9,7 @@
 1. **创建或打开项目**  
    点击“新建项目”，或直接打开一个已有资料文件夹。已有 Markdown 和子文件夹会显示在左侧文件树中。
 2. **配置 AI**  
-   打开“设置 → AI 服务”，填写服务地址、接口协议、模型和 API Key。第三方兼容站点应填写它实际提供的地址与模型名。
+   打开“设置 → AI 服务”，选择 OpenAI 格式或 Anthropic 格式，分别填写服务地址、模型和 API Key。两套配置独立保存，右下角模型菜单可直接跨提供方切换。
 3. **打开资料**  
    CoScribe 支持 Markdown、PDF、DOCX、PPTX、图片、常见文本与代码文件。Markdown 默认使用预览模式。
 4. **选择上下文**  
@@ -29,10 +29,20 @@ flowchart LR
 
 ### 阅读和提问
 
+- 左侧文件、会话、搜索、标注、记忆、AI 操作和插件图标可以重复点击：第一次打开对应侧栏，再次点击当前图标会收起。左侧栏和 AI 侧栏的收起按钮都位于各自面板内。
 - 在 Markdown、PDF、DOCX、PPTX 或文本中选中文字，再选择“选中内容”。
 - 按 `Cmd/Ctrl + Shift + K` 可以把文档选区放入聊天输入框。
 - 发送后，上下文会冻结；之后切换文档不会改变已经提交的问题。
 - 长对话右侧的浅色刻度可以快速跳到每次请求的开头。
+- AI 上下文区域会显示当前请求窗口的预估 token 占用和回答预留空间。超过预算时默认只压缩发送给模型的早期历史，界面中的原始聊天不会删除；也可以点击“压缩早期历史”强制压缩下一次请求。
+
+### OpenAI 与 Anthropic 配置
+
+- **OpenAI 格式**支持 Responses API 与 Chat Completions，也可填写第三方 OpenAI-compatible 地址。
+- **Anthropic 格式**使用 Messages API：应用会请求 `/v1/messages`，使用 `x-api-key` 与固定的 `anthropic-version: 2023-06-01`。
+- 如果第三方 Anthropic 代理提供版本路径或完整 `/messages` 地址，可直接填写；CoScribe 不会把 OpenAI 和 Anthropic 的密钥混用。
+- Anthropic 当前思考强度使用 `output_config.effort`。菜单会提供 `low`、`medium`、`high`、`xhigh` 和 `max`；OpenAI 配置仍保留 `ultra`。
+- “设置 → AI 上下文与记忆”可以覆盖上下文窗口和回答预留 token。填写 `0` 会使用 CoScribe 的模型预设。
 
 ### 整理和创建笔记
 
@@ -98,7 +108,7 @@ const note: LearningNote = {
 
 ## 常见配置问题
 
-- `Unexpected token '<'`：服务返回了 HTML 而不是 JSON，请检查最终请求地址、接口协议和 `/v1` 路径。
+- `Unexpected token '<'`：服务返回了 HTML 而不是 JSON，请检查最终请求地址、所选提供方、接口协议和 `/v1` 路径。
 - `HTTP 401 / Invalid API key`：服务端拒绝当前 API Key，请检查 Key 是否属于这个服务地址。
 - 第三方服务未必支持所有模型名或思考强度，以服务端说明为准。
 - API Key 保存在系统用户数据目录，不会写入项目或本指南。
@@ -112,5 +122,7 @@ const note: LearningNote = {
 3. Open a local document and choose the exact context scope before sending a request.
 4. Use **Organize notes** when you want AI to choose an appropriate project location and create durable Markdown notes.
 5. Use the copy button on code blocks, paste images into chat, or press `Cmd/Ctrl + Shift + 8` for a region screenshot.
+
+The OpenAI-compatible and Anthropic Messages profiles are stored separately. Use the model switcher in the lower-right corner to switch providers. The context meter shows estimated input usage and output reserve; request-only compaction never deletes the visible chat history. Re-click any active left rail icon to collapse its panel.
 
 New projects receive a local copy of this guide. The built-in copy remains available from the **User Guide** button in the upper-right corner.

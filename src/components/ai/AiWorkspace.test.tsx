@@ -223,6 +223,45 @@ describe('AiWorkspace', () => {
     expect(onQuickNote).toHaveBeenCalledOnce()
   })
 
+  it('shows context-window usage and offers non-destructive request compression', () => {
+    const onCompactContext = vi.fn()
+    const sessionWithHistory: ChatSession = {
+      ...session,
+      messages: conversationMessages
+    }
+    render(<AiWorkspace {...buildProps({
+      sessions: [sessionWithHistory],
+      contextUsage: {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        windowTokens: 200_000,
+        maximumInputTokens: 190_000,
+        outputReserveTokens: 10_000,
+        estimatedInputTokens: 142_500,
+        estimatedSystemTokens: 12_000,
+        estimatedMessageTokens: 130_500,
+        percent: 75,
+        status: 'watch',
+        compactedMessageCount: 3,
+        truncated: false,
+        forced: false
+      },
+      onCompactContext
+    })} />)
+
+    expect(screen.getByRole('progressbar', { name: '上下文窗口占用' })).toHaveAttribute('aria-valuenow', '75')
+    expect(screen.getByText('请求快照已压缩 3 条早期消息')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '压缩早期历史' }))
+    expect(onCompactContext).toHaveBeenCalledOnce()
+  })
+
+  it('places the AI collapse control inside the AI panel header', () => {
+    const onClose = vi.fn()
+    render(<AiWorkspace {...buildProps({ onClose })} />)
+    fireEvent.click(screen.getByRole('button', { name: '收起 AI 侧栏' }))
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+
   it('does not intercept an ordinary text-only paste', () => {
     const onDraftChange = vi.fn()
     render(<AiWorkspace {...buildProps({ onDraftChange })} />)

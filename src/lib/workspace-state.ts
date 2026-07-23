@@ -204,6 +204,7 @@ export function restoreWorkspaceState(
     pdf: parsePdfStates(value.pdf),
     markdown: parseMarkdownStates(value.markdown),
     navSection,
+    navVisible: value.navVisible !== false,
     aiVisible: value.aiVisible !== false,
     leftWidth: finite(
       value.leftWidth,
@@ -239,6 +240,16 @@ export function markMissingWorkspaceTabs(
 
 export function findPaneForTab(state: WorkspaceState, tabId: string): PaneId | null {
   return PANE_IDS.find((pane) => state.panes[pane].tabIds.includes(tabId)) ?? null
+}
+
+export function nextNavigatorState(
+  state: Pick<WorkspaceState, 'navSection' | 'navVisible'>,
+  section: WorkspaceState['navSection']
+): Pick<WorkspaceState, 'navSection' | 'navVisible'> {
+  if (state.navVisible && state.navSection === section) {
+    return { navSection: section, navVisible: false }
+  }
+  return { navSection: section, navVisible: true }
 }
 
 export const deserializeWorkspaceState = restoreWorkspaceState

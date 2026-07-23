@@ -14,8 +14,9 @@ import { TRUSTED_PLUGIN_REGISTRY } from '../../src/plugins/registry'
 import { atomicWriteJson, readJson } from './storage'
 
 interface StoredSettings {
-  settings: Omit<AppSettings, 'apiKey' | 'hasApiKey' | 'imageApiKey' | 'hasImageApiKey'>
+  settings: Omit<AppSettings, 'apiKey' | 'hasApiKey' | 'anthropicApiKey' | 'hasAnthropicApiKey' | 'imageApiKey' | 'hasImageApiKey'>
   encryptedApiKey?: string
+  encryptedAnthropicApiKey?: string
   encryptedImageApiKey?: string
 }
 
@@ -64,12 +65,16 @@ function sanitizeBaseUrl(value: unknown, fallback: string, label: string): strin
 
 export function sanitizeSettings(
   input: Partial<AppSettings>
-): Omit<AppSettings, 'apiKey' | 'hasApiKey' | 'imageApiKey' | 'hasImageApiKey'> {
+): Omit<AppSettings, 'apiKey' | 'hasApiKey' | 'anthropicApiKey' | 'hasAnthropicApiKey' | 'imageApiKey' | 'hasImageApiKey'> {
   const theme = input.theme === 'light' || input.theme === 'dark' || input.theme === 'system' ? input.theme : DEFAULT_SETTINGS.theme
   const context = CONTEXT_SCOPES.has(input.defaultContextScope as ContextScope)
     ? (input.defaultContextScope as ContextScope)
     : DEFAULT_SETTINGS.defaultContextScope
   const model = typeof input.model === 'string' && input.model.trim() ? input.model.trim().slice(0, 200) : DEFAULT_SETTINGS.model
+  const aiProvider = input.aiProvider === 'anthropic' ? 'anthropic' : DEFAULT_SETTINGS.aiProvider
+  const anthropicModel = typeof input.anthropicModel === 'string' && input.anthropicModel.trim()
+    ? input.anthropicModel.trim().slice(0, 200)
+    : DEFAULT_SETTINGS.anthropicModel
   const apiProtocol = AI_PROTOCOLS.has(input.apiProtocol as AiProtocol)
     ? (input.apiProtocol as AiProtocol)
     : DEFAULT_SETTINGS.apiProtocol
@@ -97,10 +102,17 @@ export function sanitizeSettings(
   )
 
   return {
+    aiProvider,
     baseUrl: sanitizeBaseUrl(input.baseUrl, DEFAULT_SETTINGS.baseUrl, 'AI 服务地址'),
     model,
     apiProtocol,
     reasoningEffort,
+    anthropicBaseUrl: sanitizeBaseUrl(
+      input.anthropicBaseUrl,
+      DEFAULT_SETTINGS.anthropicBaseUrl,
+      'Anthropic 服务地址'
+    ),
+    anthropicModel,
     imageBaseUrl: sanitizeBaseUrl(input.imageBaseUrl, DEFAULT_SETTINGS.imageBaseUrl, '图片生成服务地址'),
     theme,
     fontSize: clampedInteger(input.fontSize, DEFAULT_SETTINGS.fontSize, 11, 28),
@@ -115,7 +127,18 @@ export function sanitizeSettings(
     projectMemoryEnabled:
       typeof input.projectMemoryEnabled === 'boolean' ? input.projectMemoryEnabled : DEFAULT_SETTINGS.projectMemoryEnabled,
     enabledPlugins,
-    pluginGrants
+    pluginGrants,
+    contextWindowTokens: input.contextWindowTokens === 0
+      ? 0
+      : clampedInteger(input.contextWindowTokens, DEFAULT_SETTINGS.contextWindowTokens, 8_192, 2_000_000),
+    contextOutputReserveTokens: clampedInteger(
+      input.contextOutputReserveTokens,
+      DEFAULT_SETTINGS.contextOutputReserveTokens,
+      1_024,
+      128_000
+    ),
+    contextAutoCompact:
+      typeof input.contextAutoCompact === 'boolean' ? input.contextAutoCompact : DEFAULT_SETTINGS.contextAutoCompact
   }
 }
 
@@ -132,6 +155,7 @@ export class SettingsStore {
       return {
         settings: sanitizeSettings(value.settings),
         encryptedApiKey: typeof value.encryptedApiKey === 'string' ? value.encryptedApiKey : undefined,
+        encryptedAnthropicApiKey: typeof value.encryptedAnthropicApiKey === 'string' ? value.encryptedAnthropicApiKey : undefined,
         encryptedImageApiKey: typeof value.encryptedImageApiKey === 'string' ? value.encryptedImageApiKey : undefined
       }
     } catch {
@@ -144,6 +168,7 @@ export class SettingsStore {
     return {
       ...stored.settings,
       hasApiKey: Boolean(stored.encryptedApiKey),
+      hasAnthropicApiKey: Boolean(stored.encryptedAnthropicApiKey),
       hasImageApiKey: Boolean(stored.encryptedImageApiKey)
     }
   }
@@ -174,9 +199,23 @@ export class SettingsStore {
     }
   }
 
+  async anthropicApiKey(): Promise<string | null> {
+    const stored = await this.stored()
+    if (!stored.encryptedAnthropicApiKey) return null
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('当前系统的安全存储暂不可用，无法读取 Anthropic API Key。')
+    }
+    try {
+      return safeStorage.decryptString(Buffer.from(stored.encryptedAnthropicApiKey, 'base64'))
+    } catch {
+      throw new Error('Anthropic API Key 无法解密，请在设置中重新保存。')
+    }
+  }
+
   async save(input: AppSettings): Promise<AppSettings> {
     const previous = await this.stored()
     let encryptedApiKey = previous.encryptedApiKey
+    let encryptedAnthropicApiKey = previous.encryptedAnthropicApiKey
     let encryptedImageApiKey = previous.encryptedImageApiKey
     if (Object.prototype.hasOwnProperty.call(input, 'apiKey')) {
       const nextKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : ''
@@ -187,6 +226,17 @@ export class SettingsStore {
           throw new Error('当前系统的安全存储暂不可用，API Key 未保存。')
         }
         encryptedApiKey = safeStorage.encryptString(nextKey).toString('base64')
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(input, 'anthropicApiKey')) {
+      const nextKey = typeof input.anthropicApiKey === 'string' ? input.anthropicApiKey.trim() : ''
+      if (!nextKey) {
+        if (input.hasAnthropicApiKey === false) encryptedAnthropicApiKey = undefined
+      } else {
+        if (!safeStorage.isEncryptionAvailable()) {
+          throw new Error('当前系统的安全存储暂不可用，Anthropic API Key 未保存。')
+        }
+        encryptedAnthropicApiKey = safeStorage.encryptString(nextKey).toString('base64')
       }
     }
     if (Object.prototype.hasOwnProperty.call(input, 'imageApiKey')) {
@@ -205,12 +255,14 @@ export class SettingsStore {
     const value: StoredSettings = {
       settings,
       ...(encryptedApiKey ? { encryptedApiKey } : {}),
+      ...(encryptedAnthropicApiKey ? { encryptedAnthropicApiKey } : {}),
       ...(encryptedImageApiKey ? { encryptedImageApiKey } : {})
     }
     await atomicWriteJson(this.filePath, value)
     return {
       ...settings,
       hasApiKey: Boolean(encryptedApiKey),
+      hasAnthropicApiKey: Boolean(encryptedAnthropicApiKey),
       hasImageApiKey: Boolean(encryptedImageApiKey)
     }
   }

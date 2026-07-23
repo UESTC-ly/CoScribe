@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FileNode, FileOperationProposal, SourceRef, WorkspaceState } from '../../src/shared/types'
 import {
   buildFileOperationPreview,
+  nextNavigatorState,
   restoreWorkspaceState,
   serializeWorkspaceState,
   validateFileOperation,
@@ -171,6 +172,7 @@ describe('workspace serialization and recovery', () => {
     pdf: { '/study/missing.pdf': { page: 4, scale: 1.2, fit: 'custom', scrollTop: 300 } },
     markdown: { '/study/a.md': { scrollTop: 18, cursor: 7, mode: 'preview', outlineWidth: 999 } },
     navSection: 'sessions',
+    navVisible: false,
     aiVisible: false,
     leftWidth: 5000,
     aiWidth: 10,
@@ -186,6 +188,7 @@ describe('workspace serialization and recovery', () => {
     expect(restored.leftWidth).toBe(400)
     expect(restored.aiWidth).toBe(300)
     expect(restored.markdown['/study/a.md']?.outlineWidth).toBe(520)
+    expect(restored.navVisible).toBe(false)
   })
 
   it('returns a detached, schema-clean serialization', () => {
@@ -208,5 +211,23 @@ describe('workspace serialization and recovery', () => {
     const stale = structuredClone(persisted)
     stale.tabs[0].missing = true
     expect(restoreWorkspaceState(stale, { existingPaths: ['/study/a.md'] }).tabs[0].missing).toBeUndefined()
+  })
+
+  it('keeps the project navigator visible for pre-v3 persisted workspaces', () => {
+    const legacy = { ...persisted } as Partial<WorkspaceState>
+    delete legacy.navVisible
+
+    expect(restoreWorkspaceState(legacy).navVisible).toBe(true)
+  })
+
+  it('opens a different navigator section and collapses the active one on repeat click', () => {
+    expect(nextNavigatorState({ navSection: 'files', navVisible: true }, 'files')).toEqual({
+      navSection: 'files',
+      navVisible: false
+    })
+    expect(nextNavigatorState({ navSection: 'files', navVisible: false }, 'sessions')).toEqual({
+      navSection: 'sessions',
+      navVisible: true
+    })
   })
 })

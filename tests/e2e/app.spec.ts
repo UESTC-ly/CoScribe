@@ -68,7 +68,10 @@ async function launchProject(): Promise<void> {
 }
 
 async function enableAndOpenPlugin(name: string, regionName: string): Promise<void> {
-  await page.getByRole('button', { name: '插件', exact: true }).click()
+  const pluginSectionButton = page.getByRole('button', { name: '插件', exact: true })
+  if (await pluginSectionButton.getAttribute('aria-pressed') !== 'true') {
+    await pluginSectionButton.click()
+  }
   const card = page.locator('.plugin-card').filter({ has: page.locator('header strong').getByText(name, { exact: true }) })
   await card.scrollIntoViewIfNeeded()
   const open = card.locator('.plugin-card__open')
@@ -180,6 +183,30 @@ test('opens a real local project, searches content, and creates a standard Markd
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect.poll(async () => readFile(notePath, 'utf8')).toContain('标准 Markdown')
   await page.screenshot({ path: testInfo.outputPath('workspace.png') })
+})
+
+test('collapses each sidebar from the control that visually belongs to it', async () => {
+  const navigator = page.locator('.project-navigator')
+  await expect(navigator).toBeVisible()
+
+  await page.getByRole('button', { name: '文件', exact: true }).click()
+  await expect(navigator).toHaveCount(0)
+  await expect(page.getByRole('separator', { name: '调整项目导航宽度' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '会话', exact: true }).click()
+  await expect(page.getByRole('complementary', { name: '项目会话' })).toBeVisible()
+  await page.getByRole('button', { name: '会话', exact: true }).click()
+  await expect(navigator).toHaveCount(0)
+
+  await page.getByRole('button', { name: '文件', exact: true }).click()
+  await expect(navigator).toBeVisible()
+  await page.getByRole('button', { name: '收起左侧栏' }).click()
+  await expect(navigator).toHaveCount(0)
+
+  await page.getByRole('button', { name: '收起 AI 侧栏' }).click()
+  await expect(page.locator('.ai-workspace')).toHaveCount(0)
+  await page.getByRole('button', { name: '打开 AI 侧栏' }).click()
+  await expect(page.locator('.ai-workspace')).toBeVisible()
 })
 
 test('ships a built-in guide and seeds an editable copy into every new project', async ({}, testInfo) => {
@@ -681,6 +708,10 @@ test('persists transparent project memory and the editable system prompt', async
   await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
   await page.getByLabel('自定义系统提示词').fill('回答时先给结论；关键术语保留英文原文。')
   await page.getByRole('button', { name: '保存设置' }).click()
+  await expect(page.getByRole('dialog', { name: '设置' })).toBeHidden()
+  await expect.poll(() => page.evaluate(
+    () => window.coscribe.settings.get().then((settings) => settings.customSystemPrompt)
+  )).toBe('回答时先给结论；关键术语保留英文原文。')
   await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
   await expect(page.getByLabel('自定义系统提示词')).toHaveValue('回答时先给结论；关键术语保留英文原文。')
   await page.getByRole('button', { name: '取消' }).click()
@@ -1027,6 +1058,68 @@ test('switches the model and reasoning effort from the status bar and persists b
   trigger = page.getByRole('button', { name: /切换 AI 模型和思考强度/ })
   await expect(trigger).toContainText('gpt-5.6-luna')
   await expect(trigger).toContainText('Max')
+})
+
+test('uses the Anthropic Messages wire format with its isolated provider profile', async () => {
+  let requestPath: string | null = null
+  let requestBody: Record<string, unknown> | null = null
+  let apiKey: string | null = null
+  let anthropicVersion: string | null = null
+  const server = createServer(async (request, response) => {
+    requestPath = request.url ?? null
+    apiKey = typeof request.headers['x-api-key'] === 'string' ? request.headers['x-api-key'] : null
+    anthropicVersion = typeof request.headers['anthropic-version'] === 'string'
+      ? request.headers['anthropic-version']
+      : null
+    const chunks: Buffer[] = []
+    for await (const chunk of request) chunks.push(Buffer.from(chunk))
+    requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({
+      id: 'msg_e2e',
+      type: 'message',
+      role: 'assistant',
+      model: 'local-claude-e2e',
+      content: [{ type: 'text', text: 'ANTHROPIC_MESSAGES_E2E' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 20, output_tokens: 5 }
+    }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const port = (server.address() as AddressInfo).port
+    await page.getByRole('button', { name: '配置', exact: true }).click()
+    const settingsDialog = page.getByRole('dialog')
+    await settingsDialog.getByRole('tab', { name: /Anthropic 格式/u }).click()
+    await settingsDialog.getByLabel('Anthropic 服务地址').fill(`http://127.0.0.1:${port}/custom/v1`)
+    await settingsDialog.getByLabel('Anthropic 模型').fill('local-claude-e2e')
+    await settingsDialog.getByLabel('Anthropic API Key').fill('sk-ant-e2e-secret')
+    await settingsDialog.locator('label').filter({ hasText: '思考强度' }).locator('select').selectOption('high')
+    await settingsDialog.getByRole('button', { name: '保存设置' }).click()
+
+    await expect(page.getByRole('button', { name: /切换 AI 模型和思考强度/u })).toContainText('local-claude-e2e')
+    await page.getByLabel('向 AI 提问').fill('验证 Anthropic Messages')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect(page.getByText('ANTHROPIC_MESSAGES_E2E')).toBeVisible()
+    await expect(page.getByRole('progressbar', { name: '上下文窗口占用' })).toBeVisible()
+
+    expect(requestPath).toBe('/custom/v1/messages')
+    expect(apiKey).toBe('sk-ant-e2e-secret')
+    expect(anthropicVersion).toBe('2023-06-01')
+    const capturedRequest = requestBody as Record<string, unknown> | null
+    expect(capturedRequest).toMatchObject({
+      model: 'local-claude-e2e',
+      stream: true,
+      output_config: { effort: 'high' },
+      tool_choice: { type: 'auto' }
+    })
+    expect(typeof capturedRequest?.system).toBe('string')
+    expect(Array.isArray(capturedRequest?.messages)).toBe(true)
+    expect(JSON.stringify(capturedRequest?.messages)).toContain('验证 Anthropic Messages')
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
 })
 
 test('keeps an AI-created note on preview until the user accepts it', async () => {

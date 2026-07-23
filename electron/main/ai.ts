@@ -6,9 +6,11 @@ import type { WebContents } from 'electron'
 import type {
   AiOperationMode,
   AiProtocol,
+  AiProvider,
   AiOcrRequest,
   AiRequest,
   AiStreamEvent,
+  AppSettings,
   ContextSnapshot,
   FileNode,
   FileKind,
@@ -20,6 +22,7 @@ import type {
   SourceRef
 } from '../../src/shared/types'
 import { normalizeChatImageAttachments } from '../../src/shared/chat-images'
+import { planContextWindow } from '../../src/lib/context-window'
 import { IPC } from '../ipc-channels'
 import { PdfTextService } from './pdf'
 import { fileKind, ProjectService } from './project'
@@ -38,10 +41,18 @@ interface StreamResult {
 }
 
 type ResolvedAiProtocol = Exclude<AiProtocol, 'auto'>
+type AiWireProtocol = ResolvedAiProtocol | 'anthropic-messages'
 
 interface AiRequestTarget {
   protocol: ResolvedAiProtocol
   endpoint: string
+}
+
+interface ActiveAiRequestTarget {
+  provider: AiProvider
+  protocol: AiWireProtocol
+  endpoint: string
+  model: string
 }
 
 const MAX_CONTEXT_CHARS = 180_000
@@ -155,6 +166,21 @@ export function responsesEndpoint(baseUrl: string): string {
   return parsed.toString()
 }
 
+export function anthropicMessagesEndpoint(baseUrl: string): string {
+  const parsed = new URL(baseUrl)
+  const cleanPath = parsed.pathname.replace(/\/+$/u, '')
+  if (cleanPath.endsWith('/messages')) {
+    parsed.pathname = cleanPath
+  } else if (!cleanPath) {
+    parsed.pathname = '/v1/messages'
+  } else {
+    parsed.pathname = `${cleanPath}/messages`.replace(/^\/+/u, '/')
+  }
+  parsed.search = ''
+  parsed.hash = ''
+  return parsed.toString()
+}
+
 export function imageGenerationEndpoint(baseUrl: string): string {
   const parsed = new URL(baseUrl)
   const cleanPath = parsed.pathname.replace(/\/+$/u, '')
@@ -192,6 +218,24 @@ export function resolveAiRequestTarget(baseUrl: string, configured: AiProtocol):
   }
 }
 
+export function resolveActiveAiRequestTarget(
+  settings: Pick<AppSettings, 'aiProvider' | 'baseUrl' | 'apiProtocol' | 'model' | 'anthropicBaseUrl' | 'anthropicModel'>
+): ActiveAiRequestTarget {
+  if (settings.aiProvider === 'anthropic') {
+    return {
+      provider: 'anthropic',
+      protocol: 'anthropic-messages',
+      endpoint: anthropicMessagesEndpoint(settings.anthropicBaseUrl),
+      model: settings.anthropicModel
+    }
+  }
+  return {
+    provider: 'openai',
+    model: settings.model,
+    ...resolveAiRequestTarget(settings.baseUrl, settings.apiProtocol)
+  }
+}
+
 export function reasoningRequestFields(
   protocol: ResolvedAiProtocol,
   effort: ReasoningEffort
@@ -201,8 +245,72 @@ export function reasoningRequestFields(
     : { reasoning_effort: effort }
 }
 
+type AnthropicEffort = Exclude<ReasoningEffort, 'ultra'>
+
+export function anthropicReasoningRequestFields(
+  effort: ReasoningEffort
+): { output_config: { effort: AnthropicEffort } } {
+  return { output_config: { effort: effort === 'ultra' ? 'max' : effort } }
+}
+
+export function aiRequestHeaders(
+  provider: AiProvider,
+  apiKey: string | null,
+  accept = 'text/event-stream, application/json'
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: accept,
+    'Content-Type': 'application/json'
+  }
+  if (provider === 'anthropic') {
+    headers['anthropic-version'] = '2023-06-01'
+    if (apiKey) headers['x-api-key'] = apiKey
+  } else if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`
+  }
+  return headers
+}
+
+export function anthropicMessagesRequestBody(input: {
+  model: string
+  effort: ReasoningEffort
+  maxTokens: number
+  system: string
+  messages: Array<{ role: AiConversationMessage['role']; content: unknown }>
+  tool: { name: string; description: string; inputSchema: Record<string, unknown> }
+}): Record<string, unknown> {
+  return {
+    model: input.model,
+    max_tokens: input.maxTokens,
+    stream: true,
+    ...anthropicReasoningRequestFields(input.effort),
+    system: input.system,
+    messages: input.messages.filter((message) => message.role !== 'system'),
+    tools: [{
+      name: input.tool.name,
+      description: input.tool.description,
+      input_schema: input.tool.inputSchema
+    }],
+    tool_choice: { type: 'auto' }
+  }
+}
+
+function anthropicImageSource(imageDataUrl: string): {
+  type: 'base64'
+  media_type: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+  data: string
+} {
+  const match = imageDataUrl.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([a-z0-9+/=]+)$/iu)
+  if (!match) throw new Error('Anthropic 图片内容不是受支持的 Base64 data URL。')
+  return {
+    type: 'base64',
+    media_type: match[1].toLowerCase() as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif',
+    data: match[2]
+  }
+}
+
 export function imageOcrRequestBody(
-  protocol: ResolvedAiProtocol,
+  protocol: AiWireProtocol,
   model: string,
   effort: ReasoningEffort,
   imageDataUrl: string,
@@ -214,6 +322,20 @@ export function imageOcrRequestBody(
     '表格使用 Markdown 表格，公式尽量使用 LaTeX；无法确认的字符标记为 [不清楚]。',
     '只返回转写结果。'
   ].join('\n')
+  if (protocol === 'anthropic-messages') {
+    return {
+      model,
+      max_tokens: 8_192,
+      ...anthropicReasoningRequestFields(effort),
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: anthropicImageSource(imageDataUrl) },
+          { type: 'text', text: prompt }
+        ]
+      }]
+    }
+  }
   return protocol === 'responses'
     ? {
         model,
@@ -243,7 +365,7 @@ export function imageOcrRequestBody(
 type AiConversationMessage = AiRequest['messages'][number]
 
 export function aiConversationMessages(
-  protocol: ResolvedAiProtocol,
+  protocol: AiWireProtocol,
   input: unknown
 ): Array<{ role: AiConversationMessage['role']; content: unknown }> {
   if (!Array.isArray(input) || input.length === 0) throw new Error('AI 请求没有消息内容。')
@@ -289,6 +411,18 @@ export function aiConversationMessages(
     }
     if (!attachments.length) return { role: candidate.role, content }
     const prompt = content.trim() || '请分析我发送的图片。'
+    if (protocol === 'anthropic-messages') {
+      return {
+        role: candidate.role,
+        content: [
+          { type: 'text', text: prompt },
+          ...attachments.map((attachment) => ({
+            type: 'image',
+            source: anthropicImageSource(attachment.dataUrl)
+          }))
+        ]
+      }
+    }
     return protocol === 'responses'
       ? {
           role: candidate.role,
@@ -396,7 +530,7 @@ export async function parseAiJsonResponse(response: Response, endpoint: string):
 
   if (!trimmed) throw new Error(`AI 服务返回了空响应（${context}）。`)
   if (contentType.toLowerCase().includes('text/html') || /^\s*(?:<!doctype\s+html|<html\b)/iu.test(trimmed)) {
-    throw new Error(`AI 服务返回了网页而不是 JSON（${context}）。请确认该地址对应配置的 OpenAI-compatible API 接口。`)
+    throw new Error(`AI 服务返回了网页而不是 JSON（${context}）。请确认该地址对应当前选择的 API 协议。`)
   }
 
   let value: unknown
@@ -446,6 +580,73 @@ function nonStreamResult(value: unknown): StreamResult {
     }
   }
   return { content: typeof message.content === 'string' ? message.content : '', ...(tool ? { tool } : {}) }
+}
+
+export function anthropicResult(value: unknown): StreamResult {
+  if (!isRecord(value) || !Array.isArray(value.content)) {
+    throw new Error('Anthropic Messages API 返回格式无效。')
+  }
+  const text: string[] = []
+  let tool: ToolAccumulator | undefined
+  for (const block of value.content) {
+    if (!isRecord(block)) continue
+    if (block.type === 'text' && typeof block.text === 'string') text.push(block.text)
+    if (
+      !tool &&
+      block.type === 'tool_use' &&
+      typeof block.name === 'string' &&
+      Object.prototype.hasOwnProperty.call(block, 'input')
+    ) {
+      tool = { name: block.name, arguments: JSON.stringify(block.input) }
+    }
+  }
+  const content = text.join('')
+  if (!content && !tool) throw new Error('Anthropic Messages API 没有返回消息。')
+  return { content, ...(tool ? { tool } : {}) }
+}
+
+interface AnthropicStreamEventResult {
+  delta?: string
+  tool?: ToolAccumulator
+}
+
+export function anthropicStreamEvent(
+  value: unknown,
+  tools: Map<number, ToolAccumulator>
+): AnthropicStreamEventResult {
+  if (!isRecord(value)) return {}
+  const type = typeof value.type === 'string' ? value.type : ''
+  if (type === 'error') {
+    const detail = apiErrorMessage(value.error) || apiErrorMessage(value)
+    throw new Error(`Anthropic Messages API 流式请求失败${detail ? `：${detail}` : '。'}`)
+  }
+  const index = typeof value.index === 'number' ? value.index : 0
+  if (type === 'content_block_start' && isRecord(value.content_block)) {
+    const block = value.content_block
+    if (block.type === 'tool_use' && typeof block.name === 'string') {
+      tools.set(index, {
+        name: block.name,
+        arguments: isRecord(block.input) && Object.keys(block.input).length
+          ? JSON.stringify(block.input)
+          : ''
+      })
+    }
+  }
+  if (type === 'content_block_delta' && isRecord(value.delta)) {
+    if (value.delta.type === 'text_delta' && typeof value.delta.text === 'string') {
+      return { delta: value.delta.text }
+    }
+    if (value.delta.type === 'input_json_delta' && typeof value.delta.partial_json === 'string') {
+      const existing = tools.get(index) ?? { name: '', arguments: '' }
+      existing.arguments += value.delta.partial_json
+      tools.set(index, existing)
+    }
+  }
+  if (type === 'content_block_stop') {
+    const tool = tools.get(index)
+    if (tool?.name) return { tool }
+  }
+  return {}
 }
 
 function responseToolFromItem(
@@ -638,23 +839,21 @@ export class AiService {
     this.ocrActive.set(request.requestId, controller)
     try {
       const preferences = await this.settings.get()
-      const apiKey = await this.settings.apiKey()
-      const target = resolveAiRequestTarget(preferences.baseUrl, preferences.apiProtocol)
+      const target = resolveActiveAiRequestTarget(preferences)
+      const apiKey = target.provider === 'anthropic'
+        ? await this.settings.anthropicApiKey()
+        : await this.settings.apiKey()
       if (!apiKey && !isLoopbackHost(new URL(target.endpoint).hostname)) {
         throw new Error('远程 AI 服务尚未配置 API Key；无 Key 模式只允许本机回环服务。')
       }
-      const headers: Record<string, string> = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json'
-      }
-      if (apiKey) headers.Authorization = `Bearer ${apiKey}`
+      const headers = aiRequestHeaders(target.provider, apiKey, 'application/json')
 
       const call = (detail: 'original' | 'high') => fetch(target.endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(imageOcrRequestBody(
           target.protocol,
-          preferences.model,
+          target.model,
           preferences.reasoningEffort,
           request.imageDataUrl,
           detail
@@ -665,14 +864,20 @@ export class AiService {
 
       let response = await call('original')
       let usedDetail: 'original' | 'high' = 'original'
-      if (!response.ok && (response.status === 400 || response.status === 422)) {
+      if (target.provider !== 'anthropic' && !response.ok && (response.status === 400 || response.status === 422)) {
         await response.arrayBuffer()
         response = await call('high')
         usedDetail = 'high'
       }
       if (!response.ok) await parseAiJsonResponse(response, target.endpoint)
       const value = await parseAiJsonResponse(response, target.endpoint)
-      const text = (target.protocol === 'responses' ? responsesResult(value) : nonStreamResult(value)).content.trim()
+      const text = (
+        target.protocol === 'responses'
+          ? responsesResult(value)
+          : target.protocol === 'anthropic-messages'
+            ? anthropicResult(value)
+            : nonStreamResult(value)
+      ).content.trim()
       if (!text) throw new Error('AI OCR 没有返回可用文字。')
       return this.project.saveOcr({
         path: canonical,
@@ -680,7 +885,7 @@ export class AiService {
         text,
         lines: [],
         engine: 'ai-vision',
-        model: preferences.model,
+        model: target.model,
         createdAt: Date.now(),
         sourceModifiedAt: 0,
         sourceSize: 0,
@@ -1035,6 +1240,60 @@ export class AiService {
     return { content, ...(tool ? { tool } : {}) }
   }
 
+  private async readAnthropicEventStream(
+    sender: WebContents,
+    requestId: string,
+    response: Response,
+    signal: AbortSignal
+  ): Promise<StreamResult> {
+    if (!response.body) throw new Error('Anthropic Messages API 没有返回可读取的响应流。')
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    const tools = new Map<number, ToolAccumulator>()
+    let buffer = ''
+    let content = ''
+    let finalTool: ToolAccumulator | undefined
+
+    const consumeLine = (line: string): void => {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('data:')) return
+      const payload = trimmed.slice(5).trim()
+      if (!payload || payload === '[DONE]') return
+      let value: unknown
+      try {
+        value = JSON.parse(payload)
+      } catch {
+        throw new Error('Anthropic Messages API 返回了无法解析的流数据。')
+      }
+      const event = anthropicStreamEvent(value, tools)
+      if (event.delta) {
+        content += event.delta
+        this.send(sender, { requestId, type: 'delta', text: event.delta })
+      }
+      if (event.tool) finalTool = event.tool
+    }
+
+    try {
+      while (true) {
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+        const { done, value } = await reader.read()
+        buffer += decoder.decode(value, { stream: !done })
+        const lines = buffer.split(/\r?\n/u)
+        buffer = lines.pop() ?? ''
+        for (const line of lines) consumeLine(line)
+        if (done) break
+      }
+      if (buffer.trim()) consumeLine(buffer)
+    } finally {
+      reader.releaseLock()
+    }
+
+    const streamedTool = [...tools.entries()].sort(([left], [right]) => left - right)[0]?.[1]
+    const tool = finalTool ?? streamedTool
+    if (!content && !tool) throw new Error('Anthropic Messages API 没有返回消息。')
+    return { content, ...(tool ? { tool } : {}) }
+  }
+
   private async readResponsesEventStream(
     sender: WebContents,
     requestId: string,
@@ -1098,8 +1357,10 @@ export class AiService {
   private async run(sender: WebContents, request: AiRequest, controller: AbortController): Promise<void> {
     try {
       const preferences = await this.settings.get()
-      const apiKey = await this.settings.apiKey()
-      const target = resolveAiRequestTarget(preferences.baseUrl, preferences.apiProtocol)
+      const target = resolveActiveAiRequestTarget(preferences)
+      const apiKey = target.provider === 'anthropic'
+        ? await this.settings.anthropicApiKey()
+        : await this.settings.apiKey()
       const { endpoint, protocol } = target
       if (!apiKey && !isLoopbackHost(new URL(endpoint).hostname)) {
         throw new Error('远程 AI 服务尚未配置 API Key；无 Key 模式只允许本机回环服务。')
@@ -1181,9 +1442,31 @@ export class AiService {
         '发送时上下文：',
         context.text
       ].join('\n')
+      const contextPlan = planContextWindow({
+        provider: target.provider,
+        model: target.model,
+        messages: conversation,
+        systemPrompt: clipped(systemPrompt),
+        windowTokens: preferences.contextWindowTokens || undefined,
+        outputReserveTokens: preferences.contextOutputReserveTokens,
+        autoCompact: preferences.contextAutoCompact,
+        forceCompact: request.contextPolicy?.forceCompact === true
+      })
+      this.send(sender, {
+        requestId: request.requestId,
+        type: 'context-usage',
+        usage: contextPlan.usage
+      })
+      if (
+        contextPlan.usage.estimatedInputTokens > contextPlan.usage.maximumInputTokens &&
+        !preferences.contextAutoCompact &&
+        request.contextPolicy?.forceCompact !== true
+      ) {
+        throw new Error('当前会话已超过上下文窗口预算。请在 AI 侧栏点击“压缩早期历史”，或在设置中开启自动压缩。')
+      }
       const messages = [
-        { role: 'system', content: clipped(systemPrompt) },
-        ...conversation
+        { role: 'system', content: contextPlan.systemPrompt },
+        ...contextPlan.messages
       ]
       const toolParameters = {
         type: 'object',
@@ -1210,19 +1493,32 @@ export class AiService {
       }
       const toolName = 'propose_markdown_operation'
       const toolDescription = '向用户展示一批需要明确确认的 Markdown 创建、追加或替换建议，可创建完整的多文件笔记项目。此工具本身绝不写入磁盘。'
-      const body = protocol === 'responses'
+      const body = protocol === 'anthropic-messages'
+        ? anthropicMessagesRequestBody({
+            model: target.model,
+            maxTokens: contextPlan.usage.outputReserveTokens,
+            effort: preferences.reasoningEffort,
+            system: contextPlan.systemPrompt,
+            messages: contextPlan.messages,
+            tool: {
+              name: toolName,
+              description: toolDescription,
+              inputSchema: toolParameters
+            }
+          })
+        : protocol === 'responses'
         ? {
-            model: preferences.model,
+            model: target.model,
             stream: true,
             store: false,
             ...reasoningRequestFields(protocol, preferences.reasoningEffort),
-            instructions: clipped(systemPrompt),
-            input: conversation,
+            instructions: contextPlan.systemPrompt,
+            input: contextPlan.messages,
             tools: [{ type: 'function', name: toolName, description: toolDescription, parameters: toolParameters }],
             tool_choice: 'auto'
           }
         : {
-            model: preferences.model,
+            model: target.model,
             stream: true,
             ...reasoningRequestFields(protocol, preferences.reasoningEffort),
             messages,
@@ -1238,11 +1534,7 @@ export class AiService {
             ],
             tool_choice: 'auto'
           }
-      const headers: Record<string, string> = {
-        Accept: 'text/event-stream, application/json',
-        'Content-Type': 'application/json'
-      }
-      if (apiKey) headers.Authorization = `Bearer ${apiKey}`
+      const headers = aiRequestHeaders(target.provider, apiKey)
       const response = await fetch(endpoint, {
         method: 'POST',
         headers,
@@ -1258,12 +1550,18 @@ export class AiService {
       const contentType = response.headers.get('content-type') ?? ''
       let result: StreamResult
       if (contentType.includes('text/event-stream')) {
-        result = protocol === 'responses'
+        result = protocol === 'anthropic-messages'
+          ? await this.readAnthropicEventStream(sender, request.requestId, response, controller.signal)
+          : protocol === 'responses'
           ? await this.readResponsesEventStream(sender, request.requestId, response, controller.signal)
           : await this.readChatEventStream(sender, request.requestId, response, controller.signal)
       } else {
         const value = await parseAiJsonResponse(response, endpoint)
-        result = protocol === 'responses' ? responsesResult(value) : nonStreamResult(value)
+        result = protocol === 'anthropic-messages'
+          ? anthropicResult(value)
+          : protocol === 'responses'
+            ? responsesResult(value)
+            : nonStreamResult(value)
         if (result.content) this.send(sender, { requestId: request.requestId, type: 'delta', text: result.content })
       }
 

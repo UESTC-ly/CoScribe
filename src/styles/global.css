@@ -1,20 +1,20 @@
 :root {
-  --bg-app: #e8e8eb;
-  --bg-panel: #f2f2f4;
-  --bg-content: #fafafa;
+  --bg-app: #e7e9e6;
+  --bg-panel: #f1f3f0;
+  --bg-content: #fafbf9;
   --bg-elevated: #ffffff;
-  --bg-hover: #e7e6eb;
-  --bg-active: #e7e1f3;
-  --border: #d7d5dc;
-  --border-strong: #b9b6c1;
-  --text: #29282d;
-  --text-secondary: #5e5c65;
-  --text-muted: #7d7985;
-  --accent: #6f4db8;
-  --accent-hover: #5d3ea4;
-  --accent-soft: #ece6f8;
-  --focus: #7d5bc3;
-  --selection: #e5dcf6;
+  --bg-hover: #e4e7e2;
+  --bg-active: #dce9e3;
+  --border: #d4d8d2;
+  --border-strong: #b5bbb4;
+  --text: #282c29;
+  --text-secondary: #59605b;
+  --text-muted: #7a837d;
+  --accent: #3f7665;
+  --accent-hover: #315f51;
+  --accent-soft: #dfece6;
+  --focus: #4c816f;
+  --selection: #d7e9e1;
   --highlight: #d5a13e;
   --danger: #a9484d;
   --warning: #93631e;
@@ -36,22 +36,22 @@
 }
 
 :root[data-theme='dark'] {
-  --bg-app: #171719;
-  --bg-panel: #1d1d20;
-  --bg-content: #232326;
-  --bg-elevated: #2b2a2f;
-  --bg-hover: #303034;
-  --bg-active: #342d45;
-  --border: #37363d;
-  --border-strong: #4d4a54;
-  --text: #e7e5ea;
-  --text-secondary: #bbb7c1;
-  --text-muted: #918c99;
-  --accent: #a78bfa;
-  --accent-hover: #beaaf8;
-  --accent-soft: #332b45;
-  --focus: #b39af5;
-  --selection: #403653;
+  --bg-app: #171a18;
+  --bg-panel: #1d211f;
+  --bg-content: #222725;
+  --bg-elevated: #2a302d;
+  --bg-hover: #303734;
+  --bg-active: #263d34;
+  --border: #363e3a;
+  --border-strong: #4b5650;
+  --text: #e5eae7;
+  --text-secondary: #b6beb9;
+  --text-muted: #8e9892;
+  --accent: #7fc2aa;
+  --accent-hover: #9bd3be;
+  --accent-soft: #263c34;
+  --focus: #8bc9b2;
+  --selection: #304c41;
   --highlight: #d4a64e;
   --danger: #e4868e;
   --warning: #deb36d;
@@ -67,6 +67,13 @@ body { overflow: hidden; background: var(--bg-app); }
 button, input, textarea, select { font: inherit; color: inherit; }
 h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); letter-spacing: 0; }
 button { cursor: pointer; }
+input:not([type='checkbox']):not([type='radio']):not([type='range']),
+textarea,
+[contenteditable='true'] { cursor: text; }
+select,
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] { cursor: pointer; }
 button, input, textarea, select { outline: none; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--focus);

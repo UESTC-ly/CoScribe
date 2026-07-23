@@ -1,6 +1,6 @@
 export const PANEL_LAYOUT = {
   activityRailWidth: 46,
-  resizeHandleWidth: 1,
+  resizeHandleWidth: 5,
   projectNavigatorMinWidth: 210,
   projectNavigatorMaxWidth: 400,
   markdownOutlineMinWidth: 168,
@@ -38,7 +38,11 @@ export function clampMarkdownOutlineWidth(width: number): number {
   )
 }
 
-export function maximumAiPanelWidth(viewportWidth: number, navigationWidth: number): number {
+export function maximumAiPanelWidth(
+  viewportWidth: number,
+  navigationWidth: number,
+  navigationVisible = true
+): number {
   const viewport = Math.max(0, finite(viewportWidth, PANEL_LAYOUT.overlayBreakpoint))
   if (viewport < PANEL_LAYOUT.overlayBreakpoint) {
     return clamp(
@@ -50,7 +54,7 @@ export function maximumAiPanelWidth(viewportWidth: number, navigationWidth: numb
 
   const available = viewport
     - PANEL_LAYOUT.activityRailWidth
-    - clampProjectNavigatorWidth(navigationWidth)
+    - (navigationVisible ? clampProjectNavigatorWidth(navigationWidth) : 0)
     - PANEL_LAYOUT.resizeHandleWidth * 2
     - PANEL_LAYOUT.editorMinWidth
 
