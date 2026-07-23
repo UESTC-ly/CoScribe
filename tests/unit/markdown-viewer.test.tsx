@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useReducer } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@uiw/react-codemirror', async () => {
@@ -15,6 +16,7 @@ import { MarkdownViewer } from '../../src/components/viewers/MarkdownViewer'
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  Reflect.deleteProperty(window, 'coscribe')
 })
 
 describe('MarkdownViewer preview', () => {
@@ -45,19 +47,39 @@ describe('MarkdownViewer preview', () => {
     expect(screen.queryByLabelText('Markdown 预览')).not.toBeInTheDocument()
   })
 
-  it('auto-detects an unlabeled fence and copies the original code', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined)
+  it('auto-detects an unlabeled fence and copies the original code through the desktop bridge', async () => {
+    const desktopWriteText = vi.fn().mockResolvedValue(undefined)
+    const browserWriteText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window, 'coscribe', {
+      configurable: true,
+      value: { clipboard: { writeText: desktopWriteText } },
+    })
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
-      value: { writeText },
+      value: { writeText: browserWriteText },
     })
     const code = 'def greet(name):\n    return f"Hello {name}"'
-    render(<MarkdownViewer value={`\`\`\`\n${code}\n\`\`\``} />)
+    function RerenderingHost(): React.JSX.Element {
+      const [, rerender] = useReducer((value: number) => value + 1, 0)
+      return (
+        <MarkdownViewer
+          value={`\`\`\`\n${code}\n\`\`\``}
+          onContextChange={rerender}
+          onOpenLink={() => undefined}
+        />
+      )
+    }
+    render(<RerenderingHost />)
 
     const block = screen.getByRole('region', { name: 'Python · 自动识别 代码块' })
     expect(block.querySelector('.hljs-keyword')).toHaveTextContent('def')
-    fireEvent.click(screen.getByRole('button', { name: '复制代码' }))
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(code))
+    const copyButton = screen.getByRole('button', { name: '复制代码' })
+    fireEvent.mouseUp(copyButton)
+    expect(screen.getByRole('button', { name: '复制代码' })).toBe(copyButton)
+    fireEvent.click(copyButton)
+    await waitFor(() => expect(desktopWriteText).toHaveBeenCalledWith(code))
+    expect(browserWriteText).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '代码已复制' })).toBeVisible()
   })
 
   it('collapses and expands only descendants of the selected outline branch', () => {

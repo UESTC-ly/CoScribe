@@ -46,6 +46,7 @@ import {
   isChatImageMimeType,
   normalizeChatImageAttachments
 } from '../../shared/chat-images'
+import { ConversationTurnNavigator } from './ConversationTurnNavigator'
 import { MarkdownMessage } from './MarkdownMessage'
 import { useLocalSpeechInput } from './useLocalSpeechInput'
 import '../../styles/ai.css'
@@ -294,6 +295,7 @@ export function AiWorkspace({
   const messagesRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const activeSession = sessions.find((session) => session.id === currentSessionId) ?? null
+  const hasTurnNavigation = (activeSession?.messages.filter((message) => message.role === 'user').length ?? 0) >= 2
   const currentDraft = draft ?? localDraft
   const isBusy = isStreaming || isGeneratingImage
 
@@ -657,59 +659,68 @@ export function AiWorkspace({
         </div>
       )}
 
-      <div className="ai-messages" ref={messagesRef} aria-live="polite" aria-busy={isBusy}>
-        {!activeSession ? (
-          <div className="ai-empty">
-            <span className="ai-empty__glyph"><MessageSquarePlus aria-hidden="true" /></span>
-            <h2>开始一个独立会话</h2>
-            <p>每个会话拥有独立历史，但都能读取当前项目中你明确指定的内容。</p>
-            <button className="ai-button ai-button--primary" type="button" onClick={() => void onNewSession()}>
-              <Plus aria-hidden="true" /> 新建会话
-            </button>
-          </div>
-        ) : activeSession.messages.length === 0 ? (
-          <div className="ai-empty ai-empty--session">
-            <span className="ai-empty__eyebrow">新会话 · {projectName}</span>
-            <h2>从正在看的内容开始</h2>
-            <p>可以直接问“这里是什么意思”，也可以指定文件后跨资料对比。</p>
-            <div className="ai-empty__prompts">
-              {['解释当前内容的核心概念', '总结这一页并列出疑问', '把学到的内容整理成笔记'].map((prompt) => (
-                <button type="button" key={prompt} onClick={() => { updateDraft(prompt); textareaRef.current?.focus() }}>
-                  {prompt}
-                </button>
-              ))}
+      <div className={clsx('ai-messages-shell', hasTurnNavigation && 'ai-messages-shell--navigable')}>
+        <div className="ai-messages" ref={messagesRef} aria-live="polite" aria-busy={isBusy}>
+          {!activeSession ? (
+            <div className="ai-empty">
+              <span className="ai-empty__glyph"><MessageSquarePlus aria-hidden="true" /></span>
+              <h2>开始一个独立会话</h2>
+              <p>每个会话拥有独立历史，但都能读取当前项目中你明确指定的内容。</p>
+              <button className="ai-button ai-button--primary" type="button" onClick={() => void onNewSession()}>
+                <Plus aria-hidden="true" /> 新建会话
+              </button>
             </div>
-          </div>
-        ) : (
-          activeSession.messages.map((message, index) => (
-            <MarkdownMessage
-              key={message.id}
-              message={message}
-              streaming={
-                isStreaming && index === activeSession.messages.length - 1 && message.role === 'assistant'
-              }
-              operationBusy={message.operation?.id === applyingOperationId}
-              onOpenSource={onOpenSource}
-              onOpenContext={onOpenContext}
-              onAcceptOperation={onAcceptOperation}
-              onRejectOperation={onRejectOperation}
-              onRegenerate={onRegenerateMessage}
-            />
-          ))
+          ) : activeSession.messages.length === 0 ? (
+            <div className="ai-empty ai-empty--session">
+              <span className="ai-empty__eyebrow">新会话 · {projectName}</span>
+              <h2>从正在看的内容开始</h2>
+              <p>可以直接问“这里是什么意思”，也可以指定文件后跨资料对比。</p>
+              <div className="ai-empty__prompts">
+                {['解释当前内容的核心概念', '总结这一页并列出疑问', '把学到的内容整理成笔记'].map((prompt) => (
+                  <button type="button" key={prompt} onClick={() => { updateDraft(prompt); textareaRef.current?.focus() }}>
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            activeSession.messages.map((message, index) => (
+              <MarkdownMessage
+                key={message.id}
+                message={message}
+                streaming={
+                  isStreaming && index === activeSession.messages.length - 1 && message.role === 'assistant'
+                }
+                operationBusy={message.operation?.id === applyingOperationId}
+                onOpenSource={onOpenSource}
+                onOpenContext={onOpenContext}
+                onAcceptOperation={onAcceptOperation}
+                onRejectOperation={onRejectOperation}
+                onRegenerate={onRegenerateMessage}
+              />
+            ))
+          )}
+          {isGeneratingImage && (
+            <div className="ai-stream-status" role="status">
+              <Loader2 className="ai-spin" aria-hidden="true" />
+              GPT-Image 2 正在生成图片…
+            </div>
+          )}
+          {isStreaming && lastMessage?.role !== 'assistant' && (
+            <div className="ai-stream-status" role="status">
+              <Loader2 className="ai-spin" aria-hidden="true" />
+              正在读取上下文并组织回答…
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+        {activeSession && (
+          <ConversationTurnNavigator
+            key={activeSession.id}
+            messages={activeSession.messages}
+            scrollContainerRef={messagesRef}
+          />
         )}
-        {isGeneratingImage && (
-          <div className="ai-stream-status" role="status">
-            <Loader2 className="ai-spin" aria-hidden="true" />
-            GPT-Image 2 正在生成图片…
-          </div>
-        )}
-        {isStreaming && lastMessage?.role !== 'assistant' && (
-          <div className="ai-stream-status" role="status">
-            <Loader2 className="ai-spin" aria-hidden="true" />
-            正在读取上下文并组织回答…
-          </div>
-        )}
-        <div ref={bottomRef} />
       </div>
 
       <footer className="ai-composer-wrap">

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 
 import type { FileKind, ResearchReference, ResearchReferenceType } from '../../shared/types'
+import { writeClipboardText } from '../../lib/clipboard'
 import {
   bibTeXFor,
   citationToken,
@@ -220,7 +221,7 @@ export default function ReferencesWorkspace(props: ReferencesWorkspaceProps): Re
   }
 
   const copy = async (value: string, label: string): Promise<void> => {
-    try { await navigator.clipboard.writeText(value); setMessage(`${label}已复制。`) }
+    try { await writeClipboardText(value); setMessage(`${label}已复制。`) }
     catch { setMessage('系统剪贴板不可用。') }
   }
 

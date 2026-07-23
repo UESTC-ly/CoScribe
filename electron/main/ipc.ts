@@ -1,4 +1,4 @@
-import { app, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { app, clipboard, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 
 import type {
   AiRequest,
@@ -98,6 +98,10 @@ export function registerIpc(services: Services): void {
   }
 
   handle(IPC.appVersion, () => app.getVersion())
+  handle(IPC.clipboardWriteText, (_event, text: unknown) => {
+    if (typeof text !== 'string') throw new TypeError('剪贴板内容必须是文本。')
+    clipboard.writeText(text)
+  })
 
   handle(IPC.projectRecent, () => project.recent())
   handle(IPC.projectChooseLocation, () => project.chooseLocation())

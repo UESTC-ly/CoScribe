@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ViewerNotice } from './ViewerChrome'
 import type { DocxViewerProps } from './types'
 import { usePersistentDomSelection } from './usePersistentDomSelection'
+import { writeClipboardText } from '../../lib/clipboard'
 
 export function DocxViewer({
   html,
@@ -56,7 +57,7 @@ export function DocxViewer({
           <button
             type="button"
             className="vk-viewer-text-button"
-            onClick={() => void navigator.clipboard.writeText(text).then(() => {
+            onClick={() => void writeClipboardText(text).then(() => {
               setCopied(true)
               window.setTimeout(() => setCopied(false), 1_200)
             })}

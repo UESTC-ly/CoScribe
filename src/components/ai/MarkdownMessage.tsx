@@ -5,6 +5,7 @@ import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
+import { writeClipboardText } from '../../lib/clipboard'
 import type { ChatMessage, ContextSnapshot, FileOperationProposal, SourceRef } from '../../shared/types'
 import { MermaidDiagram } from '../viewers/MermaidDiagram'
 import { AiCodeBlock } from './AiCodeBlock'
@@ -107,7 +108,7 @@ function MessageActions({
 
   const copy = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(message.content)
+      await writeClipboardText(message.content)
       setCopied(true)
     } catch {
       setCopied(false)

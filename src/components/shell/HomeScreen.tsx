@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, BookOpenText, FolderOpen, Plus, Settings } from 'lucide-react'
+import { AlertTriangle, BookOpenText, CircleHelp, FolderOpen, Plus, Settings } from 'lucide-react'
 import type { ProjectRef } from '../../shared/types'
 import { Dialog } from './Dialog'
 
@@ -12,6 +12,7 @@ interface HomeScreenProps {
   onChooseLocation: () => Promise<string | null>
   onOpenFolder: () => Promise<void> | void
   onOpenRecent: (path: string) => Promise<void> | void
+  onOpenGuide: () => void
   onOpenSettings: () => void
 }
 
@@ -44,7 +45,10 @@ export function HomeScreen(props: HomeScreenProps): React.JSX.Element {
 
   return (
     <main className="home-screen">
-      <header className="home-titlebar"><button className="icon-button" onClick={props.onOpenSettings} aria-label="设置"><Settings size={17} /></button></header>
+      <header className="home-titlebar">
+        <button className="icon-button" onClick={props.onOpenGuide} aria-label="使用指南" title="使用指南"><CircleHelp size={17} /></button>
+        <button className="icon-button" onClick={props.onOpenSettings} aria-label="设置" title="设置"><Settings size={17} /></button>
+      </header>
       <section className="home-content">
         <div className="home-brand">
           <span className="home-brand__mark"><BookOpenText size={23} strokeWidth={1.8} /></span>
@@ -75,15 +79,15 @@ export function HomeScreen(props: HomeScreenProps): React.JSX.Element {
       </section>
       <Dialog
         open={createOpen}
-        title="新建空项目"
-        description="会在保存位置下创建一个新的空文件夹。已有 Markdown 或子文件夹时，请使用“打开已有文件夹”。"
+        title="新建项目"
+        description="会创建一个普通文件夹，并加入可删除的“CoScribe 使用指南.md”。已有 Markdown 或子文件夹时，请使用“打开已有文件夹”。"
         onClose={() => setCreateOpen(false)}
         footer={<><button className="secondary-button" onClick={() => setCreateOpen(false)}>取消</button><button className="primary-button" disabled={!name.trim() || !parentPath || props.busy} onClick={() => void create()}>创建并打开</button></>}
       >
         <div className="form-stack">
           <label className="field-label">项目名称<input className="field" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：FastAPI 学习" /></label>
           <label className="field-label">保存位置（父文件夹）<div className="field-with-button"><input className="field" value={parentPath} onChange={(event) => setParentPath(event.target.value)} placeholder="选择父文件夹" /><button className="secondary-button" onClick={() => void pickParent()}>选择…</button></div></label>
-          <div className="path-preview"><span>将创建空项目</span><code>{targetPath || '选择位置并输入名称'}</code></div>
+          <div className="path-preview"><span>将创建项目和简明使用指南</span><code>{targetPath || '选择位置并输入名称'}</code></div>
           <button className="secondary-button create-project-open-existing" onClick={() => { setCreateOpen(false); void props.onOpenFolder() }} disabled={props.busy}><FolderOpen size={15} />打开已有文件夹</button>
         </div>
       </Dialog>

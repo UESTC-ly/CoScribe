@@ -26,6 +26,7 @@ import swift from 'highlight.js/lib/languages/swift'
 import typescript from 'highlight.js/lib/languages/typescript'
 import xml from 'highlight.js/lib/languages/xml'
 import yaml from 'highlight.js/lib/languages/yaml'
+import { writeClipboardText } from '../../lib/clipboard'
 
 const registeredLanguages = {
   bash,
@@ -183,7 +184,7 @@ export function SyntaxCodeBlock({
 
   const copy = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(code)
+      await writeClipboardText(code)
       setCopied(true)
     } catch {
       setCopied(false)

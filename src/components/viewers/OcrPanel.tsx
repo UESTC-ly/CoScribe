@@ -1,6 +1,7 @@
 import { Check, Copy, Loader2, ScanText, Sparkles, X } from 'lucide-react'
 import { useState } from 'react'
 
+import { writeClipboardText } from '../../lib/clipboard'
 import type { OcrResult } from '../../shared/types'
 import type { OcrStatus } from './useOcrSession'
 
@@ -48,7 +49,7 @@ export function OcrPanel(props: OcrPanelProps): React.JSX.Element {
             className="vk-viewer-icon-button"
             aria-label="复制识别文字"
             onClick={() => {
-              void navigator.clipboard.writeText(props.result?.text ?? '').then(() => {
+              void writeClipboardText(props.result?.text ?? '').then(() => {
                 setCopied(true)
                 window.setTimeout(() => setCopied(false), 1_200)
               })

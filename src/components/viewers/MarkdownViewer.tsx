@@ -257,6 +257,7 @@ export function MarkdownViewer({
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
   const onErrorRef = useRef(onError)
+  const onOpenLinkRef = useRef(onOpenLink)
   const onContextChangeRef = useRef(onContextChange)
   const onReadingStateChangeRef = useRef(onReadingStateChange)
   const draftRef = useRef(draft)
@@ -306,6 +307,7 @@ export function MarkdownViewer({
   onChangeRef.current = onChange
   onSaveRef.current = onSave
   onErrorRef.current = onError
+  onOpenLinkRef.current = onOpenLink
   onContextChangeRef.current = onContextChange
   onReadingStateChangeRef.current = onReadingStateChange
 
@@ -693,9 +695,9 @@ export function MarkdownViewer({
           target="_blank"
           rel="noreferrer"
           onClick={(event) => {
-            if (onOpenLink && href) {
+            if (onOpenLinkRef.current && href) {
               event.preventDefault()
-              onOpenLink(href)
+              onOpenLinkRef.current(href)
             }
           }}
         />
@@ -726,7 +728,7 @@ export function MarkdownViewer({
         return <pre {...props}>{children}</pre>
       },
     }
-  }, [onOpenLink, outline])
+  }, [outline])
 
   const resolveConflict = useCallback(
     (resolution: 'use-external' | 'keep-local') => {

@@ -1,6 +1,6 @@
 {
   "name": "coscribe",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "CoScribe：以本地项目为核心的 AI 学习与内容工作台",
   "private": true,
   "type": "module",
@@ -97,6 +97,7 @@
       "package.json",
       "LICENSE",
       "THIRD_PARTY_NOTICES.md",
+      "resources/guide/CoScribe 使用指南.md",
       "resources/ocr/LICENSE-APACHE-2.0.txt",
       "!node_modules/sherpa-onnx-*{,/**/*}"
     ],

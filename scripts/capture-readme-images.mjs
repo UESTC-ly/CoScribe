@@ -11,40 +11,10 @@ const projectPath = await mkdtemp(path.join(tmpdir(), 'coscribe-readme-project-'
 const userDataPath = await mkdtemp(path.join(tmpdir(), 'coscribe-readme-user-'))
 
 await mkdir(output, { recursive: true })
-await writeFile(path.join(projectPath, 'CoScribe 使用指南.md'), [
-  '# CoScribe 学习工作台',
-  '',
-  '> 阅读本地资料、追踪上下文，并把 AI 输出沉淀为可迁移的 Markdown。',
-  '',
-  '## 学习流程',
-  '',
-  '```mermaid',
-  'flowchart LR',
-  '  A[打开本地资料] --> B[选中关键内容]',
-  '  B --> C[向 AI 提问]',
-  '  C --> D[整理为本地笔记]',
-  '```',
-  '',
-  '## 代码示例',
-  '',
-  '```typescript',
-  'interface LearningNote {',
-  '  source: string',
-  '  summary: string',
-  '}',
-  '',
-  'const note: LearningNote = {',
-  "  source: '本地项目',",
-  "  summary: '让知识回到自己的文件中'",
-  '}',
-  '```',
-  '',
-  '## 下一步',
-  '',
-  '- 从 PDF、DOCX、PPTX 或网页中收集资料',
-  '- 使用截图、OCR 与网页选区补全上下文',
-  '- 点击“整理笔记”写入项目'
-].join('\n'))
+await copyFile(
+  path.join(root, 'resources', 'guide', 'CoScribe 使用指南.md'),
+  path.join(projectPath, 'CoScribe 使用指南.md')
+)
 await writeFile(path.join(projectPath, 'OCR 示例.svg'), [
   '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480">',
   '<rect width="1200" height="480" fill="white"/>',

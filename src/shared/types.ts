@@ -648,6 +648,9 @@ export interface CoScribeAPI {
     platform: string
     version: () => Promise<string>
   }
+  clipboard: {
+    writeText: (text: string) => Promise<void>
+  }
   project: {
     recent: () => Promise<ProjectRef[]>
     chooseLocation: () => Promise<string | null>

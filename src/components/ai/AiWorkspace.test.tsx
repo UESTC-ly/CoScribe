@@ -5,7 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiWorkspaceProps } from './AiWorkspace'
 import { AiWorkspace } from './AiWorkspace'
 import { MarkdownOperationCard } from './MarkdownOperationCard'
-import type { ChatImageAttachment, ChatSession, ContextSnapshot, FileOperationProposal } from '../../shared/types'
+import type {
+  ChatImageAttachment,
+  ChatMessage,
+  ChatSession,
+  ContextSnapshot,
+  FileOperationProposal
+} from '../../shared/types'
 
 afterEach(cleanup)
 
@@ -82,6 +88,39 @@ function pngFile(name = 'diagram.png'): File {
     { type: 'image/png' }
   )
 }
+
+const conversationMessages: ChatMessage[] = [
+  {
+    id: 'user-1',
+    role: 'user',
+    content: '解释 Checkpointer 如何保存状态',
+    createdAt: 1
+  },
+  {
+    id: 'assistant-1',
+    role: 'assistant',
+    content: 'Checkpointer 会在图运行期间保存状态快照。',
+    createdAt: 2
+  },
+  {
+    id: 'user-2',
+    role: 'user',
+    content: '它和普通数据库事务有什么区别？',
+    createdAt: 3
+  },
+  {
+    id: 'assistant-2',
+    role: 'assistant',
+    content: '两者解决的问题和生命周期不同。',
+    createdAt: 4
+  },
+  {
+    id: 'user-3',
+    role: 'user',
+    content: '请给出一个最小示例',
+    createdAt: 5
+  }
+]
 
 describe('AiWorkspace', () => {
   it('sends the question with the controlled scope and referenced files', () => {
@@ -321,6 +360,60 @@ describe('AiWorkspace', () => {
     fireEvent.change(titleInput, { target: { value: '持久化机制' } })
     fireEvent.submit(titleInput.closest('form') as HTMLFormElement)
     expect(onRenameSession).toHaveBeenCalledWith('session-1', '持久化机制')
+  })
+
+  it('shows one low-profile navigation marker per user request with prompt summaries', () => {
+    const multiTurnSession: ChatSession = { ...session, messages: conversationMessages }
+    render(<AiWorkspace {...buildProps({ sessions: [multiTurnSession] })} />)
+
+    const navigator = screen.getByRole('navigation', { name: '对话请求导航' })
+    const markers = within(navigator).getAllByRole('button')
+
+    expect(markers).toHaveLength(3)
+    expect(markers[0]).toHaveAccessibleName('跳转到第 1 次请求：解释 Checkpointer 如何保存状态')
+    expect(markers[1]).toHaveAccessibleName('跳转到第 2 次请求：它和普通数据库事务有什么区别？')
+    expect(within(navigator).getByText('第 3 次请求')).toBeInTheDocument()
+  })
+
+  it('hides request navigation until a conversation has at least two user turns', () => {
+    const singleTurnSession: ChatSession = {
+      ...session,
+      messages: conversationMessages.slice(0, 2)
+    }
+    render(<AiWorkspace {...buildProps({ sessions: [singleTurnSession] })} />)
+
+    expect(screen.queryByRole('navigation', { name: '对话请求导航' })).not.toBeInTheDocument()
+  })
+
+  it('scrolls to a request start and tracks the turn nearest the viewport top', async () => {
+    const multiTurnSession: ChatSession = { ...session, messages: conversationMessages }
+    const { container } = render(<AiWorkspace {...buildProps({ sessions: [multiTurnSession] })} />)
+    const messages = container.querySelector('.ai-messages') as HTMLDivElement
+    const first = container.querySelector('[data-message-id="user-1"]') as HTMLElement
+    const second = container.querySelector('[data-message-id="user-2"]') as HTMLElement
+    const third = container.querySelector('[data-message-id="user-3"]') as HTMLElement
+    const scrollTo = vi.fn()
+
+    Object.defineProperty(messages, 'scrollTo', { configurable: true, value: scrollTo })
+    Object.defineProperty(first, 'offsetTop', { configurable: true, value: 40 })
+    Object.defineProperty(second, 'offsetTop', { configurable: true, value: 420 })
+    Object.defineProperty(third, 'offsetTop', { configurable: true, value: 820 })
+
+    fireEvent.click(screen.getByRole('button', { name: /跳转到第 2 次请求/ }))
+    expect(scrollTo).toHaveBeenCalledWith({ top: 408, behavior: 'smooth' })
+
+    messages.scrollTop = 440
+    fireEvent.scroll(messages)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /跳转到第 2 次请求/ })).toHaveAttribute(
+        'aria-current',
+        'step'
+      )
+      expect(screen.getByRole('button', { name: /跳转到第 3 次请求/ })).not.toHaveAttribute(
+        'aria-current'
+      )
+    })
   })
 })
 

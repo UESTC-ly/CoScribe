@@ -33,6 +33,9 @@ const api: CoScribeAPI = {
     platform: process.platform,
     version: () => ipcRenderer.invoke(IPC.appVersion)
   },
+  clipboard: {
+    writeText: (text: string) => ipcRenderer.invoke(IPC.clipboardWriteText, text)
+  },
   project: {
     recent: () => ipcRenderer.invoke(IPC.projectRecent),
     chooseLocation: () => ipcRenderer.invoke(IPC.projectChooseLocation),

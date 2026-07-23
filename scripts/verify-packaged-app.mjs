@@ -28,6 +28,7 @@ const requiredEntries = [
   '/out/renderer/assets/ocr/models/PP-OCRv6_small_rec_onnx_infer.tar',
   '/out/renderer/assets/ocr/ort/ort-wasm-simd-threaded.jsep.mjs',
   '/out/renderer/assets/ocr/ort/ort-wasm-simd-threaded.jsep.wasm',
+  '/resources/guide/CoScribe 使用指南.md',
   '/resources/ocr/LICENSE-APACHE-2.0.txt'
 ]
 const missing = requiredEntries.filter((entry) => !entrySet.has(entry))

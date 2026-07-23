@@ -520,13 +520,191 @@
   height: 12px;
 }
 
-.ai-messages {
+.ai-messages-shell {
+  position: relative;
   min-height: 0;
+  flex: 1;
+  display: flex;
+}
+
+.ai-messages {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
   flex: 1;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   scroll-behavior: smooth;
+}
+
+.ai-messages-shell--navigable .ai-message {
+  padding-inline-end: 32px;
+}
+
+.ai-turn-nav {
+  position: absolute;
+  z-index: 12;
+  top: 50%;
+  right: 8px;
+  width: 24px;
+  max-height: calc(100% - 36px);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.ai-turn-nav__spine {
+  position: absolute;
+  z-index: -1;
+  top: 7px;
+  right: 2px;
+  bottom: 7px;
+  width: 1px;
+  background: repeating-linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--ai-ink-faint) 42%, transparent) 0 2px,
+    transparent 2px 5px
+  );
+  opacity: .5;
+  transition: opacity 140ms ease;
+}
+
+.ai-turn-nav:hover .ai-turn-nav__spine,
+.ai-turn-nav:focus-within .ai-turn-nav__spine {
+  opacity: .82;
+}
+
+.ai-turn-nav ol {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-turn-nav li {
+  min-height: 0;
+  max-height: 13px;
+  flex: 1 1 13px;
+  display: flex;
+}
+
+.ai-turn-nav__item {
+  position: relative;
+  width: 24px;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  color: var(--ai-ink-faint);
+  background: transparent;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.ai-turn-nav__marker {
+  width: 8px;
+  height: 1px;
+  margin-right: 0;
+  background: color-mix(in srgb, currentColor 52%, transparent);
+  border-radius: 999px;
+  transition:
+    width 140ms ease,
+    height 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.ai-turn-nav__item:hover .ai-turn-nav__marker,
+.ai-turn-nav__item:focus-visible .ai-turn-nav__marker {
+  width: 14px;
+  height: 1.5px;
+  color: var(--ai-ink-soft);
+  background: currentColor;
+}
+
+.ai-turn-nav__item[aria-current='step'] .ai-turn-nav__marker {
+  width: 18px;
+  height: 2px;
+  color: var(--ai-accent);
+  background: currentColor;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ai-accent) 11%, transparent);
+}
+
+.ai-turn-nav__tooltip {
+  position: absolute;
+  z-index: 30;
+  top: 50%;
+  right: calc(100% + 7px);
+  width: max-content;
+  min-width: 154px;
+  max-width: min(230px, calc(100cqw - 64px));
+  padding: 7px 9px 8px;
+  color: var(--ai-ink);
+  background: var(--ai-paper-raised);
+  border: 1px solid var(--ai-line-strong);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgb(20 25 21 / .14), 0 2px 6px rgb(20 25 21 / .08);
+  text-align: left;
+  line-height: 1.35;
+  transform: translateY(-50%);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.ai-turn-nav__tooltip::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -4px;
+  width: 7px;
+  height: 7px;
+  background: inherit;
+  border-top: 1px solid var(--ai-line-strong);
+  border-right: 1px solid var(--ai-line-strong);
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.ai-turn-nav__item:hover .ai-turn-nav__tooltip,
+.ai-turn-nav__item:focus-visible .ai-turn-nav__tooltip {
+  visibility: visible;
+}
+
+.ai-turn-nav__tooltip-meta {
+  margin-bottom: 3px;
+  color: var(--ai-ink-faint);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 8.5px;
+}
+
+.ai-turn-nav__tooltip-meta b {
+  color: var(--ai-ink-soft);
+  font-weight: 700;
+}
+
+.ai-turn-nav__tooltip-meta time {
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-turn-nav__tooltip > strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ai-ink);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .ai-message {

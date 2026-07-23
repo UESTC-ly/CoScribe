@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import {
   Columns2,
   Columns3,
+  CircleHelp,
   FileCheck2,
   PanelRightClose,
   PanelRightOpen,
@@ -74,6 +75,7 @@ const ReviewMatrixWorkspace = lazy(() => import('./plugins/review-matrix/ReviewM
 const McpWorkspace = lazy(() => import('./plugins/mcp/McpWorkspace'))
 const GitSnapshotsWorkspace = lazy(() => import('./plugins/git-snapshots/GitSnapshotsWorkspace'))
 const WebTrackerWorkspace = lazy(() => import('./plugins/web-tracker/WebTrackerWorkspace'))
+const UserGuideDialog = lazy(() => import('./components/shell/UserGuideDialog'))
 
 interface PromptState {
   title: string
@@ -184,6 +186,7 @@ export default function App(): React.JSX.Element {
   const [hydrated, setHydrated] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
   const [prompt, setPrompt] = useState<PromptState | null>(null)
   const [promptValue, setPromptValue] = useState('')
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
@@ -1327,7 +1330,7 @@ export default function App(): React.JSX.Element {
   if (booting && !state.project) return <div className="app-loading"><span className="viewer-spinner" /><strong>正在准备本地工作台…</strong></div>
 
   if (!state.project) {
-    return <><HomeScreen recentProjects={state.recentProjects} defaultParentPath={state.settings.defaultProjectPath} busy={booting} error={error} onChooseLocation={() => window.coscribe.project.chooseLocation()} onCreate={(name, parentPath) => openProject(() => window.coscribe.project.create(name, parentPath))} onOpenFolder={() => openProject(() => window.coscribe.project.openDialog())} onOpenRecent={(path) => openProject(() => window.coscribe.project.openPath(path))} onOpenSettings={() => setSettingsOpen(true)} /><SettingsDialog open={settingsOpen} settings={state.settings} onSave={saveSettings} onClose={() => setSettingsOpen(false)} /></>
+    return <><HomeScreen recentProjects={state.recentProjects} defaultParentPath={state.settings.defaultProjectPath} busy={booting} error={error} onChooseLocation={() => window.coscribe.project.chooseLocation()} onCreate={(name, parentPath) => openProject(() => window.coscribe.project.create(name, parentPath))} onOpenFolder={() => openProject(() => window.coscribe.project.openDialog())} onOpenRecent={(path) => openProject(() => window.coscribe.project.openPath(path))} onOpenGuide={() => setGuideOpen(true)} onOpenSettings={() => setSettingsOpen(true)} /><SettingsDialog open={settingsOpen} settings={state.settings} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />{guideOpen && <Suspense fallback={null}><UserGuideDialog onClose={() => setGuideOpen(false)} /></Suspense>}</>
   }
 
   const primaryTabs = state.workspace.panes.primary.tabIds.map((id) => state.workspace.tabs.find((tab) => tab.id === id)).filter((tab): tab is OpenTab => Boolean(tab))
@@ -1402,6 +1405,7 @@ export default function App(): React.JSX.Element {
         <div className="app-titlebar__actions">
           <button className={`icon-button ${state.workspace.split ? 'is-active' : ''}`} disabled={specialWorkspaceActive} onClick={toggleSplit} title={specialWorkspaceActive ? '当前工作区使用单内容区域' : state.workspace.split ? '关闭分屏' : '左右分屏'} aria-label={state.workspace.split ? '关闭分屏' : '左右分屏'}>{state.workspace.split ? <Columns3 size={16} /> : <Columns2 size={16} />}</button>
           <button className={`icon-button ${state.workspace.aiVisible ? 'is-active' : ''}`} onClick={() => state.setAiVisible(!state.workspace.aiVisible)} title={state.workspace.aiVisible ? '隐藏 AI' : '显示 AI'} aria-label={state.workspace.aiVisible ? '隐藏 AI' : '显示 AI'}>{state.workspace.aiVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}</button>
+          <button className="icon-button" onClick={() => setGuideOpen(true)} title="使用指南" aria-label="使用指南"><CircleHelp size={16} /></button>
           <button className="icon-button" onClick={() => setSettingsOpen(true)} title="设置" aria-label="设置"><SettingsIcon size={16} /></button>
         </div>
       </header>
@@ -1606,6 +1610,7 @@ export default function App(): React.JSX.Element {
       </footer>
 
       {error && <div className="global-error" role="alert"><span>{error}</span><button onClick={() => setError(null)}>关闭</button></div>}
+      {guideOpen && <Suspense fallback={null}><UserGuideDialog onClose={() => setGuideOpen(false)} /></Suspense>}
       <SettingsDialog open={settingsOpen} settings={state.settings} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />
       <Dialog open={Boolean(prompt)} title={prompt?.title ?? ''} description={prompt?.description} onClose={() => setPrompt(null)} width={460} footer={<><button className="secondary-button" onClick={() => setPrompt(null)}>取消</button><button className="primary-button" disabled={!promptValue.trim()} onClick={() => void submitPrompt()}>{prompt?.confirmLabel ?? '确认'}</button></>}>
         <label className="field-label">{prompt?.label}<textarea className="field prompt-textarea" value={promptValue} onChange={(event) => setPromptValue(event.target.value)} placeholder={prompt?.placeholder} rows={prompt?.title.includes('批注') ? 5 : 2} /></label>

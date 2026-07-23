@@ -182,6 +182,38 @@ test('opens a real local project, searches content, and creates a standard Markd
   await page.screenshot({ path: testInfo.outputPath('workspace.png') })
 })
 
+test('ships a built-in guide and seeds an editable copy into every new project', async ({}, testInfo) => {
+  await page.locator('.app-titlebar__actions').getByRole('button', { name: '使用指南' }).click()
+  let guideDialog = page.getByRole('dialog', { name: 'CoScribe 使用指南' })
+  await expect(guideDialog).toContainText('五分钟开始')
+  await expect(guideDialog).toContainText('English Quick Guide')
+  await expect(guideDialog.locator('.vk-mermaid-svg svg')).toBeVisible({ timeout: 15_000 })
+  await guideDialog.getByRole('button', { name: '关闭对话框' }).click()
+
+  await page.getByRole('button', { name: '返回首页' }).click()
+  await expect(page.getByRole('button', { name: '新建项目' })).toBeVisible()
+  await page.getByRole('button', { name: '使用指南' }).click()
+  guideDialog = page.getByRole('dialog', { name: 'CoScribe 使用指南' })
+  await expect(guideDialog).toContainText('普通文件夹作为项目')
+  await guideDialog.getByRole('button', { name: '关闭对话框' }).click()
+
+  await page.getByRole('button', { name: '新建项目' }).click()
+  await page.getByLabel('项目名称').fill('内置指南示例')
+  await page.getByLabel('保存位置（父文件夹）').fill(projectPath)
+  await page.getByRole('button', { name: '创建并打开' }).click()
+
+  const createdProject = path.join(projectPath, '内置指南示例')
+  const guidePath = path.join(createdProject, 'CoScribe 使用指南.md')
+  await expect.poll(async () => readFile(guidePath, 'utf8').catch(() => ''))
+    .toContain('# CoScribe 简明使用指南 / Quick Guide')
+  const guideRow = page.locator('.tree-row').filter({ hasText: 'CoScribe 使用指南.md' })
+  await expect(guideRow).toBeVisible()
+  await guideRow.click()
+  await expect(page.getByLabel('CoScribe 使用指南.md Markdown 编辑器')).toBeVisible()
+  await expect(page.getByLabel('Markdown 预览')).toContainText('推荐工作流')
+  await page.screenshot({ path: testInfo.outputPath('built-in-user-guide.png') })
+})
+
 test('grants a built-in plugin explicitly and creates a templated daily note', async ({}, testInfo) => {
   await page.getByRole('button', { name: '插件', exact: true }).click()
   const dailyCard = page.locator('.plugin-card').filter({ hasText: '每日笔记与模板' })
@@ -322,6 +354,20 @@ test('renders Mermaid fenced blocks in Markdown preview', async ({}, testInfo) =
   await expect(codeBlock).toBeVisible()
   await expect(codeBlock.locator('.hljs-keyword')).toHaveText('const')
   await expect(codeBlock.locator('.hljs-number')).toHaveText('42')
+  const clipboardProbe = await page.evaluate(async () => {
+    try {
+      await window.coscribe.clipboard.writeText('COSCRIBE_CLIPBOARD_PROBE')
+      return 'ok'
+    } catch (reason) {
+      return reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason)
+    }
+  })
+  expect(clipboardProbe).toBe('ok')
+  await electronApp.evaluate(({ clipboard }) => clipboard.clear())
+  await codeBlock.getByRole('button', { name: '复制代码' }).click()
+  await expect(codeBlock.getByRole('button', { name: '代码已复制' })).toBeVisible()
+  await expect.poll(async () => electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+    .toBe('const answer: number = 42')
   const lightCodeBackground = await codeBlock.locator('pre').evaluate(
     (element) => window.getComputedStyle(element).backgroundColor,
   )
@@ -1322,6 +1368,97 @@ test('renders Mermaid diagrams and highlighted code in AI answers', async ({}, t
     await expect(codeBlock.locator('.hljs-keyword')).toHaveText('const')
     await expect(codeBlock.locator('.hljs-number')).toHaveText('42')
     await page.screenshot({ path: testInfo.outputPath('ai-mermaid-and-code.png') })
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+test('navigates between request starts without crowding a narrow AI sidebar', async ({}, testInfo) => {
+  let requestCount = 0
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Consume the request before returning the mocked model response.
+    }
+    requestCount += 1
+    const answer = [
+      `第 ${requestCount} 轮回答`,
+      '',
+      ...Array.from(
+        { length: 16 },
+        (_, index) => `- 要点 ${index + 1}：这是用于验证长对话滚动定位的本地测试内容。`
+      )
+    ].join('\n')
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({
+      output: [{
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: answer }]
+      }]
+    }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const port = (server.address() as AddressInfo).port
+    await page.getByRole('button', { name: '配置', exact: true }).click()
+    await page.getByLabel('服务地址').fill(`http://127.0.0.1:${port}`)
+    await page.getByLabel('模型', { exact: true }).fill('local-e2e-model')
+    await page.getByRole('button', { name: '保存设置' }).click()
+
+    const questions = [
+      '先解释状态持久化的核心作用',
+      '再比较内存状态和磁盘快照',
+      '最后给我一个最小实践建议'
+    ]
+    for (const [index, question] of questions.entries()) {
+      await page.getByLabel('向 AI 提问').fill(question)
+      await page.getByRole('button', { name: '发送消息' }).click()
+      await expect(page.getByText(`第 ${index + 1} 轮回答`)).toBeVisible()
+    }
+
+    const navigator = page.getByRole('navigation', { name: '对话请求导航' })
+    const markers = navigator.getByRole('button')
+    await expect(markers).toHaveCount(3)
+    await expect(navigator.locator('[aria-current="step"]')).toHaveCount(1)
+    await page.locator('.ai-messages').evaluate((element) => {
+      element.scrollTo({ top: element.scrollHeight, behavior: 'auto' })
+    })
+    await expect(markers.nth(2)).toHaveAttribute('aria-current', 'step')
+    expect(await page.locator('.ai-messages').evaluate(
+      (element) => element.scrollHeight > element.clientHeight
+    )).toBe(true)
+
+    const navBox = await navigator.boundingBox()
+    const shellBox = await page.locator('.ai-messages-shell').boundingBox()
+    if (!navBox || !shellBox) throw new Error('Request navigator is not visible inside the message area')
+    expect(navBox.width).toBeLessThanOrEqual(26)
+    expect(navBox.x).toBeGreaterThanOrEqual(shellBox.x)
+    expect(navBox.x + navBox.width).toBeLessThanOrEqual(shellBox.x + shellBox.width)
+
+    await page.locator('.ai-workspace').screenshot({
+      path: testInfo.outputPath('ai-request-navigation.png')
+    })
+
+    await markers.nth(0).click()
+    await expect(markers.nth(0)).toHaveAttribute('aria-current', 'step')
+    await expect.poll(async () => {
+      const firstMessage = page.locator('.ai-message--user').first()
+      const relativeTop = await firstMessage.evaluate((element) => {
+        const container = element.closest('.ai-messages')
+        if (!container) return Number.POSITIVE_INFINITY
+        return element.getBoundingClientRect().top - container.getBoundingClientRect().top
+      })
+      return relativeTop >= -1 && relativeTop < 28
+    }).toBe(true)
+    await expect(markers.nth(0)).toHaveAttribute('aria-current', 'step')
+
+    await markers.nth(1).hover()
+    await expect(page.getByRole('tooltip').filter({ hasText: questions[1] })).toBeVisible()
+    await page.waitForTimeout(180)
+    await page.locator('.ai-workspace').screenshot({
+      path: testInfo.outputPath('ai-request-navigation-tooltip.png')
+    })
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }

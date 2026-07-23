@@ -2,7 +2,7 @@
 .app-loading { width: 100%; height: 100%; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--text-secondary); background: var(--bg-app); font-size: 13px; }
 .viewer-spinner { width: 19px; height: 19px; display: inline-block; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: shell-spin .8s linear infinite; }
 @keyframes shell-spin { to { transform: rotate(360deg); } }
-.home-titlebar { height: 44px; display: flex; justify-content: flex-end; align-items: center; padding: 0 14px; -webkit-app-region: drag; }
+.home-titlebar { height: 44px; display: flex; justify-content: flex-end; align-items: center; gap: 2px; padding: 0 14px; -webkit-app-region: drag; }
 .home-titlebar button { -webkit-app-region: no-drag; }
 .home-content { width: min(840px, calc(100vw - 48px)); margin: 8vh auto 0; padding-bottom: 60px; }
 .home-brand { display: flex; align-items: center; gap: 14px; }
@@ -48,6 +48,9 @@
 .path-preview span { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0; }
 .path-preview code { overflow: hidden; color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; }
 .create-project-open-existing { justify-self: start; }
+.user-guide-content { height: min(680px, 70vh); min-height: 420px; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; }
+.user-guide-content .vk-markdown-toolbar { display: none; }
+.user-guide-content .vk-markdown-preview { padding-top: 38px; padding-bottom: 72px; }
 
 .app-shell { width: 100%; height: 100%; display: grid; grid-template-rows: 42px minmax(0, 1fr) 23px; background: var(--bg-app); }
 .app-shell.is-panel-resizing { cursor: col-resize; user-select: none; }

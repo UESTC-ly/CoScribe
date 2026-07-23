@@ -1,5 +1,6 @@
 export const IPC = {
   appVersion: 'app:version',
+  clipboardWriteText: 'clipboard:write-text',
   projectRecent: 'project:recent',
   projectChooseLocation: 'project:choose-location',
   projectCreate: 'project:create',

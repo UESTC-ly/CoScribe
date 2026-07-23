@@ -30,15 +30,15 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 ### 下载与安装
 
-从 [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest) 下载 `v2.2.1`：
+从 [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest) 下载 `v2.2.2`：
 
 | 系统 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS | `CoScribe-2.2.1-arm64.dmg` | Apple Silicon，macOS 13+ |
-| macOS | `CoScribe-2.2.1-arm64-mac.zip` | Apple Silicon 免安装压缩包 |
-| Windows | `CoScribe-Setup-2.2.1-x64.exe` | Windows 10/11 x64 |
-| Linux | `CoScribe-2.2.1-x64.AppImage` | 通用 x86-64 便携包 |
-| Linux | `CoScribe-2.2.1-x64.deb` | Debian / Ubuntu x86-64 |
+| macOS | `CoScribe-2.2.2-arm64.dmg` | Apple Silicon，macOS 13+ |
+| macOS | `CoScribe-2.2.2-arm64-mac.zip` | Apple Silicon 免安装压缩包 |
+| Windows | `CoScribe-Setup-2.2.2-x64.exe` | Windows 10/11 x64 |
+| Linux | `CoScribe-2.2.2-x64.AppImage` | 通用 x86-64 便携包 |
+| Linux | `CoScribe-2.2.2-x64.deb` | Debian / Ubuntu x86-64 |
 | 全平台 | `SHA256SUMS.txt` | 安装包 SHA-256 校验值 |
 
 这些安装包目前没有 Apple Developer ID、Windows Authenticode 或 Linux 发行版签名。
@@ -52,7 +52,7 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 #### Windows
 
-1. 运行 `CoScribe-Setup-2.2.1-x64.exe`。
+1. 运行 `CoScribe-Setup-2.2.2-x64.exe`。
 2. 如果 SmartScreen 拦截未签名安装包，确认文件来自本仓库并核对 SHA-256 后，选择“更多信息 → 仍要运行”。
 3. 安装完成后从开始菜单启动 CoScribe。
 
@@ -61,14 +61,14 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 AppImage：
 
 ```bash
-chmod +x CoScribe-2.2.1-x64.AppImage
-./CoScribe-2.2.1-x64.AppImage
+chmod +x CoScribe-2.2.2-x64.AppImage
+./CoScribe-2.2.2-x64.AppImage
 ```
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install ./CoScribe-2.2.1-x64.deb
+sudo apt install ./CoScribe-2.2.2-x64.deb
 ```
 
 Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门户配置。
@@ -82,6 +82,8 @@ Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门
 3. **打开资料**：从文件树打开 Markdown、PDF、DOCX、PPTX、图片或文本。Markdown 默认进入预览。
 4. **固定上下文**：选择“当前内容”“选中内容”“当前文档”或“当前项目”，再向 AI 提问。
 5. **保存结果**：普通文件修改先检查差异并接受；点击“整理笔记”时，AI 会在项目内选择合适位置或创建新目录和笔记。
+
+新建项目会自动包含 `CoScribe 使用指南.md`。首页和项目右上角也有“使用指南”按钮，即使打开已有文件夹也能随时查看内置版本。指南包含基础配置、上下文选择、截图/OCR、快捷键、Mermaid 与代码块示例。
 
 CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、`node_modules` 等开发目录。
 
@@ -279,23 +281,23 @@ npm run verify:package:linux
 
 ### Download and install
 
-Download `v2.2.1` from [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest):
+Download `v2.2.2` from [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest):
 
 | Platform | Artifact | Target |
 | --- | --- | --- |
-| macOS | `CoScribe-2.2.1-arm64.dmg` | Apple Silicon, macOS 13+ |
-| macOS | `CoScribe-2.2.1-arm64-mac.zip` | Portable Apple Silicon archive |
-| Windows | `CoScribe-Setup-2.2.1-x64.exe` | Windows 10/11 x64 |
-| Linux | `CoScribe-2.2.1-x64.AppImage` | Portable x86-64 AppImage |
-| Linux | `CoScribe-2.2.1-x64.deb` | Debian / Ubuntu x86-64 |
+| macOS | `CoScribe-2.2.2-arm64.dmg` | Apple Silicon, macOS 13+ |
+| macOS | `CoScribe-2.2.2-arm64-mac.zip` | Portable Apple Silicon archive |
+| Windows | `CoScribe-Setup-2.2.2-x64.exe` | Windows 10/11 x64 |
+| Linux | `CoScribe-2.2.2-x64.AppImage` | Portable x86-64 AppImage |
+| Linux | `CoScribe-2.2.2-x64.deb` | Debian / Ubuntu x86-64 |
 | All | `SHA256SUMS.txt` | SHA-256 checksums |
 
 The builds are currently unsigned.
 
 - **macOS:** drag CoScribe into Applications, then right-click and choose **Open**. If blocked, use System Settings → Privacy & Security → Open Anyway. Screen Recording is used only for region capture; Microphone is used only for local speech input.
 - **Windows:** run the x64 installer. If SmartScreen appears, verify the checksum and source before choosing **More info → Run anyway**.
-- **Linux AppImage:** run `chmod +x CoScribe-2.2.1-x64.AppImage`, then `./CoScribe-2.2.1-x64.AppImage`.
-- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-2.2.1-x64.deb`.
+- **Linux AppImage:** run `chmod +x CoScribe-2.2.2-x64.AppImage`, then `./CoScribe-2.2.2-x64.AppImage`.
+- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-2.2.2-x64.deb`.
 
 > The Apple Silicon macOS package passed real-window smoke tests. Windows and Linux were cross-built on macOS and passed architecture and packaged-content verification, but were not installed or launched on physical Windows/Linux hosts. Local speech recognition and system Calendar integration remain macOS-only.
 
@@ -306,6 +308,8 @@ The builds are currently unsigned.
 3. **Read a source:** open Markdown, PDF, DOCX, PPTX, an image, or text. Markdown opens in Preview by default.
 4. **Freeze the scope:** choose Current content, Selection, Current document, or Project before sending.
 5. **Save durable results:** review ordinary file proposals before accepting them; use Quick Note when AI should route and save notes inside the project.
+
+Every new project includes an editable `CoScribe 使用指南.md`. The **User Guide** button on both the home screen and project title bar always opens the built-in copy, including setup, context, screenshot/OCR, shortcut, Mermaid, and code-block examples.
 
 Existing files and nested folders appear directly. `.git`, `.venv`, `node_modules`, and similar development directories are excluded from the research tree.
 

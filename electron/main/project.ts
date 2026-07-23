@@ -59,6 +59,7 @@ import {
 } from './project-memory'
 
 const METADATA_DIRECTORY = '.vibeknowledge'
+const USER_GUIDE_FILENAME = 'CoScribe 使用指南.md'
 const MAX_RECENT_PROJECTS = 20
 const MAX_TEXT_FILE_SIZE = 32 * 1024 * 1024
 const MAX_POWERPOINT_FILE_SIZE = 128 * 1024 * 1024
@@ -734,6 +735,14 @@ export class ProjectService {
     const parent = await canonicalDirectory(parentPath)
     const target = path.join(parent, safeName)
     await mkdir(target, { mode: 0o700 })
+    try {
+      const guideSource = path.join(app.getAppPath(), 'resources', 'guide', USER_GUIDE_FILENAME)
+      const guideContent = await readFile(guideSource, 'utf8')
+      await atomicCreate(path.join(target, USER_GUIDE_FILENAME), guideContent)
+    } catch (error) {
+      await rm(target, { recursive: true, force: true }).catch(() => undefined)
+      throw new Error(`无法创建内置使用指南：${error instanceof Error ? error.message : String(error)}`)
+    }
     return this.openPath(target, Date.now())
   }
 

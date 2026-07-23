@@ -26,6 +26,7 @@ describe('HomeScreen project creation', () => {
         onChooseLocation={vi.fn(async () => null)}
         onOpenFolder={vi.fn()}
         onOpenRecent={vi.fn()}
+        onOpenGuide={vi.fn()}
         onOpenSettings={vi.fn()}
       />
     )
@@ -55,6 +56,7 @@ describe('HomeScreen project creation', () => {
         onChooseLocation={vi.fn(async () => null)}
         onOpenFolder={onOpenFolder}
         onOpenRecent={vi.fn()}
+        onOpenGuide={vi.fn()}
         onOpenSettings={vi.fn()}
       />
     )
@@ -64,6 +66,24 @@ describe('HomeScreen project creation', () => {
     const openButtons = screen.getAllByRole('button', { name: '打开已有文件夹' })
     fireEvent.click(openButtons[openButtons.length - 1])
     expect(onOpenFolder).toHaveBeenCalledOnce()
-    expect(screen.queryByRole('dialog', { name: '新建空项目' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '新建项目' })).not.toBeInTheDocument()
+  })
+
+  it('offers the built-in guide before a project is opened', () => {
+    const onOpenGuide = vi.fn()
+    render(
+      <HomeScreen
+        recentProjects={[]}
+        onCreate={vi.fn()}
+        onChooseLocation={vi.fn(async () => null)}
+        onOpenFolder={vi.fn()}
+        onOpenRecent={vi.fn()}
+        onOpenGuide={onOpenGuide}
+        onOpenSettings={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '使用指南' }))
+    expect(onOpenGuide).toHaveBeenCalledOnce()
   })
 })
