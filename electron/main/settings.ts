@@ -5,6 +5,8 @@ import {
   DEFAULT_SETTINGS,
   REASONING_EFFORTS,
   type AiProtocol,
+  type AiProvider,
+  type AiProviderProfile,
   type AppSettings,
   type ContextScope,
   type PluginPermission,
@@ -13,10 +15,23 @@ import {
 import { TRUSTED_PLUGIN_REGISTRY } from '../../src/plugins/registry'
 import { atomicWriteJson, readJson } from './storage'
 
+type SanitizedSettings = Omit<
+  AppSettings,
+  'apiKey' | 'hasApiKey' | 'anthropicApiKey' | 'hasAnthropicApiKey' | 'imageApiKey' | 'hasImageApiKey'
+>
+
 interface StoredSettings {
-  settings: Omit<AppSettings, 'apiKey' | 'hasApiKey' | 'anthropicApiKey' | 'hasAnthropicApiKey' | 'imageApiKey' | 'hasImageApiKey'>
+  version?: number
+  settings: Partial<AppSettings>
+  encryptedApiKeys?: Record<string, string>
   encryptedApiKey?: string
   encryptedAnthropicApiKey?: string
+  encryptedImageApiKey?: string
+}
+
+interface NormalizedStoredSettings {
+  settings: SanitizedSettings
+  encryptedApiKeys: Record<string, string>
   encryptedImageApiKey?: string
 }
 
@@ -28,6 +43,7 @@ const TRUSTED_PLUGIN_PERMISSIONS = new Map(
   TRUSTED_PLUGIN_REGISTRY.map((plugin) => [plugin.id, new Set<PluginPermission>([...plugin.permissions, ...(plugin.optionalPermissions ?? [])])])
 )
 export const MAX_CUSTOM_SYSTEM_PROMPT_CHARS = 20_000
+export const MAX_AI_PROFILES = 20
 
 export function isLoopbackHost(hostname: string): boolean {
   return (
@@ -63,24 +79,107 @@ function sanitizeBaseUrl(value: unknown, fallback: string, label: string): strin
   return parsed.toString().replace(/\/$/u, '')
 }
 
-export function sanitizeSettings(
-  input: Partial<AppSettings>
-): Omit<AppSettings, 'apiKey' | 'hasApiKey' | 'anthropicApiKey' | 'hasAnthropicApiKey' | 'imageApiKey' | 'hasImageApiKey'> {
+function profileDefaults(provider: AiProvider): AiProviderProfile {
+  const fallback = DEFAULT_SETTINGS.aiProfiles.find((profile) => profile.provider === provider)
+  if (!fallback) throw new Error(`缺少 ${provider} 默认配置。`)
+  return { ...fallback }
+}
+
+function legacyProfiles(input: Partial<AppSettings>): AiProviderProfile[] {
+  const openai = profileDefaults('openai')
+  const anthropic = profileDefaults('anthropic')
+  return [
+    {
+      ...openai,
+      baseUrl: typeof input.baseUrl === 'string' ? input.baseUrl : openai.baseUrl,
+      model: typeof input.model === 'string' ? input.model : openai.model,
+      apiProtocol: AI_PROTOCOLS.has(input.apiProtocol as AiProtocol) ? input.apiProtocol as AiProtocol : openai.apiProtocol,
+      hasApiKey: Boolean(input.hasApiKey)
+    },
+    {
+      ...anthropic,
+      baseUrl: typeof input.anthropicBaseUrl === 'string' ? input.anthropicBaseUrl : anthropic.baseUrl,
+      model: typeof input.anthropicModel === 'string' ? input.anthropicModel : anthropic.model,
+      hasApiKey: Boolean(input.hasAnthropicApiKey)
+    }
+  ]
+}
+
+function profileId(value: unknown, provider: AiProvider, index: number): string {
+  const candidate = typeof value === 'string' ? value.trim().slice(0, 80) : ''
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(candidate) ? candidate : `${provider}-${index + 1}`
+}
+
+function sanitizeProfiles(input: Partial<AppSettings>): AiProviderProfile[] {
+  const hasProfileCollection = Array.isArray(input.aiProfiles) && input.aiProfiles.length > 0
+  const candidates = hasProfileCollection
+    ? input.aiProfiles ?? []
+    : legacyProfiles(input)
+  const profiles: AiProviderProfile[] = []
+  const ids = new Set<string>()
+
+  for (const [index, raw] of candidates.slice(0, MAX_AI_PROFILES).entries()) {
+    if (!raw || typeof raw !== 'object') continue
+    const provider: AiProvider = raw.provider === 'anthropic' ? 'anthropic' : 'openai'
+    const fallback = profileDefaults(provider)
+    const id = profileId(raw.id, provider, index)
+    if (ids.has(id)) continue
+    ids.add(id)
+    const useLegacyOpenAi = !hasProfileCollection && id === 'openai-default'
+    const useLegacyAnthropic = !hasProfileCollection && id === 'anthropic-default'
+    const baseUrl = useLegacyOpenAi && typeof input.baseUrl === 'string'
+      ? input.baseUrl
+      : useLegacyAnthropic && typeof input.anthropicBaseUrl === 'string'
+        ? input.anthropicBaseUrl
+        : raw.baseUrl
+    const model = useLegacyOpenAi && typeof input.model === 'string'
+      ? input.model
+      : useLegacyAnthropic && typeof input.anthropicModel === 'string'
+        ? input.anthropicModel
+        : raw.model
+    const protocol = useLegacyOpenAi && AI_PROTOCOLS.has(input.apiProtocol as AiProtocol)
+      ? input.apiProtocol
+      : raw.apiProtocol
+    const name = typeof raw.name === 'string' && raw.name.trim()
+      ? raw.name.trim().slice(0, 60)
+      : fallback.name
+    profiles.push({
+      id,
+      name,
+      provider,
+      baseUrl: sanitizeBaseUrl(baseUrl, fallback.baseUrl, `${name} 服务地址`),
+      model: typeof model === 'string' && model.trim() ? model.trim().slice(0, 200) : fallback.model,
+      apiProtocol: AI_PROTOCOLS.has(protocol as AiProtocol) ? protocol as AiProtocol : fallback.apiProtocol,
+      hasApiKey: Boolean(raw.hasApiKey)
+    })
+  }
+
+  return profiles.length ? profiles : legacyProfiles(input)
+}
+
+export function sanitizeSettings(input: Partial<AppSettings>): SanitizedSettings {
   const theme = input.theme === 'light' || input.theme === 'dark' || input.theme === 'system' ? input.theme : DEFAULT_SETTINGS.theme
   const context = CONTEXT_SCOPES.has(input.defaultContextScope as ContextScope)
     ? (input.defaultContextScope as ContextScope)
     : DEFAULT_SETTINGS.defaultContextScope
-  const model = typeof input.model === 'string' && input.model.trim() ? input.model.trim().slice(0, 200) : DEFAULT_SETTINGS.model
-  const aiProvider = input.aiProvider === 'anthropic' ? 'anthropic' : DEFAULT_SETTINGS.aiProvider
-  const anthropicModel = typeof input.anthropicModel === 'string' && input.anthropicModel.trim()
-    ? input.anthropicModel.trim().slice(0, 200)
-    : DEFAULT_SETTINGS.anthropicModel
-  const apiProtocol = AI_PROTOCOLS.has(input.apiProtocol as AiProtocol)
-    ? (input.apiProtocol as AiProtocol)
-    : DEFAULT_SETTINGS.apiProtocol
-  const reasoningEffort = SUPPORTED_REASONING_EFFORTS.has(input.reasoningEffort as ReasoningEffort)
+  const profiles = sanitizeProfiles(input)
+  const requestedProvider: AiProvider = input.aiProvider === 'anthropic' ? 'anthropic' : 'openai'
+  const requestedProfile = profiles.find((profile) => profile.id === input.activeAiProfileId)
+  const activeProfile = requestedProfile?.provider === requestedProvider
+    ? requestedProfile
+    : profiles.find((profile) => profile.provider === requestedProvider) ?? requestedProfile ?? profiles[0]
+  const openAiProfile = activeProfile.provider === 'openai'
+    ? activeProfile
+    : profiles.find((profile) => profile.provider === 'openai') ?? profileDefaults('openai')
+  const anthropicProfile = activeProfile.provider === 'anthropic'
+    ? activeProfile
+    : profiles.find((profile) => profile.provider === 'anthropic') ?? profileDefaults('anthropic')
+  const reasoningEffortCandidate = SUPPORTED_REASONING_EFFORTS.has(input.reasoningEffort as ReasoningEffort)
     ? (input.reasoningEffort as ReasoningEffort)
     : DEFAULT_SETTINGS.reasoningEffort
+  const reasoningEffort = activeProfile.provider === 'anthropic' && reasoningEffortCandidate === 'ultra'
+    ? 'max'
+    : reasoningEffortCandidate
   const customSystemPrompt = typeof input.customSystemPrompt === 'string'
     ? input.customSystemPrompt.trim().slice(0, MAX_CUSTOM_SYSTEM_PROMPT_CHARS)
     : DEFAULT_SETTINGS.customSystemPrompt
@@ -102,17 +201,15 @@ export function sanitizeSettings(
   )
 
   return {
-    aiProvider,
-    baseUrl: sanitizeBaseUrl(input.baseUrl, DEFAULT_SETTINGS.baseUrl, 'AI 服务地址'),
-    model,
-    apiProtocol,
+    aiProvider: activeProfile.provider,
+    activeAiProfileId: activeProfile.id,
+    aiProfiles: profiles,
+    baseUrl: openAiProfile.baseUrl,
+    model: openAiProfile.model,
+    apiProtocol: openAiProfile.apiProtocol,
     reasoningEffort,
-    anthropicBaseUrl: sanitizeBaseUrl(
-      input.anthropicBaseUrl,
-      DEFAULT_SETTINGS.anthropicBaseUrl,
-      'Anthropic 服务地址'
-    ),
-    anthropicModel,
+    anthropicBaseUrl: anthropicProfile.baseUrl,
+    anthropicModel: anthropicProfile.model,
     imageBaseUrl: sanitizeBaseUrl(input.imageBaseUrl, DEFAULT_SETTINGS.imageBaseUrl, '图片生成服务地址'),
     theme,
     fontSize: clampedInteger(input.fontSize, DEFAULT_SETTINGS.fontSize, 11, 28),
@@ -142,128 +239,155 @@ export function sanitizeSettings(
   }
 }
 
+function decryptSecret(encrypted: string | undefined, label: string): string | null {
+  if (!encrypted) return null
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error(`当前系统的安全存储暂不可用，无法读取${label}。`)
+  }
+  try {
+    return safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
+  } catch {
+    throw new Error(`${label}无法解密，请在设置中重新保存。`)
+  }
+}
+
+function encryptSecret(value: string, label: string): string {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error(`当前系统的安全存储暂不可用，${label}未保存。`)
+  }
+  return safeStorage.encryptString(value).toString('base64')
+}
+
 export class SettingsStore {
   private get filePath(): string {
     return path.join(app.getPath('userData'), 'settings.json')
   }
 
-  private async stored(): Promise<StoredSettings> {
-    const fallback: StoredSettings = { settings: sanitizeSettings(DEFAULT_SETTINGS) }
+  private async stored(): Promise<NormalizedStoredSettings> {
+    const fallback: StoredSettings = { version: 2, settings: sanitizeSettings(DEFAULT_SETTINGS) }
     const value = await readJson<StoredSettings>(this.filePath, fallback)
-    if (!value || typeof value !== 'object' || !value.settings) return fallback
+    if (!value || typeof value !== 'object' || !value.settings) {
+      return { settings: sanitizeSettings(DEFAULT_SETTINGS), encryptedApiKeys: {} }
+    }
     try {
+      const settings = sanitizeSettings(value.settings)
+      const encryptedApiKeys = value.encryptedApiKeys && typeof value.encryptedApiKeys === 'object'
+        ? Object.fromEntries(Object.entries(value.encryptedApiKeys).filter(
+            ([id, encrypted]) => settings.aiProfiles.some((profile) => profile.id === id) && typeof encrypted === 'string'
+          ))
+        : {}
+      const openAiProfile = settings.aiProfiles.find((profile) => profile.provider === 'openai')
+      const anthropicProfile = settings.aiProfiles.find((profile) => profile.provider === 'anthropic')
+      if (value.encryptedApiKey && openAiProfile && !encryptedApiKeys[openAiProfile.id]) {
+        encryptedApiKeys[openAiProfile.id] = value.encryptedApiKey
+      }
+      if (value.encryptedAnthropicApiKey && anthropicProfile && !encryptedApiKeys[anthropicProfile.id]) {
+        encryptedApiKeys[anthropicProfile.id] = value.encryptedAnthropicApiKey
+      }
       return {
-        settings: sanitizeSettings(value.settings),
-        encryptedApiKey: typeof value.encryptedApiKey === 'string' ? value.encryptedApiKey : undefined,
-        encryptedAnthropicApiKey: typeof value.encryptedAnthropicApiKey === 'string' ? value.encryptedAnthropicApiKey : undefined,
+        settings,
+        encryptedApiKeys,
         encryptedImageApiKey: typeof value.encryptedImageApiKey === 'string' ? value.encryptedImageApiKey : undefined
       }
     } catch {
-      return fallback
+      return { settings: sanitizeSettings(DEFAULT_SETTINGS), encryptedApiKeys: {} }
     }
   }
 
-  async get(): Promise<AppSettings> {
-    const stored = await this.stored()
+  private publicSettings(stored: NormalizedStoredSettings): AppSettings {
+    const aiProfiles = stored.settings.aiProfiles.map((profile) => ({
+      ...profile,
+      hasApiKey: Boolean(stored.encryptedApiKeys[profile.id])
+    }))
+    const active = aiProfiles.find((profile) => profile.id === stored.settings.activeAiProfileId) ?? aiProfiles[0]
+    const openAi = active.provider === 'openai'
+      ? active
+      : aiProfiles.find((profile) => profile.provider === 'openai')
+    const anthropic = active.provider === 'anthropic'
+      ? active
+      : aiProfiles.find((profile) => profile.provider === 'anthropic')
     return {
       ...stored.settings,
-      hasApiKey: Boolean(stored.encryptedApiKey),
-      hasAnthropicApiKey: Boolean(stored.encryptedAnthropicApiKey),
+      aiProfiles,
+      hasApiKey: Boolean(openAi?.hasApiKey),
+      hasAnthropicApiKey: Boolean(anthropic?.hasApiKey),
       hasImageApiKey: Boolean(stored.encryptedImageApiKey)
     }
   }
 
-  async apiKey(): Promise<string | null> {
+  async get(): Promise<AppSettings> {
+    return this.publicSettings(await this.stored())
+  }
+
+  private async activeApiKey(provider: AiProvider): Promise<string | null> {
     const stored = await this.stored()
-    if (!stored.encryptedApiKey) return null
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('当前系统的安全存储暂不可用，无法读取 API Key。')
-    }
-    try {
-      return safeStorage.decryptString(Buffer.from(stored.encryptedApiKey, 'base64'))
-    } catch {
-      throw new Error('API Key 无法解密，请在设置中重新保存。')
-    }
+    const active = stored.settings.aiProfiles.find((profile) => profile.id === stored.settings.activeAiProfileId)
+    const profile = active?.provider === provider
+      ? active
+      : stored.settings.aiProfiles.find((candidate) => candidate.provider === provider)
+    return decryptSecret(profile ? stored.encryptedApiKeys[profile.id] : undefined, `${profile?.name ?? 'AI'} API Key`)
+  }
+
+  async apiKey(): Promise<string | null> {
+    return this.activeApiKey('openai')
   }
 
   async imageApiKey(): Promise<string | null> {
     const stored = await this.stored()
-    if (!stored.encryptedImageApiKey) return null
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('当前系统的安全存储暂不可用，无法读取图片生成 API Key。')
-    }
-    try {
-      return safeStorage.decryptString(Buffer.from(stored.encryptedImageApiKey, 'base64'))
-    } catch {
-      throw new Error('图片生成 API Key 无法解密，请在设置中重新保存。')
-    }
+    return decryptSecret(stored.encryptedImageApiKey, '图片生成 API Key')
   }
 
   async anthropicApiKey(): Promise<string | null> {
-    const stored = await this.stored()
-    if (!stored.encryptedAnthropicApiKey) return null
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('当前系统的安全存储暂不可用，无法读取 Anthropic API Key。')
-    }
-    try {
-      return safeStorage.decryptString(Buffer.from(stored.encryptedAnthropicApiKey, 'base64'))
-    } catch {
-      throw new Error('Anthropic API Key 无法解密，请在设置中重新保存。')
-    }
+    return this.activeApiKey('anthropic')
   }
 
   async save(input: AppSettings): Promise<AppSettings> {
     const previous = await this.stored()
-    let encryptedApiKey = previous.encryptedApiKey
-    let encryptedAnthropicApiKey = previous.encryptedAnthropicApiKey
-    let encryptedImageApiKey = previous.encryptedImageApiKey
-    if (Object.prototype.hasOwnProperty.call(input, 'apiKey')) {
-      const nextKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : ''
-      if (!nextKey) {
-        if (input.hasApiKey === false) encryptedApiKey = undefined
-      } else {
-        if (!safeStorage.isEncryptionAvailable()) {
-          throw new Error('当前系统的安全存储暂不可用，API Key 未保存。')
-        }
-        encryptedApiKey = safeStorage.encryptString(nextKey).toString('base64')
-      }
-    }
-    if (Object.prototype.hasOwnProperty.call(input, 'anthropicApiKey')) {
-      const nextKey = typeof input.anthropicApiKey === 'string' ? input.anthropicApiKey.trim() : ''
-      if (!nextKey) {
-        if (input.hasAnthropicApiKey === false) encryptedAnthropicApiKey = undefined
-      } else {
-        if (!safeStorage.isEncryptionAvailable()) {
-          throw new Error('当前系统的安全存储暂不可用，Anthropic API Key 未保存。')
-        }
-        encryptedAnthropicApiKey = safeStorage.encryptString(nextKey).toString('base64')
-      }
-    }
-    if (Object.prototype.hasOwnProperty.call(input, 'imageApiKey')) {
-      const nextKey = typeof input.imageApiKey === 'string' ? input.imageApiKey.trim() : ''
-      if (!nextKey) {
-        if (input.hasImageApiKey === false) encryptedImageApiKey = undefined
-      } else {
-        if (!safeStorage.isEncryptionAvailable()) {
-          throw new Error('当前系统的安全存储暂不可用，图片生成 API Key 未保存。')
-        }
-        encryptedImageApiKey = safeStorage.encryptString(nextKey).toString('base64')
-      }
+    const settings = sanitizeSettings(input)
+    const profileIds = new Set(settings.aiProfiles.map((profile) => profile.id))
+    const encryptedApiKeys = Object.fromEntries(
+      Object.entries(previous.encryptedApiKeys).filter(([id]) => profileIds.has(id))
+    )
+
+    for (const profile of settings.aiProfiles) {
+      const raw = input.aiProfiles?.find((candidate) => candidate.id === profile.id)
+      if (!raw || !Object.prototype.hasOwnProperty.call(raw, 'apiKey')) continue
+      const nextKey = typeof raw.apiKey === 'string' ? raw.apiKey.trim() : ''
+      if (nextKey) encryptedApiKeys[profile.id] = encryptSecret(nextKey, `${profile.name} API Key`)
+      else if (raw.hasApiKey === false) delete encryptedApiKeys[profile.id]
     }
 
-    const settings = sanitizeSettings(input)
+    const legacyOpenAi = settings.aiProfiles.find((profile) => profile.provider === 'openai')
+    if (legacyOpenAi && Object.prototype.hasOwnProperty.call(input, 'apiKey')) {
+      const nextKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : ''
+      if (nextKey) encryptedApiKeys[legacyOpenAi.id] = encryptSecret(nextKey, 'API Key')
+      else if (input.hasApiKey === false) delete encryptedApiKeys[legacyOpenAi.id]
+    }
+    const legacyAnthropic = settings.aiProfiles.find((profile) => profile.provider === 'anthropic')
+    if (legacyAnthropic && Object.prototype.hasOwnProperty.call(input, 'anthropicApiKey')) {
+      const nextKey = typeof input.anthropicApiKey === 'string' ? input.anthropicApiKey.trim() : ''
+      if (nextKey) encryptedApiKeys[legacyAnthropic.id] = encryptSecret(nextKey, 'Anthropic API Key')
+      else if (input.hasAnthropicApiKey === false) delete encryptedApiKeys[legacyAnthropic.id]
+    }
+
+    let encryptedImageApiKey = previous.encryptedImageApiKey
+    if (Object.prototype.hasOwnProperty.call(input, 'imageApiKey')) {
+      const nextKey = typeof input.imageApiKey === 'string' ? input.imageApiKey.trim() : ''
+      if (nextKey) encryptedImageApiKey = encryptSecret(nextKey, '图片生成 API Key')
+      else if (input.hasImageApiKey === false) encryptedImageApiKey = undefined
+    }
+
+    const persistedSettings: SanitizedSettings = {
+      ...settings,
+      aiProfiles: settings.aiProfiles.map((profile) => ({ ...profile, hasApiKey: false }))
+    }
     const value: StoredSettings = {
-      settings,
-      ...(encryptedApiKey ? { encryptedApiKey } : {}),
-      ...(encryptedAnthropicApiKey ? { encryptedAnthropicApiKey } : {}),
+      version: 2,
+      settings: persistedSettings,
+      ...(Object.keys(encryptedApiKeys).length ? { encryptedApiKeys } : {}),
       ...(encryptedImageApiKey ? { encryptedImageApiKey } : {})
     }
     await atomicWriteJson(this.filePath, value)
-    return {
-      ...settings,
-      hasApiKey: Boolean(encryptedApiKey),
-      hasAnthropicApiKey: Boolean(encryptedAnthropicApiKey),
-      hasImageApiKey: Boolean(encryptedImageApiKey)
-    }
+    return this.publicSettings({ settings, encryptedApiKeys, encryptedImageApiKey })
   }
 }

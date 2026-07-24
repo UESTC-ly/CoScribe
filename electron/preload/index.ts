@@ -143,6 +143,9 @@ const api: CoScribeAPI = {
   },
   browser: {
     open: (url?: string) => ipcRenderer.invoke(IPC.browserOpen, url),
+    newTab: (url?: string) => ipcRenderer.invoke(IPC.browserNewTab, url),
+    activateTab: (tabId: string) => ipcRenderer.invoke(IPC.browserActivateTab, tabId),
+    closeTab: (tabId: string) => ipcRenderer.invoke(IPC.browserCloseTab, tabId),
     navigate: (url: string) => ipcRenderer.invoke(IPC.browserNavigate, url),
     back: () => ipcRenderer.invoke(IPC.browserBack),
     forward: () => ipcRenderer.invoke(IPC.browserForward),

@@ -8,6 +8,7 @@ import {
   FileText,
   Globe2,
   LoaderCircle,
+  Plus,
   Quote,
   RefreshCw,
   Search,
@@ -31,7 +32,10 @@ const EMPTY_STATE: ResearchBrowserState = {
   loading: false,
   canGoBack: false,
   canGoForward: false,
-  secure: false
+  secure: false,
+  activeTabId: null,
+  tabs: [],
+  maxTabs: 10
 }
 
 interface BrowserWorkspaceProps {
@@ -65,7 +69,7 @@ export function BrowserWorkspace({
 
   const acceptState = useCallback((next: ResearchBrowserState): void => {
     setState(next)
-    if (next.url) setAddress(next.url)
+    setAddress(next.url)
     if (next.error) setLocalMessage(next.error)
     else if (next.notice) setLocalMessage(next.notice)
   }, [])
@@ -204,16 +208,56 @@ export function BrowserWorkspace({
     }
   }
 
+  const createTab = async (): Promise<void> => {
+    try {
+      setLocalMessage(null)
+      acceptState(await window.coscribe.browser.newTab())
+    } catch (reason) {
+      reportError(reason)
+    }
+  }
+
+  const activateTab = async (tabId: string): Promise<void> => {
+    try {
+      setLocalMessage(null)
+      acceptState(await window.coscribe.browser.activateTab(tabId))
+    } catch (reason) {
+      reportError(reason)
+    }
+  }
+
+  const closeTab = async (tabId: string): Promise<void> => {
+    if (state.tabs.length <= 1) {
+      await close()
+      return
+    }
+    try {
+      setLocalMessage(null)
+      acceptState(await window.coscribe.browser.closeTab(tabId))
+    } catch (reason) {
+      reportError(reason)
+    }
+  }
+
   const hasPage = Boolean(state.url)
   const status = localMessage || state.error || state.notice || (state.loading ? '正在加载原网页…' : '')
 
   return (
     <section className="research-browser" aria-label="资料浏览器">
       <header className="research-browser__tabbar">
-        <Globe2 size={14} aria-hidden="true" />
-        <strong title={state.title}>{state.title || '新资料页'}</strong>
-        {state.secure && <ShieldCheck size={13} aria-label="HTTPS 安全连接" />}
-        <button className="icon-button" type="button" onClick={() => void close()} title="关闭资料浏览器" aria-label="关闭资料浏览器"><X size={15} /></button>
+        <div className="research-browser__tabs" role="tablist" aria-label="浏览器标签页">
+          {state.tabs.map((tab) => (
+            <div key={tab.id} className={`research-browser__tab ${tab.id === state.activeTabId ? 'is-active' : ''}`}>
+              <button type="button" role="tab" aria-selected={tab.id === state.activeTabId} onClick={() => void activateTab(tab.id)} title={tab.title || tab.url || '新资料页'}>
+                {tab.loading ? <LoaderCircle className="is-spinning" size={12} /> : <Globe2 size={12} />}
+                <strong>{tab.title || '新资料页'}</strong>
+              </button>
+              <button type="button" className="research-browser__tab-close" onClick={() => void closeTab(tab.id)} title="关闭标签页" aria-label={`关闭标签页：${tab.title || '新资料页'}`}><X size={12} /></button>
+            </div>
+          ))}
+        </div>
+        <button className="icon-button research-browser__new-tab" type="button" disabled={state.tabs.length >= state.maxTabs} onClick={() => void createTab()} title={`新建标签页（最多 ${state.maxTabs} 个）`} aria-label="新建浏览器标签页"><Plus size={15} /></button>
+        <button className="icon-button research-browser__close" type="button" onClick={() => void close()} title="关闭资料浏览器" aria-label="关闭资料浏览器"><X size={15} /></button>
       </header>
 
       <div className="research-browser__toolbar" role="toolbar" aria-label="网页工具">
@@ -247,7 +291,7 @@ export function BrowserWorkspace({
 
       <div className="research-browser__status" aria-live="polite">
         <span className={state.error || (localMessage && !state.notice) ? 'is-error' : ''}>{status}</span>
-        <span>{hasPage ? '原网页' : '单标签'}</span>
+        <span>{state.tabs.length}/{state.maxTabs} 个页面</span>
       </div>
 
       <div ref={surfaceRef} className={`research-browser__surface ${hasPage ? 'has-page' : ''}`} aria-label="原网页内容">

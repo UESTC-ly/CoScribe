@@ -9,7 +9,7 @@
 1. **创建或打开项目**  
    点击“新建项目”，或直接打开一个已有资料文件夹。已有 Markdown 和子文件夹会显示在左侧文件树中。
 2. **配置 AI**  
-   打开“设置 → AI 服务”，选择 OpenAI 格式或 Anthropic 格式，分别填写服务地址、模型和 API Key。两套配置独立保存，右下角模型菜单可直接跨提供方切换。
+   打开“设置 → AI 服务商”，添加一组或多组 OpenAI-compatible / Anthropic 配置。每组地址、模型和 API Key 独立保存，右下角模型菜单可直接切换。
 3. **打开资料**  
    CoScribe 支持 Markdown、PDF、DOCX、PPTX、图片、常见文本与代码文件。Markdown 默认使用预览模式。
 4. **选择上下文**  
@@ -60,7 +60,7 @@ flowchart LR
 - **Anthropic 格式**使用 Messages API：应用会请求 `/v1/messages`，使用 `x-api-key` 与固定的 `anthropic-version: 2023-06-01`。
 - 如果第三方 Anthropic 代理提供版本路径或完整 `/messages` 地址，可直接填写；CoScribe 不会把 OpenAI 和 Anthropic 的密钥混用。
 - Anthropic 当前思考强度使用 `output_config.effort`。菜单会提供 `low`、`medium`、`high`、`xhigh` 和 `max`；OpenAI 配置仍保留 `ultra`。
-- “设置 → AI 上下文与记忆”可以覆盖上下文窗口和回答预留 token。填写 `0` 会使用 CoScribe 的模型预设。
+- “设置 → AI 行为”可以覆盖上下文窗口和回答预留 token。填写 `0` 会使用 CoScribe 的模型预设。
 
 ### 整理和创建笔记
 
@@ -80,11 +80,11 @@ flowchart LR
 | DOCX | 本地语义预览和全文搜索 |
 | PPTX | 本地只读幻灯片预览和逐页搜索 |
 | 图片 | 查看、缩放、本地 OCR 或显式 AI 增强 |
-| 网页 | 使用内置单标签资料浏览器，保留原网页并可保存 Markdown、PDF 或 MHTML |
+| 网页 | 使用最多 10 个标签页的内置资料浏览器，保留原网页并可保存 Markdown、PDF 或 MHTML |
 
 ### 截图、粘贴图片与 OCR
 
-- 点击聊天工具栏中的“截图”，或按 `Cmd/Ctrl + Shift + 8`，然后拖动鼠标框选区域。
+- 点击聊天工具栏中的“截图”，或按 `Cmd/Ctrl + Shift + 8`。透明取景层会根据鼠标位置预选窗口或内容区域；单击候选框或拖动鼠标自选区域。
 - 可以直接把 PNG、JPEG、WebP 或非动画 GIF 粘贴到聊天输入框。
 - 图片点击“本地文字识别”，PDF 点击“本地识别当前页”。
 - macOS Apple Silicon 可点击“语音”进行本地中英文实时转写。
@@ -138,7 +138,7 @@ const note: LearningNote = {
 ## English Quick Guide
 
 1. Create a project or open an existing folder.
-2. Configure the AI endpoint, protocol, model, and API key under **Settings → AI Service**.
+2. Add one or more named provider profiles under **Settings → AI Providers**; each profile keeps its endpoint, model, protocol, and API key separately.
 3. Open a local document and choose the exact context scope before sending a request.
 4. Use **Organize notes** when you want AI to choose an appropriate project location and create durable Markdown notes.
 5. Use the copy button on code blocks, paste images into chat, or press `Cmd/Ctrl + Shift + 8` for a region screenshot.

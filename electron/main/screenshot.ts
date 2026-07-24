@@ -2,6 +2,7 @@ import { BrowserWindow, desktopCapturer, screen, type Display, type NativeImage 
 
 import { MAX_CHAT_IMAGE_BYTES } from '../../src/shared/chat-images'
 import type { ChatImageAttachment } from '../../src/shared/types'
+import { screenshotCandidateGuides } from './screenshot-candidates'
 import { screenshotCropBounds, type ScreenshotRegion } from './screenshot-region'
 
 const CAPTURE_RETRY_DELAYS_MS = [0, 140, 320] as const
@@ -17,31 +18,32 @@ const SELECTION_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
   <style>
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; cursor: crosshair; user-select: none; -webkit-app-region: no-drag; }
-    body { background: #111318; }
-    #screen { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
-    #shade { position: fixed; inset: 0; background: rgba(8, 10, 14, 0.34); }
-    #selection { position: fixed; display: none; border: 2px solid rgba(255, 255, 255, 0.96); background: rgba(255, 255, 255, 0.04); box-shadow: 0 0 0 100vmax rgba(8, 10, 14, 0.42); }
+    body { background: transparent; }
+    #selection { position: fixed; display: none; border: 2px solid rgba(255, 255, 255, 0.98); background: rgba(255, 255, 255, 0.025); box-shadow: 0 0 0 100vmax rgba(8, 10, 14, 0.32); pointer-events: none; }
     #selection.active { display: block; }
+    #selection.candidate { border-color: rgba(116, 196, 255, 0.98); }
     #size { position: absolute; left: 6px; top: 6px; padding: 3px 6px; color: white; background: rgba(20, 22, 27, 0.82); border-radius: 4px; font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; white-space: nowrap; }
   </style>
 </head>
 <body>
-  <img id="screen" alt="" draggable="false">
-  <div id="shade"></div>
   <div id="selection"><span id="size"></span></div>
 </body>
 </html>`
 
-const SELECTION_SCRIPT = `(() => new Promise((resolve) => {
-  const shade = document.getElementById('shade')
+function selectionScript(candidates: ScreenshotRegion[], initialPoint: { x: number; y: number }): string {
+  return `(() => new Promise((resolve) => {
+  const candidates = ${JSON.stringify(candidates)}
+  const initialPoint = ${JSON.stringify(initialPoint)}
   const box = document.getElementById('selection')
   const size = document.getElementById('size')
   let start = null
   let current = null
+  let suggested = null
+  let dragging = false
   let settled = false
 
   const clamp = (value, maximum) => Math.min(maximum, Math.max(0, value))
@@ -60,7 +62,31 @@ const SELECTION_SCRIPT = `(() => new Promise((resolve) => {
     cleanup()
     resolve(value)
   }
-  const render = (clientX, clientY) => {
+  const renderRegion = (region, candidate) => {
+    if (!region) {
+      box.classList.remove('active', 'candidate')
+      return
+    }
+    current = region
+    box.style.left = region.x + 'px'
+    box.style.top = region.y + 'px'
+    box.style.width = region.width + 'px'
+    box.style.height = region.height + 'px'
+    size.textContent = Math.round(region.width) + ' × ' + Math.round(region.height)
+    box.classList.toggle('candidate', candidate)
+    box.classList.add('active')
+  }
+  const candidateAt = (clientX, clientY) => candidates.find((region) => (
+    clientX >= region.x &&
+    clientX <= region.x + region.width &&
+    clientY >= region.y &&
+    clientY <= region.y + region.height
+  )) || null
+  const hover = (clientX, clientY) => {
+    suggested = candidateAt(clientX, clientY)
+    renderRegion(suggested, true)
+  }
+  const renderDrag = (clientX, clientY) => {
     if (!start) return
     const endX = clamp(clientX, window.innerWidth)
     const endY = clamp(clientY, window.innerHeight)
@@ -68,18 +94,14 @@ const SELECTION_SCRIPT = `(() => new Promise((resolve) => {
     const y = Math.min(start.y, endY)
     const width = Math.abs(endX - start.x)
     const height = Math.abs(endY - start.y)
-    current = { x, y, width, height }
-    box.style.left = x + 'px'
-    box.style.top = y + 'px'
-    box.style.width = width + 'px'
-    box.style.height = height + 'px'
-    size.textContent = Math.round(width) + ' × ' + Math.round(height)
+    renderRegion({ x, y, width, height }, false)
   }
   const reset = () => {
     start = null
     current = null
-    box.classList.remove('active')
-    shade.style.display = 'block'
+    suggested = null
+    dragging = false
+    box.classList.remove('active', 'candidate')
   }
   function pointerDown(event) {
     if (event.button !== 0) return
@@ -89,26 +111,33 @@ const SELECTION_SCRIPT = `(() => new Promise((resolve) => {
       y: clamp(event.clientY, window.innerHeight),
       pointerId: event.pointerId
     }
+    suggested = candidateAt(event.clientX, event.clientY)
+    dragging = false
     try { document.body.setPointerCapture?.(event.pointerId) } catch {}
-    shade.style.display = 'none'
-    box.classList.add('active')
-    render(event.clientX, event.clientY)
+    renderRegion(suggested || { x: start.x, y: start.y, width: 0, height: 0 }, Boolean(suggested))
   }
   function pointerMove(event) {
-    if (!start || event.pointerId !== start.pointerId) return
+    if (!start) {
+      hover(event.clientX, event.clientY)
+      return
+    }
+    if (event.pointerId !== start.pointerId) return
     event.preventDefault()
-    render(event.clientX, event.clientY)
+    if (Math.abs(event.clientX - start.x) >= 4 || Math.abs(event.clientY - start.y) >= 4) dragging = true
+    if (dragging) renderDrag(event.clientX, event.clientY)
   }
   function pointerUp(event) {
     if (!start || event.pointerId !== start.pointerId) return
     event.preventDefault()
-    render(event.clientX, event.clientY)
+    if (dragging) renderDrag(event.clientX, event.clientY)
     try { document.body.releasePointerCapture?.(event.pointerId) } catch {}
-    if (!current || current.width < ${MIN_SELECTION_SIZE} || current.height < ${MIN_SELECTION_SIZE}) {
+    const selection = dragging ? current : suggested
+    if (!selection || selection.width < ${MIN_SELECTION_SIZE} || selection.height < ${MIN_SELECTION_SIZE}) {
       reset()
+      hover(event.clientX, event.clientY)
       return
     }
-    finish({ ...current, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
+    finish({ ...selection, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
   }
   function pointerCancel(event) {
     if (!start || event.pointerId !== start.pointerId) return
@@ -120,7 +149,7 @@ const SELECTION_SCRIPT = `(() => new Promise((resolve) => {
     finish(null)
   }
   function cancel() { finish(null) }
-  function preventMenu(event) { event.preventDefault() }
+  function preventMenu(event) { event.preventDefault(); finish(null) }
 
   window.addEventListener('pointerdown', pointerDown, true)
   window.addEventListener('pointermove', pointerMove, true)
@@ -129,7 +158,9 @@ const SELECTION_SCRIPT = `(() => new Promise((resolve) => {
   window.addEventListener('keydown', keyDown, true)
   window.addEventListener('blur', cancel, true)
   window.addEventListener('contextmenu', preventMenu, true)
+  hover(initialPoint.x, initialPoint.y)
 }))()`
+}
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
@@ -160,14 +191,16 @@ function encodeScreenshot(image: NativeImage): Buffer {
   throw new Error('截图文件过大，无法加入聊天。请降低显示器分辨率后重试。')
 }
 
-function screenshotPreviewDataUrl(image: NativeImage, display: Display): string {
-  if (image.isEmpty()) throw new Error('没有获取到屏幕预览。请检查系统的屏幕录制权限。')
-  const width = Math.max(1, Math.round(display.bounds.width))
-  const height = Math.max(1, Math.round(display.bounds.height))
-  const preview = image.resize({ width, height, quality: 'good' })
-  const bytes = preview.toJPEG(86)
-  if (!bytes.length) throw new Error('无法生成截图选区预览。')
-  return `data:image/jpeg;base64,${bytes.toString('base64')}`
+function displayRelativeRegion(
+  display: Display,
+  region: { x: number; y: number; width: number; height: number }
+): ScreenshotRegion {
+  return {
+    x: region.x - display.bounds.x,
+    y: region.y - display.bounds.y,
+    width: region.width,
+    height: region.height
+  }
 }
 
 async function captureDisplayImage(display: Display, captureSize: { width: number; height: number }): Promise<NativeImage> {
@@ -200,7 +233,11 @@ export class ScreenshotService {
     return capture
   }
 
-  private async selectRegion(display: Display, previewDataUrl: string): Promise<ScreenshotSelection | null> {
+  private async selectRegion(
+    display: Display,
+    candidates: ScreenshotRegion[],
+    initialPoint: { x: number; y: number }
+  ): Promise<ScreenshotSelection | null> {
     const overlay = new BrowserWindow({
       x: display.bounds.x,
       y: display.bounds.y,
@@ -208,7 +245,7 @@ export class ScreenshotService {
       height: display.bounds.height,
       show: false,
       frame: false,
-      transparent: false,
+      transparent: true,
       resizable: false,
       movable: false,
       minimizable: false,
@@ -216,7 +253,7 @@ export class ScreenshotService {
       fullscreenable: false,
       skipTaskbar: true,
       hasShadow: false,
-      backgroundColor: '#111318',
+      backgroundColor: '#00000000',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -234,13 +271,8 @@ export class ScreenshotService {
     try {
       await overlay.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SELECTION_HTML)}`)
       overlay.webContents.on('will-navigate', (event) => event.preventDefault())
-      await overlay.webContents.executeJavaScript(`(() => {
-        const image = document.getElementById('screen')
-        image.src = ${JSON.stringify(previewDataUrl)}
-        return image.decode()
-      })()`, true)
       const closed = new Promise<null>((resolve) => overlay.once('closed', () => resolve(null)))
-      const selected = overlay.webContents.executeJavaScript(SELECTION_SCRIPT, true).catch(() => null)
+      const selected = overlay.webContents.executeJavaScript(selectionScript(candidates, initialPoint), true).catch(() => null)
       const timedOut = new Promise<null>((resolve) => {
         timeout = setTimeout(() => resolve(null), SELECTION_TIMEOUT_MS)
         timeout.unref()
@@ -271,16 +303,48 @@ export class ScreenshotService {
       width: Math.max(1, Math.round(display.size.width * display.scaleFactor)),
       height: Math.max(1, Math.round(display.size.height * display.scaleFactor))
     }
-    // Capture the visible display before opening the selector. This preserves
-    // the current note in the screenshot and prevents the selector itself from
-    // appearing in the captured pixels.
-    const displayImage = process.env.COSCRIBE_E2E_SCREENSHOT_SOURCE === 'app-window'
-      ? await window.webContents.capturePage()
-      : await captureDisplayImage(display, captureSize)
+    const captureVisibleDisplay = (): Promise<NativeImage> => (
+      process.env.COSCRIBE_E2E_SCREENSHOT_SOURCE === 'app-window'
+        ? window.webContents.capturePage()
+        : captureDisplayImage(display, captureSize)
+    )
+    const analysisImage = await captureVisibleDisplay()
+    const analysisSize = analysisImage.getSize()
+    const analysisScale = Math.min(1, 360 / Math.max(analysisSize.width, 1), 240 / Math.max(analysisSize.height, 1))
+    const sampledImage = analysisScale < 1
+      ? analysisImage.resize({
+          width: Math.max(1, Math.round(analysisSize.width * analysisScale)),
+          height: Math.max(1, Math.round(analysisSize.height * analysisScale)),
+          quality: 'good'
+        })
+      : analysisImage
+    const sampledSize = sampledImage.getSize()
+    const fixedRegions = [
+      displayRelativeRegion(display, display.workArea),
+      displayRelativeRegion(display, window.getBounds())
+    ]
+    const guides = screenshotCandidateGuides(
+      {
+        width: sampledSize.width,
+        height: sampledSize.height,
+        pixels: sampledImage.toBitmap()
+      },
+      { width: display.bounds.width, height: display.bounds.height },
+      fixedRegions
+    )
+    const cursor = screen.getCursorScreenPoint()
+    const initialPoint = {
+      x: cursor.x - display.bounds.x,
+      y: cursor.y - display.bounds.y
+    }
 
     try {
-      const selection = await this.selectRegion(display, screenshotPreviewDataUrl(displayImage, display))
+      const selection = await this.selectRegion(display, guides.regions, initialPoint)
       if (!selection) return null
+      // The transparent selector is destroyed before pixels are captured, so
+      // neither its dimming layer nor selection border can leak into the result.
+      await delay(70)
+      const displayImage = await captureVisibleDisplay()
       const crop = screenshotCropBounds(
         selection,
         { width: selection.viewportWidth, height: selection.viewportHeight },

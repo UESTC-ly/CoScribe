@@ -9,6 +9,7 @@ import {
   Settings as SettingsIcon
 } from 'lucide-react'
 import type { AiSendPayload, ImageGenerationPayload } from './components/ai'
+import type { SettingsPanel } from './components/shell'
 import type { ChatCommandInvocation } from './lib/chat-commands'
 import {
   ActivityRail,
@@ -208,6 +209,7 @@ export default function App(): React.JSX.Element {
   const [hydrated, setHydrated] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsInitialPanel, setSettingsInitialPanel] = useState<SettingsPanel>('general')
   const [guideOpen, setGuideOpen] = useState(false)
   const [prompt, setPrompt] = useState<PromptState | null>(null)
   const [promptValue, setPromptValue] = useState('')
@@ -245,6 +247,10 @@ export default function App(): React.JSX.Element {
   const panelResizeCleanupRef = useRef<((commit: boolean) => void) | null>(null)
 
   const setStore = appStore.getState
+  const openSettings = useCallback((initialPanel: SettingsPanel = 'general'): void => {
+    setSettingsInitialPanel(initialPanel)
+    setSettingsOpen(true)
+  }, [])
   const budgetSession = useMemo(
     () => state.sessions.find((session) => session.id === state.workspace.currentSessionId) ?? null,
     [state.sessions, state.workspace.currentSessionId]
@@ -1581,11 +1587,34 @@ export default function App(): React.JSX.Element {
   }, [refreshTree])
 
   const saveQuickAiSettings = useCallback(async (
-    patch: Partial<Pick<AppSettings, 'aiProvider' | 'model' | 'anthropicModel' | 'reasoningEffort'>>
+    patch: Partial<Pick<AppSettings, 'activeAiProfileId' | 'aiProvider' | 'model' | 'anthropicModel' | 'reasoningEffort'>>
   ): Promise<void> => {
     const current = appStore.getState().settings
     try {
-      const saved = await window.coscribe.settings.save({ ...current, ...patch })
+      const currentProfile = current.aiProfiles.find((profile) => profile.id === current.activeAiProfileId)
+      const requestedProfile = patch.activeAiProfileId
+        ? current.aiProfiles.find((profile) => profile.id === patch.activeAiProfileId)
+        : undefined
+      const targetProfile = requestedProfile ??
+        (patch.aiProvider && patch.aiProvider !== currentProfile?.provider
+          ? current.aiProfiles.find((profile) => profile.provider === patch.aiProvider)
+          : currentProfile) ??
+        current.aiProfiles[0]
+      const aiProfiles = current.aiProfiles.map((profile) => {
+        if (profile.id !== targetProfile.id) return profile
+        return {
+          ...profile,
+          ...(profile.provider === 'openai' && patch.model ? { model: patch.model } : {}),
+          ...(profile.provider === 'anthropic' && patch.anthropicModel ? { model: patch.anthropicModel } : {})
+        }
+      })
+      const saved = await window.coscribe.settings.save({
+        ...current,
+        ...patch,
+        aiProvider: targetProfile.provider,
+        activeAiProfileId: targetProfile.id,
+        aiProfiles
+      })
       setStore().setSettings(saved)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '无法保存 AI 模型设置')
@@ -1637,6 +1666,8 @@ export default function App(): React.JSX.Element {
     let animationFrame: number | null = null
     let finished = false
 
+    document.documentElement.classList.add('is-column-resizing')
+    if (browserActive) void window.coscribe.browser.setVisible(false)
     const paint = (): void => {
       animationFrame = null
       if (!shell) return
@@ -1689,6 +1720,8 @@ export default function App(): React.JSX.Element {
         setStore().setPanelWidths({ aiWidth: latestWidth })
       }
       panelResizeCleanupRef.current = null
+      document.documentElement.classList.remove('is-column-resizing')
+      if (browserActive) void window.coscribe.browser.setVisible(true)
       setResizing(null)
     }
     const end = (next: PointerEvent): void => {
@@ -1729,7 +1762,7 @@ export default function App(): React.JSX.Element {
   if (booting && !state.project) return <div className="app-loading"><span className="viewer-spinner" /><strong>正在准备本地工作台…</strong></div>
 
   if (!state.project) {
-    return <><HomeScreen recentProjects={state.recentProjects} defaultParentPath={state.settings.defaultProjectPath} busy={booting} error={error} onChooseLocation={() => window.coscribe.project.chooseLocation()} onCreate={(name, parentPath) => openProject(() => window.coscribe.project.create(name, parentPath))} onOpenFolder={() => openProject(() => window.coscribe.project.openDialog())} onOpenRecent={(path) => openProject(() => window.coscribe.project.openPath(path))} onOpenGuide={() => setGuideOpen(true)} onOpenSettings={() => setSettingsOpen(true)} /><SettingsDialog open={settingsOpen} settings={state.settings} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />{guideOpen && <Suspense fallback={null}><UserGuideDialog onClose={() => setGuideOpen(false)} /></Suspense>}</>
+    return <><HomeScreen recentProjects={state.recentProjects} defaultParentPath={state.settings.defaultProjectPath} busy={booting} error={error} onChooseLocation={() => window.coscribe.project.chooseLocation()} onCreate={(name, parentPath) => openProject(() => window.coscribe.project.create(name, parentPath))} onOpenFolder={() => openProject(() => window.coscribe.project.openDialog())} onOpenRecent={(path) => openProject(() => window.coscribe.project.openPath(path))} onOpenGuide={() => setGuideOpen(true)} onOpenSettings={() => openSettings()} /><SettingsDialog open={settingsOpen} initialPanel={settingsInitialPanel} settings={state.settings} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />{guideOpen && <Suspense fallback={null}><UserGuideDialog onClose={() => setGuideOpen(false)} /></Suspense>}</>
   }
 
   const primaryTabs = state.workspace.panes.primary.tabIds.map((id) => state.workspace.tabs.find((tab) => tab.id === id)).filter((tab): tab is OpenTab => Boolean(tab))
@@ -1800,15 +1833,15 @@ export default function App(): React.JSX.Element {
     >
       <header className="app-titlebar">
         <div className="app-titlebar__project"><strong>{state.project.name}</strong><span>{browserActive ? '资料浏览器 · 原网页' : activePlugin ? activePlugin.name : activeTab?.path ?? state.project.path}</span></div>
-        <div className="app-titlebar__center">{browserActive ? '单标签资料浏览器' : activePlugin ? '按需加载的可信内置插件' : activeDocument?.dirty ? '未保存' : activeTab ? '本地文件' : '项目工作区'}</div>
+        <div className="app-titlebar__center">{browserActive ? '资料浏览器' : activePlugin ? '按需加载的可信内置插件' : activeDocument?.dirty ? '未保存' : activeTab ? '本地文件' : '项目工作区'}</div>
         <div className="app-titlebar__actions">
           <button className={`icon-button ${state.workspace.split ? 'is-active' : ''}`} disabled={specialWorkspaceActive} onClick={toggleSplit} title={specialWorkspaceActive ? '当前工作区使用单内容区域' : state.workspace.split ? '关闭分屏' : '左右分屏'} aria-label={state.workspace.split ? '关闭分屏' : '左右分屏'}>{state.workspace.split ? <Columns3 size={16} /> : <Columns2 size={16} />}</button>
           <button className="icon-button" onClick={() => setGuideOpen(true)} title="使用指南" aria-label="使用指南"><CircleHelp size={16} /></button>
-          <button className="icon-button" onClick={() => setSettingsOpen(true)} title="设置" aria-label="设置"><SettingsIcon size={16} /></button>
+          <button className="icon-button" onClick={() => openSettings()} title="设置" aria-label="设置"><SettingsIcon size={16} /></button>
         </div>
       </header>
       <div className="app-body">
-        <ActivityRail active={state.workspace.navSection} navVisible={state.workspace.navVisible} browserActive={browserActive} onChange={toggleNavigatorSection} onToggleBrowser={() => setBrowserActive((active) => { const next = !active; if (next) setActivePluginId(null); return next })} onSettings={() => setSettingsOpen(true)} />
+        <ActivityRail active={state.workspace.navSection} navVisible={state.workspace.navVisible} browserActive={browserActive} onChange={toggleNavigatorSection} onToggleBrowser={() => setBrowserActive((active) => { const next = !active; if (next) setActivePluginId(null); return next })} onSettings={() => openSettings()} />
         {state.workspace.navVisible && <ProjectNavigator
           section={state.workspace.navSection}
           projectName={state.project.name}
@@ -1878,12 +1911,12 @@ export default function App(): React.JSX.Element {
                 onFileChanged={plannerFileChanged}
                 onGenerateWithAi={generateProjectPlan}
                 calendarGranted={(state.settings.pluginGrants.planner ?? []).includes('calendar:write')}
-                onOpenSettings={() => setSettingsOpen(true)}
+                onOpenSettings={() => openSettings('providers')}
               />
             ) : activePluginId === 'daily-notes' ? (
               <DailyNotesWorkspace projectName={state.project.name} onOpenMarkdown={(path) => openPath(path, 'markdown')} onFileChanged={plannerFileChanged} />
             ) : activePluginId === 'flashcards' ? (
-              <FlashcardsWorkspace files={pluginFiles} aiConfigured={isConfigured} onOpenMarkdown={(path) => openPath(path, 'markdown')} onGenerateWithAi={generateFlashcards} onOpenSettings={() => setSettingsOpen(true)} />
+              <FlashcardsWorkspace files={pluginFiles} aiConfigured={isConfigured} onOpenMarkdown={(path) => openPath(path, 'markdown')} onGenerateWithAi={generateFlashcards} onOpenSettings={() => openSettings('providers')} />
             ) : activePluginId === 'backlinks' ? (
               <BacklinksWorkspace activePath={activeTab?.kind === 'markdown' ? activeTab.path : undefined} onOpenMarkdown={(path) => openPath(path, 'markdown')} />
             ) : activePluginId === 'diagnostics' ? (
@@ -1902,7 +1935,7 @@ export default function App(): React.JSX.Element {
                 onOpenMarkdown={(path) => openPath(path, 'markdown')}
                 onProjectChanged={refreshTree}
                 onGenerateWithAi={generateLiteratureMatrix}
-                onOpenSettings={() => setSettingsOpen(true)}
+                onOpenSettings={() => openSettings('providers')}
               />
             ) : activePluginId === 'mcp-connectors' ? (
               <McpWorkspace onSendToAi={sendPluginTextToAi} />
@@ -1998,7 +2031,7 @@ export default function App(): React.JSX.Element {
             onRejectOperation={rejectOperation}
             onRegenerateMessage={regenerateAiMessage}
             onClose={() => state.setAiVisible(false)}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => openSettings('providers')}
             onDismissError={() => setAiError(null)}
           /></Suspense>
         </>}
@@ -2015,6 +2048,7 @@ export default function App(): React.JSX.Element {
           </button>
         )}
       </div>
+      {resizing && <div className="panel-resize-shield" aria-hidden="true" />}
       <footer className="app-statusbar">
         <span className={`status-item ${activeDocument?.dirty ? 'is-warning' : 'is-ok'}`}>{activeDocument?.dirty ? <Save size={11} /> : <FileCheck2 size={11} />}{activeDocument?.dirty ? '尚未保存' : '文件已同步'}</span>
         {activeTab?.kind === 'pdf' && <span className="status-item">第 {state.workspace.pdf[activeTab.path]?.page ?? 1} 页</span>}
@@ -2025,6 +2059,8 @@ export default function App(): React.JSX.Element {
           provider={state.settings.aiProvider}
           openAiModel={state.settings.model}
           anthropicModel={state.settings.anthropicModel}
+          profiles={state.settings.aiProfiles}
+          activeProfileId={state.settings.activeAiProfileId}
           reasoningEffort={state.settings.reasoningEffort}
           isConfigured={isConfigured}
           onChange={saveQuickAiSettings}
@@ -2034,7 +2070,7 @@ export default function App(): React.JSX.Element {
 
       {error && <div className="global-error" role="alert"><span>{error}</span><button onClick={() => setError(null)}>关闭</button></div>}
       {guideOpen && <Suspense fallback={null}><UserGuideDialog onClose={() => setGuideOpen(false)} /></Suspense>}
-      <SettingsDialog open={settingsOpen} settings={state.settings} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />
+      <SettingsDialog open={settingsOpen} initialPanel={settingsInitialPanel} settings={state.settings} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />
       <Dialog open={Boolean(prompt)} title={prompt?.title ?? ''} description={prompt?.description} onClose={() => setPrompt(null)} width={460} footer={<><button className="secondary-button" onClick={() => setPrompt(null)}>取消</button><button className="primary-button" disabled={!promptValue.trim()} onClick={() => void submitPrompt()}>{prompt?.confirmLabel ?? '确认'}</button></>}>
         <label className="field-label">{prompt?.label}<textarea className="field prompt-textarea" value={promptValue} onChange={(event) => setPromptValue(event.target.value)} placeholder={prompt?.placeholder} rows={prompt?.title.includes('批注') ? 5 : 2} /></label>
       </Dialog>

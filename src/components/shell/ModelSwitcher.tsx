@@ -5,6 +5,7 @@ import {
   SELECTABLE_ANTHROPIC_MODELS,
   SELECTABLE_AI_MODELS,
   type AiProvider,
+  type AiProviderProfile,
   type ReasoningEffort,
 } from '../../shared/types'
 
@@ -12,10 +13,13 @@ interface ModelSwitcherProps {
   provider: AiProvider
   openAiModel: string
   anthropicModel: string
+  profiles: AiProviderProfile[]
+  activeProfileId: string
   reasoningEffort: ReasoningEffort
   isConfigured: boolean
   onChange: (patch: {
     aiProvider?: AiProvider
+    activeAiProfileId?: string
     model?: string
     anthropicModel?: string
     reasoningEffort?: ReasoningEffort
@@ -44,6 +48,8 @@ export function ModelSwitcher({
   provider,
   openAiModel,
   anthropicModel,
+  profiles,
+  activeProfileId,
   reasoningEffort,
   isConfigured,
   onChange
@@ -86,6 +92,11 @@ export function ModelSwitcher({
     }
   }
   const model = provider === 'anthropic' ? anthropicModel : openAiModel
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId)
+  const modelOptions = [...new Set([
+    model,
+    ...(provider === 'anthropic' ? SELECTABLE_ANTHROPIC_MODELS : SELECTABLE_AI_MODELS)
+  ])]
   const reasoningOptions = provider === 'anthropic'
     ? REASONING_OPTIONS.filter((option) => option.value !== 'ultra')
     : REASONING_OPTIONS
@@ -119,7 +130,7 @@ export function ModelSwitcher({
         onClick={() => setOpen((value) => !value)}
       >
         <Bot size={11} />
-        <span className="model-switcher__provider">{provider === 'anthropic' ? 'Claude' : 'OpenAI'}</span>
+        <span className="model-switcher__provider">{activeProfile?.name ?? (provider === 'anthropic' ? 'Claude' : 'OpenAI')}</span>
         <span className="model-switcher__model">{model}</span>
         <span className="model-switcher__effort">{STATUS_LABELS[reasoningEffort]}</span>
         <ChevronDown size={10} aria-hidden="true" />
@@ -134,39 +145,42 @@ export function ModelSwitcher({
           onKeyDown={moveMenuFocus}
         >
           <section className="model-switcher__section" role="group" aria-labelledby="model-switcher-models">
-            <h3 id="model-switcher-models">OpenAI 格式</h3>
-            {SELECTABLE_AI_MODELS.map((option) => (
+            <h3 id="model-switcher-models">AI 服务商</h3>
+            {profiles.map((profile) => (
               <button
-                key={option}
+                key={profile.id}
                 type="button"
                 role="menuitemradio"
-                aria-checked={provider === 'openai' && openAiModel === option}
+                aria-checked={profile.id === activeProfileId}
                 disabled={saving}
-                onClick={() => void choose({ aiProvider: 'openai', model: option })}
+                onClick={() => void choose({
+                  activeAiProfileId: profile.id,
+                  aiProvider: profile.provider,
+                  ...(profile.provider === 'anthropic' && reasoningEffort === 'ultra' ? { reasoningEffort: 'max' } : {})
+                })}
               >
-                <span>{option}</span>
-                {provider === 'openai' && openAiModel === option && <Check size={13} aria-hidden="true" />}
+                <span>{profile.name}</span>
+                <small>{profile.model}</small>
+                {profile.id === activeProfileId && <Check size={13} aria-hidden="true" />}
               </button>
             ))}
           </section>
           <div className="model-switcher__separator" />
           <section className="model-switcher__section" role="group" aria-labelledby="model-switcher-anthropic-models">
-            <h3 id="model-switcher-anthropic-models">Anthropic Messages</h3>
-            {SELECTABLE_ANTHROPIC_MODELS.map((option) => (
+            <h3 id="model-switcher-anthropic-models">当前配置模型</h3>
+            {modelOptions.map((option) => (
               <button
                 key={option}
                 type="button"
                 role="menuitemradio"
-                aria-checked={provider === 'anthropic' && anthropicModel === option}
+                aria-checked={model === option}
                 disabled={saving}
-                onClick={() => void choose({
-                  aiProvider: 'anthropic',
-                  anthropicModel: option,
-                  ...(reasoningEffort === 'ultra' ? { reasoningEffort: 'max' } : {})
-                })}
+                onClick={() => void choose(provider === 'anthropic'
+                  ? { anthropicModel: option }
+                  : { model: option })}
               >
                 <span>{option}</span>
-                {provider === 'anthropic' && anthropicModel === option && <Check size={13} aria-hidden="true" />}
+                {model === option && <Check size={13} aria-hidden="true" />}
               </button>
             ))}
           </section>

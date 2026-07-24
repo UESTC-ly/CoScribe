@@ -78,7 +78,7 @@ Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门
 ### 五分钟开始使用
 
 1. **打开项目**：首页点击“打开文件夹”，选择已有资料目录；也可以创建新项目。
-2. **配置 AI**：打开“设置 → AI 服务”，填写兼容 OpenAI 的地址、协议、模型和 API Key。
+2. **配置 AI**：打开“设置 → AI 服务商”，添加一组或多组 OpenAI-compatible / Anthropic 地址、模型和 API Key。
 3. **打开资料**：从文件树打开 Markdown、PDF、DOCX、PPTX、图片或文本。Markdown 默认进入预览。
 4. **固定上下文**：选择“当前内容”“选中内容”“当前文档”或“当前项目”，再向 AI 提问。
 5. **保存结果**：普通文件修改先检查差异并接受；点击“整理笔记”时，AI 会在项目内选择合适位置或创建新目录和笔记。
@@ -87,18 +87,20 @@ Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门
 
 CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、`node_modules` 等开发目录。
 
-### 配置 AI 服务
+### 配置 AI 服务商
 
-打开“设置 → AI 服务”：
+系统外观、项目与保存选项位于“通用设置”；AI 连接集中在“AI 服务商”。可以添加多组命名配置，并为每组独立保存地址、模型和密钥。
 
 | 配置项 | 如何填写 |
 | --- | --- |
+| 服务商名称 | 使用容易辨认的名称，例如“OpenAI 工作账号”或“本地 Ollama” |
+| 接口格式 | 选择 OpenAI-compatible 或 Anthropic Messages |
 | 服务地址 | 基础地址，如 `https://api.openai.com/v1`；也支持完整的 `/responses` 或 `/chat/completions` 地址 |
-| 接口协议 | 建议选择“自动”；第三方服务不兼容时再固定为 Responses 或 Chat Completions |
+| 接口协议 | OpenAI-compatible 配置建议选择“自动”；第三方服务不兼容时再固定协议 |
 | 模型 | 填写服务端真实支持的模型名 |
 | API Key | 远程服务必须填写；本机回环服务可不填 |
 
-底部状态栏可快速切换 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`，以及 `low`、`medium`、`high`、`xhigh`、`ultra`、`max` 六档思考强度。第三方站点是否接受这些模型和档位，以其服务端实现为准。
+底部状态栏可在已保存的服务商配置间切换，并调整模型与思考强度。第三方站点是否接受所选模型和档位，以其服务端实现为准。
 
 - 远程 AI 地址必须使用 HTTPS；HTTP 只允许 `localhost`、`127.0.0.0/8` 和 `::1`。
 - API Key 通过 Electron `safeStorage` 加密保存在系统用户数据目录，不写进项目。
@@ -159,7 +161,7 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 
 项目根目录的 `COSCRIBE.md` 是项目级长期记忆。它适合记录稳定目标、术语、偏好、决策和限制，不适合存放 API Key、密码或大段会话原文。左侧“记忆”可以直接审阅和编辑；设置中也可以关闭向模型发送记忆，而不删除文件。
 
-“设置 → 系统提示词”允许编辑回答风格和工作偏好。自定义提示词不能覆盖 CoScribe 固定的路径、密钥和文件确认边界。
+“设置 → AI 行为”集中管理系统提示词、上下文、思考强度和项目记忆。自定义提示词不能覆盖 CoScribe 固定的路径、密钥和文件确认边界。
 
 ### OCR、图片、截图与语音
 
@@ -168,7 +170,7 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 - 图片点击“本地文字识别”，PDF 点击“本地识别当前页”。内置 PP-OCRv6-small、ONNX Runtime Web 与 WASM 在本机运行，不需要首次下载模型。
 - “AI 增强”是单独的显式操作，会把当前图像发送到已配置的 AI 服务。
 - 可以直接把 PNG、JPEG、WebP 或非动画 GIF 粘贴进聊天；每条消息最多 4 张，单张最多 5 MB，合计最多 10 MB。
-- 点击“截图”或按 `Cmd/Ctrl + Shift + 8`，在冻结的当前显示画面上拖拽选择区域。主窗口不会被隐藏，松开后截图进入聊天附件但不会自动发送，`Esc` 取消。
+- 点击“截图”或按 `Cmd/Ctrl + Shift + 8` 后，桌面保持原样，只覆盖透明十字取景层。鼠标附近会根据窗口和内容边缘显示候选框；单击候选框或拖拽自选区域后，应用重新捕获原始屏幕像素并裁剪。截图进入聊天附件但不会自动发送，`Esc` 取消。
 - macOS Apple Silicon 点击“语音”可在本机实时转写中英文，文字边说边进入输入框。识别器按需启动，停止后退出；原始录音不会发往语音云服务。
 
 OCR 与 AI 输出都可能出错，重要内容需要对照原始资料。
@@ -177,8 +179,9 @@ OCR 与 AI 输出都可能出错，重要内容需要对照原始资料。
 
 ![CoScribe research browser preserving the original webpage](docs/images/research-browser.png)
 
-左侧地球图标打开轻量资料浏览器。它复用 Electron 的 Chromium，限制为单标签，不引入第二套浏览器内核。
+左侧地球图标打开轻量资料浏览器。它复用 Electron 的 Chromium，最多同时保留 10 个独立标签页，不引入第二套浏览器内核。
 
+- 标签栏支持新建、切换和关闭页面；达到 10 页后需先关闭一个标签。
 - 页面保留原始 DOM、样式和交互，不会被纯文本阅读模式替换。
 - 可把网页选区、正文或引用来源发送给 AI。
 - 可保存完整 MHTML、语义化 Markdown 或保持打印排版的 PDF。
@@ -273,7 +276,7 @@ npm run verify:package:linux
 - Windows/Linux 产物已静态验证，但本次发布没有真实系统运行测试。
 - 插件中心尚不能安装第三方插件包。
 - 旧版 `.ppt` 依赖用户自行安装 LibreOffice；复杂 PPTX 字体、视频、宏和特殊对象可能与 PowerPoint 有差异。
-- 资料浏览器不提供多标签、密码管理、扩展、复杂下载和视频播放。
+- 资料浏览器最多保留 10 个标签页，不提供密码管理、扩展、复杂下载和视频播放。
 
 ---
 
@@ -306,7 +309,7 @@ The builds are currently unsigned.
 ### Start in five minutes
 
 1. **Open a project:** select an existing folder or create a new one.
-2. **Configure AI:** enter an OpenAI-compatible endpoint, protocol, model, and API key under Settings → AI service.
+2. **Configure AI:** add one or more named OpenAI-compatible or Anthropic profiles under Settings → AI Providers.
 3. **Read a source:** open Markdown, PDF, DOCX, PPTX, an image, or text. Markdown opens in Preview by default.
 4. **Freeze the scope:** choose Current content, Selection, Current document, or Project before sending.
 5. **Save durable results:** review ordinary file proposals before accepting them; use Quick Note when AI should route and save notes inside the project.
@@ -317,9 +320,9 @@ Existing files and nested folders appear directly. `.git`, `.venv`, `node_module
 
 ### Configure AI and image generation
 
-Settings → AI service accepts either a base URL such as `https://api.openai.com/v1` or a full `/responses` or `/chat/completions` endpoint. Automatic protocol mode is recommended. Remote services require HTTPS and an API key; loopback services may use HTTP without a key.
+System appearance, project, and save preferences live under General. Settings → AI Providers stores multiple named OpenAI-compatible or Anthropic profiles, each with its own endpoint, model, protocol, and encrypted key. OpenAI-compatible profiles accept a base URL such as `https://api.openai.com/v1` or a full `/responses` or `/chat/completions` endpoint. Remote services require HTTPS and an API key; loopback services may use HTTP without a key.
 
-The status bar switches among `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol`, with `low`, `medium`, `high`, `xhigh`, `ultra`, and `max` reasoning levels. A third-party provider must actually support the chosen values. Keys are encrypted with Electron `safeStorage` outside the project.
+The status bar switches among saved provider profiles and adjusts their model and reasoning level. A third-party provider must actually support the chosen values. Keys are encrypted separately with Electron `safeStorage` outside the project.
 
 `Unexpected token '<'` means the server returned HTML rather than JSON. Check the final request URL, protocol, proxy route, and `/v1` path. HTTP 401 means the provider rejected the key.
 
@@ -369,7 +372,7 @@ Every sent turn freezes its project, pane, document, page or heading, webpage UR
 
 `COSCRIBE.md` is transparent project-level memory for durable goals, terminology, preferences, decisions, and constraints. It is ordinary Markdown and never crosses project boundaries. Do not store secrets or raw conversation dumps there.
 
-Settings → System prompt provides editable response and workflow instructions. These instructions remain below CoScribe's immutable path, secret, and confirmation boundaries.
+Settings → AI Behavior groups the system prompt, context budget, reasoning effort, and project memory. Custom instructions remain below CoScribe's immutable path, secret, and confirmation boundaries.
 
 ### OCR, images, screenshots, and speech
 
@@ -378,7 +381,7 @@ Settings → System prompt provides editable response and workflow instructions.
 - Local OCR uses bundled PP-OCRv6-small, ONNX Runtime Web, and WASM with no first-run model download.
 - AI Enhance is a separate opt-in action that sends only the current image or rendered PDF page to the configured AI service.
 - Paste or choose up to four PNG, JPEG, WebP, or non-animated GIF images per message; each is limited to 5 MB and the total to 10 MB.
-- `Cmd/Ctrl + Shift + 8` freezes the visible display—including the open note—without hiding CoScribe. Drag a region to attach the crop without sending it; `Esc` cancels.
+- `Cmd/Ctrl + Shift + 8` keeps the desktop visible beneath a transparent crosshair selector. Candidate regions follow the pointer using window and content edges; click a candidate or drag a custom region. CoScribe captures the original display pixels only after selection, attaches the crop without sending it, and uses `Esc` to cancel.
 - On Apple Silicon macOS, Voice performs live bilingual transcription locally. Text appears in the composer while speaking, and the on-demand recognizer exits after recording.
 
 Always verify OCR and AI output against the primary source.
@@ -387,7 +390,7 @@ Always verify OCR and AI output against the primary source.
 
 ![CoScribe research browser preserving the original webpage](docs/images/research-browser.png)
 
-The globe icon opens a single-tab research browser backed by Electron's existing Chromium. It keeps the original DOM, styling, and interaction visible. Send a selection, extracted article text, or a citation to AI; save the page as complete MHTML, semantic Markdown, or print-layout PDF.
+The globe icon opens a research browser backed by Electron's existing Chromium, with up to 10 independent tabs. It keeps the original DOM, styling, and interaction visible. Send a selection, extracted article text, or a citation to AI; save the page as complete MHTML, semantic Markdown, or print-layout PDF.
 
 MHTML preserves the currently loaded HTML, styles, and resources as one all-or-nothing file up to 256 MB without passing through the AI text limit. Video, complex downloads, direct media, and popups go to the system browser.
 
@@ -467,7 +470,7 @@ npm run verify:package:linux
 
 ### Current limits
 
-CoScribe does not provide cloud sync, accounts, multi-user collaboration, mobile clients, or source editing for PDF/DOCX/PPTX. Local live speech and system Calendar/Reminders integration are Apple Silicon macOS-only. Windows and Linux packages are statically verified but were not runtime-tested on native hosts for this release. The plugin center accepts audited built-ins only. Legacy PPT conversion requires a separate LibreOffice installation. The research browser intentionally omits tabs, passwords, extensions, advanced downloads, and video playback.
+CoScribe does not provide cloud sync, accounts, multi-user collaboration, mobile clients, or source editing for PDF/DOCX/PPTX. Local live speech and system Calendar/Reminders integration are Apple Silicon macOS-only. Windows and Linux packages are statically verified but were not runtime-tested on native hosts for this release. The plugin center accepts audited built-ins only. Legacy PPT conversion requires a separate LibreOffice installation. The research browser is limited to 10 tabs and intentionally omits passwords, extensions, advanced downloads, and video playback.
 
 ## License
 

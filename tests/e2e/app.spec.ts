@@ -511,7 +511,19 @@ test('browses an original isolated webpage and saves complete MHTML, semantic Ma
     await expect.poll(async () => electronApp.evaluate(({ webContents }, expectedUrl) => {
       return webContents.getAllWebContents().some((contents) => contents.getURL() === expectedUrl && !contents.isLoading())
     }, url)).toBe(true)
-    await expect(page.locator('.research-browser__tabbar strong')).toHaveText('Isolated Research Page')
+    const loadedBrowserTab = page.getByRole('tab', { name: 'Isolated Research Page' })
+    await expect(loadedBrowserTab).toBeVisible()
+
+    const newBrowserTab = page.getByRole('button', { name: '新建浏览器标签页' })
+    for (let index = 1; index < 10; index += 1) await newBrowserTab.click()
+    await expect(page.getByRole('tablist', { name: '浏览器标签页' }).getByRole('tab')).toHaveCount(10)
+    await expect(newBrowserTab).toBeDisabled()
+    await expect(page.getByText('10/10 个页面')).toBeVisible()
+    await page.getByRole('button', { name: '关闭标签页：新资料页' }).last().click()
+    await expect(newBrowserTab).toBeEnabled()
+    await newBrowserTab.click()
+    await loadedBrowserTab.click()
+    await expect(page.locator('.research-browser__tab.is-active strong')).toHaveText('Isolated Research Page')
 
     const nativeBounds = await electronApp.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0]
@@ -629,7 +641,7 @@ test('browses an original isolated webpage and saves complete MHTML, semantic Ma
     await expect(page.getByText('这是由 Chromium 保存的完整网页归档')).toBeVisible()
     await expect(page.getByRole('button', { name: '使用其他应用打开' })).toBeVisible()
     await page.getByRole('button', { name: '资料浏览器', exact: true }).click()
-    await expect(page.locator('.research-browser__tabbar strong')).toHaveText('Isolated Research Page')
+    await expect(page.locator('.research-browser__tab.is-active strong')).toHaveText('Isolated Research Page')
 
     await page.getByRole('button', { name: '保存网页为 Markdown' }).click()
     const markdownPath = path.join(projectPath, '资料剪藏', 'Isolated Research Page.md')
@@ -706,6 +718,7 @@ test('persists transparent project memory and the editable system prompt', async
   await expect(page.getByText('已写入项目')).toBeVisible()
 
   await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: /AI 行为/u }).click()
   await page.getByLabel('自定义系统提示词').fill('回答时先给结论；关键术语保留英文原文。')
   await page.getByRole('button', { name: '保存设置' }).click()
   await expect(page.getByRole('dialog', { name: '设置' })).toBeHidden()
@@ -713,6 +726,7 @@ test('persists transparent project memory and the editable system prompt', async
     () => window.coscribe.settings.get().then((settings) => settings.customSystemPrompt)
   )).toBe('回答时先给结论；关键术语保留英文原文。')
   await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: /AI 行为/u }).click()
   await expect(page.getByLabel('自定义系统提示词')).toHaveValue('回答时先给结论；关键术语保留英文原文。')
   await page.getByRole('button', { name: '取消' }).click()
 })
@@ -818,8 +832,10 @@ test('drag-selects a screenshot region and adds the crop to chat attachments', a
   await page.getByRole('button', { name: '截图', exact: true }).click()
   const selector = await selectorWindow
   await selector.waitForLoadState('domcontentloaded')
-  await expect(selector.locator('#shade')).toBeVisible()
-  await expect(selector.locator('#screen')).toHaveAttribute('src', /^data:image\/jpeg;base64,/u)
+  await expect(selector.locator('#selection')).toBeVisible()
+  await expect(selector.locator('#selection')).toHaveClass(/candidate/u)
+  await expect(selector.locator('#screen')).toHaveCount(0)
+  expect(await selector.locator('body').evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
   await expect.poll(async () => electronApp.evaluate(({ BrowserWindow }) => {
     const main = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL().startsWith('coscribe-app:'))
     return Boolean(main?.isVisible())
@@ -967,7 +983,7 @@ test('keeps cursor feedback stable across nested targets and resize drags', asyn
 
   const navigationSeparator = page.getByRole('separator', { name: '调整项目导航宽度' })
   expect(await navigationSeparator.evaluate((element) => getComputedStyle(element).cursor)).toBe('col-resize')
-  expect(await navigationSeparator.evaluate((element) => getComputedStyle(element, '::after').cursor)).toBe('col-resize')
+  expect((await navigationSeparator.boundingBox())?.width).toBe(9)
   await hoverAndExpectNativeCursor(navigationSeparator, 'col-resize')
   const navigationBox = await navigationSeparator.boundingBox()
   if (!navigationBox) throw new Error('Project navigation resize separator is not visible')
@@ -1190,6 +1206,40 @@ test('switches the model and reasoning effort from the status bar and persists b
   await expect(trigger).toContainText('Max')
 })
 
+test('stores multiple named AI providers with separately encrypted credentials', async () => {
+  await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: /AI 服务商/u }).click()
+  await page.getByLabel('服务地址').fill('https://first.example.com/v1')
+  await page.getByLabel('API Key').fill('sk-first-provider-secret')
+
+  await page.getByRole('button', { name: '添加', exact: true }).click()
+  await page.getByLabel('服务商名称').fill('第二供应商')
+  await page.getByLabel('服务地址').fill('https://second.example.com/v1')
+  await page.getByLabel('API Key').fill('sk-second-provider-secret')
+  await page.getByRole('button', { name: '保存设置' }).click()
+  await expect(page.getByRole('dialog', { name: '设置' })).toBeHidden()
+
+  const saved = await page.evaluate(() => window.coscribe.settings.get())
+  expect(saved.aiProfiles).toHaveLength(3)
+  expect(saved.aiProfiles.filter((profile) => profile.hasApiKey)).toHaveLength(2)
+  expect(saved.aiProfiles.find((profile) => profile.name === '第二供应商')).toMatchObject({
+    baseUrl: 'https://second.example.com/v1',
+    hasApiKey: true
+  })
+  expect(saved.aiProfiles.every((profile) => profile.apiKey === undefined)).toBe(true)
+
+  const settingsJson = await readFile(path.join(userDataPath, 'settings.json'), 'utf8')
+  expect(settingsJson).not.toContain('sk-first-provider-secret')
+  expect(settingsJson).not.toContain('sk-second-provider-secret')
+  expect(Object.keys((JSON.parse(settingsJson) as { encryptedApiKeys: Record<string, string> }).encryptedApiKeys)).toHaveLength(2)
+
+  await electronApp.close()
+  await launchProject()
+  const restored = await page.evaluate(() => window.coscribe.settings.get())
+  expect(restored.aiProfiles.filter((profile) => profile.hasApiKey)).toHaveLength(2)
+  expect(restored.aiProfiles.find((profile) => profile.name === '第二供应商')?.baseUrl).toBe('https://second.example.com/v1')
+})
+
 test('uses the Anthropic Messages wire format with its isolated provider profile', async () => {
   let requestPath: string | null = null
   let requestBody: Record<string, unknown> | null = null
@@ -1221,10 +1271,11 @@ test('uses the Anthropic Messages wire format with its isolated provider profile
     const port = (server.address() as AddressInfo).port
     await page.getByRole('button', { name: '配置', exact: true }).click()
     const settingsDialog = page.getByRole('dialog')
-    await settingsDialog.getByRole('tab', { name: /Anthropic 格式/u }).click()
+    await settingsDialog.getByRole('tab', { name: /^Anthropic/u }).click()
     await settingsDialog.getByLabel('Anthropic 服务地址').fill(`http://127.0.0.1:${port}/custom/v1`)
     await settingsDialog.getByLabel('Anthropic 模型').fill('local-claude-e2e')
     await settingsDialog.getByLabel('Anthropic API Key').fill('sk-ant-e2e-secret')
+    await settingsDialog.getByRole('button', { name: /AI 行为/u }).click()
     await settingsDialog.locator('label').filter({ hasText: '思考强度' }).locator('select').selectOption('high')
     await settingsDialog.getByRole('button', { name: '保存设置' }).click()
 
@@ -1492,6 +1543,7 @@ test('uses an independent third-party GPT-Image 2 endpoint and renders the downl
     await page.getByRole('button', { name: '配置', exact: true }).click()
     await page.getByLabel('服务地址').fill(`http://127.0.0.1:${port}`)
     await page.getByLabel('模型', { exact: true }).fill('local-e2e-model')
+    await page.getByRole('button', { name: /图片生成/u }).click()
     await page.getByLabel('图片生成请求地址').fill(endpoint)
     await page.getByRole('textbox', { name: /图片 API Key/ }).fill('image-e2e-secret')
     await page.getByRole('button', { name: '保存设置' }).click()

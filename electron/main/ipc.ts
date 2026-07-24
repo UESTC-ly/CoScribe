@@ -227,6 +227,9 @@ export function registerIpc(services: Services): void {
   })
 
   handle(IPC.browserOpen, (_event, url?: string) => browser.open(url))
+  handle(IPC.browserNewTab, (_event, url?: string) => browser.newTab(url))
+  handle(IPC.browserActivateTab, (_event, tabId: string) => browser.activateTab(tabId))
+  handle(IPC.browserCloseTab, (_event, tabId: string) => browser.closeTab(tabId))
   handle(IPC.browserNavigate, (_event, url: string) => browser.navigate(url))
   handle(IPC.browserBack, () => browser.back())
   handle(IPC.browserForward, () => browser.forward())

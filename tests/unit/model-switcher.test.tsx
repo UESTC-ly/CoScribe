@@ -11,6 +11,11 @@ describe('ModelSwitcher provider-aware selection', () => {
         provider="openai"
         openAiModel="gpt-5.6-terra"
         anthropicModel="claude-sonnet-4-6"
+        profiles={[
+          { id: 'openai', name: 'OpenAI', provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.6-terra', apiProtocol: 'auto', hasApiKey: true },
+          { id: 'anthropic', name: 'Anthropic', provider: 'anthropic', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-6', apiProtocol: 'auto', hasApiKey: true }
+        ]}
+        activeProfileId="openai"
         reasoningEffort="ultra"
         isConfigured
         onChange={onChange}
@@ -18,11 +23,11 @@ describe('ModelSwitcher provider-aware selection', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: /切换 AI 模型和思考强度/u }))
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'claude-opus-4-8' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Anthropic claude-sonnet-4-6/u }))
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith({
+      activeAiProfileId: 'anthropic',
       aiProvider: 'anthropic',
-      anthropicModel: 'claude-opus-4-8',
       reasoningEffort: 'max'
     }))
   })
@@ -33,6 +38,10 @@ describe('ModelSwitcher provider-aware selection', () => {
         provider="anthropic"
         openAiModel="gpt-5.6-terra"
         anthropicModel="claude-sonnet-4-6"
+        profiles={[
+          { id: 'anthropic', name: 'Anthropic', provider: 'anthropic', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-6', apiProtocol: 'auto', hasApiKey: true }
+        ]}
+        activeProfileId="anthropic"
         reasoningEffort="max"
         isConfigured
         onChange={vi.fn()}

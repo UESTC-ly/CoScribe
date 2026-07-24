@@ -11,7 +11,8 @@ import type {
   ResearchBrowserBounds,
   ResearchBrowserExtractMode,
   ResearchBrowserExtractResult,
-  ResearchBrowserState
+  ResearchBrowserState,
+  ResearchBrowserTabState
 } from '../../src/shared/types'
 import { IPC } from '../ipc-channels'
 import { ProjectService, type ProjectWriteScope } from './project'
@@ -28,6 +29,7 @@ const BROWSER_PARTITION = 'coscribe-research-browser'
 const CAPTURE_WORLD_ID = 13_337
 const MAX_CAPTURE_CHARS = 200_000
 const MAX_WEB_ARCHIVE_BYTES = 256 * 1024 * 1024
+export const MAX_BROWSER_TABS = 10
 const EXTERNAL_LAUNCH_LIMIT = 4
 const EXTERNAL_LAUNCH_WINDOW_MS = 10_000
 
@@ -43,8 +45,9 @@ function boundedString(value: unknown, maximum = MAX_CAPTURE_CHARS): string {
   return typeof value === 'string' ? value.trim().slice(0, maximum) : ''
 }
 
-function emptyState(): ResearchBrowserState {
+function emptyTabState(id: string): ResearchBrowserTabState {
   return {
+    id,
     url: '',
     title: '新资料页',
     loading: false,
@@ -52,6 +55,13 @@ function emptyState(): ResearchBrowserState {
     canGoForward: false,
     secure: false
   }
+}
+
+interface BrowserTab {
+  id: string
+  view: WebContentsView | null
+  state: ResearchBrowserTabState
+  pageRevision: number
 }
 
 function safeExternalUrl(value: string): string | null {
@@ -75,14 +85,13 @@ function safeSystemUrl(value: string): string | null {
 }
 
 export class ResearchBrowserService {
-  private view: WebContentsView | null = null
+  private tabs: BrowserTab[] = []
+  private activeTabId: string | null = null
   private parentWindow: BrowserWindow | null = null
   private browserSession: Session | null = null
   private bounds: ResearchBrowserBounds = { x: 0, y: 0, width: 0, height: 0 }
   private visible = false
-  private stateValue = emptyState()
   private externalLaunches: number[] = []
-  private pageRevision = 0
 
   private readonly handleDownload = (event: Electron.Event, item: Electron.DownloadItem): void => {
     event.preventDefault()
@@ -102,68 +111,121 @@ export class ResearchBrowserService {
     private readonly project: ProjectService
   ) {}
 
-  private async launchExternal(
-    value: string,
-    options: { successNotice: string; rateLimited?: boolean }
-  ): Promise<boolean> {
-    const target = safeSystemUrl(value)
-    if (!target) {
-      this.mergeState({ error: '外部地址无效，已阻止打开。', notice: undefined })
-      return false
-    }
-    if (options.rateLimited !== false) {
-      const now = Date.now()
-      this.externalLaunches = this.externalLaunches.filter((timestamp) => now - timestamp < EXTERNAL_LAUNCH_WINDOW_MS)
-      if (this.externalLaunches.length >= EXTERNAL_LAUNCH_LIMIT) {
-        this.mergeState({ notice: '网页连续请求打开过多外部窗口，后续请求已拦截。', error: undefined })
-        return false
-      }
-      this.externalLaunches.push(now)
-    }
-    try {
-      await shell.openExternal(target)
-      this.mergeState({ notice: options.successNotice, error: undefined })
-      return true
-    } catch (error) {
-      const detail = error instanceof Error ? boundedString(error.message, 300) : ''
-      this.mergeState({
-        error: `无法在系统浏览器中打开外部内容${detail ? `：${detail}` : '。'}`,
-        notice: undefined
-      })
-      return false
+  private get activeTab(): BrowserTab | null {
+    return this.tabs.find((tab) => tab.id === this.activeTabId) ?? null
+  }
+
+  private requireActiveTab(): BrowserTab {
+    const tab = this.activeTab
+    if (!tab) throw new Error('请先打开一个网页。')
+    return tab
+  }
+
+  private browserState(): ResearchBrowserState {
+    const active = this.activeTab
+    const page = active?.state ?? emptyTabState('')
+    return {
+      url: page.url,
+      title: page.title,
+      loading: page.loading,
+      canGoBack: page.canGoBack,
+      canGoForward: page.canGoForward,
+      secure: page.secure,
+      ...(page.error ? { error: page.error } : {}),
+      ...(page.notice ? { notice: page.notice } : {}),
+      activeTabId: active?.id ?? null,
+      tabs: this.tabs.map((tab) => ({ ...tab.state })),
+      maxTabs: MAX_BROWSER_TABS
     }
   }
 
-  private mergeState(patch: Partial<ResearchBrowserState> = {}): ResearchBrowserState {
-    const contents = this.view?.webContents
-    const url = contents && !contents.isDestroyed() ? contents.getURL() : this.stateValue.url
+  private emitState(): ResearchBrowserState {
+    const state = this.browserState()
+    const window = this.getWindow()
+    if (window && !window.isDestroyed()) window.webContents.send(IPC.browserState, state)
+    return state
+  }
+
+  private mergeTabState(tab: BrowserTab, patch: Partial<ResearchBrowserTabState> = {}): ResearchBrowserState {
+    const contents = tab.view?.webContents
+    const url = contents && !contents.isDestroyed() ? contents.getURL() : tab.state.url
     let secure = false
     try { secure = new URL(url).protocol === 'https:' } catch { secure = false }
-    this.stateValue = {
-      ...this.stateValue,
+    tab.state = {
+      ...tab.state,
       ...(contents && !contents.isDestroyed()
         ? {
             url: url === 'about:blank' ? '' : url,
-            title: contents.getTitle() || this.stateValue.title,
+            title: contents.getTitle() || tab.state.title,
             loading: contents.isLoading(),
             canGoBack: contents.navigationHistory.canGoBack(),
             canGoForward: contents.navigationHistory.canGoForward(),
             secure
           }
         : {}),
-      ...patch
+      ...patch,
+      id: tab.id
     }
-    const window = this.getWindow()
-    if (window && !window.isDestroyed()) window.webContents.send(IPC.browserState, { ...this.stateValue })
-    return { ...this.stateValue }
+    return this.emitState()
+  }
+
+  private mergeState(patch: Partial<ResearchBrowserTabState> = {}): ResearchBrowserState {
+    const tab = this.activeTab
+    return tab ? this.mergeTabState(tab, patch) : this.emitState()
+  }
+
+  private syncViewVisibility(): void {
+    for (const tab of this.tabs) {
+      if (!tab.view || tab.view.webContents.isDestroyed()) continue
+      tab.view.setBounds(this.bounds)
+      tab.view.setVisible(this.visible && tab.id === this.activeTabId)
+    }
+  }
+
+  private async launchExternal(
+    value: string,
+    options: { successNotice: string; rateLimited?: boolean },
+    tab = this.activeTab
+  ): Promise<boolean> {
+    const target = safeSystemUrl(value)
+    if (!target) {
+      if (tab) this.mergeTabState(tab, { error: '外部地址无效，已阻止打开。', notice: undefined })
+      return false
+    }
+    if (options.rateLimited !== false) {
+      const now = Date.now()
+      this.externalLaunches = this.externalLaunches.filter((timestamp) => now - timestamp < EXTERNAL_LAUNCH_WINDOW_MS)
+      if (this.externalLaunches.length >= EXTERNAL_LAUNCH_LIMIT) {
+        if (tab) this.mergeTabState(tab, { notice: '网页连续请求打开过多外部窗口，后续请求已拦截。', error: undefined })
+        return false
+      }
+      this.externalLaunches.push(now)
+    }
+    try {
+      await shell.openExternal(target)
+      if (tab) this.mergeTabState(tab, { notice: options.successNotice, error: undefined })
+      return true
+    } catch (error) {
+      const detail = error instanceof Error ? boundedString(error.message, 300) : ''
+      if (tab) {
+        this.mergeTabState(tab, {
+          error: `无法在系统浏览器中打开外部内容${detail ? `：${detail}` : '。'}`,
+          notice: undefined
+        })
+      }
+      return false
+    }
   }
 
   private attachToWindow(): BrowserWindow {
     const window = this.getWindow()
     if (!window || window.isDestroyed()) throw new Error('主窗口尚未准备好。')
-    if (this.view && this.parentWindow !== window) {
-      if (this.parentWindow && !this.parentWindow.isDestroyed()) this.parentWindow.contentView.removeChildView(this.view)
-      window.contentView.addChildView(this.view)
+    if (this.parentWindow !== window) {
+      for (const tab of this.tabs) {
+        if (!tab.view || tab.view.webContents.isDestroyed()) continue
+        if (this.parentWindow && !this.parentWindow.isDestroyed()) this.parentWindow.contentView.removeChildView(tab.view)
+        window.contentView.addChildView(tab.view)
+      }
       this.parentWindow = window
     }
     return window
@@ -183,17 +245,18 @@ export class ResearchBrowserService {
       const externalOnly = details.resourceType === 'mainFrame' && (/^(?:video|audio)\//iu.test(contentType) || /\battachment\b/iu.test(disposition))
       if (externalOnly) {
         callback({ cancel: true })
+        const tab = this.tabs.find((candidate) => candidate.view?.webContents.id === details.webContentsId) ?? this.activeTab
         const directUrl = details.method === 'GET' ? safeExternalUrl(details.url) : null
-        const currentPage = safeExternalUrl(this.stateValue.url)
+        const currentPage = tab ? safeExternalUrl(tab.state.url) : null
         const target = directUrl ?? currentPage
         if (target) {
           void this.launchExternal(target, {
             successNotice: directUrl
               ? '媒体或下载地址已在系统浏览器打开。'
               : '该下载不能保留 POST 数据或登录态；已打开当前页面，请在系统浏览器中重新下载。'
-          })
-        } else {
-          this.mergeState({ notice: '该下载不能保留 POST 数据、登录态或临时内容。请在系统浏览器中重新打开来源页。' })
+          }, tab)
+        } else if (tab) {
+          this.mergeTabState(tab, { notice: '该下载不能保留 POST 数据、登录态或临时内容。请在系统浏览器中重新打开来源页。' })
         }
         return
       }
@@ -201,10 +264,10 @@ export class ResearchBrowserService {
     })
   }
 
-  private ensureView(): WebContentsView {
-    if (this.view && !this.view.webContents.isDestroyed()) {
+  private ensureView(tab = this.requireActiveTab()): WebContentsView {
+    if (tab.view && !tab.view.webContents.isDestroyed()) {
       this.attachToWindow()
-      return this.view
+      return tab.view
     }
 
     const window = this.getWindow()
@@ -223,37 +286,46 @@ export class ResearchBrowserService {
         autoplayPolicy: 'document-user-activation-required'
       }
     })
-    this.view = view
+    tab.view = view
     this.parentWindow = window
     view.setBackgroundColor('#ffffff')
     view.setBounds(this.bounds)
-    view.setVisible(this.visible)
+    view.setVisible(this.visible && tab.id === this.activeTabId)
     window.contentView.addChildView(view)
     this.configureSession(view.webContents.session)
 
     const contents = view.webContents
     contents.setWindowOpenHandler(({ url }) => {
-      const external = safeSystemUrl(url)
-      if (external) void this.launchExternal(external, { successNotice: '弹出页面已在系统浏览器打开。' })
-      else this.mergeState({ notice: '已拦截不受信任的弹出页面。' })
+      const external = safeExternalUrl(url)
+      if (external) {
+        void this.newTab(external).catch((error: unknown) => {
+          this.mergeTabState(tab, {
+            notice: error instanceof Error ? error.message : '无法打开新的浏览器标签页。'
+          })
+        })
+      } else {
+        const systemTarget = safeSystemUrl(url)
+        if (systemTarget) void this.launchExternal(systemTarget, { successNotice: '外部协议已交给系统应用。' }, tab)
+        else this.mergeTabState(tab, { notice: '已拦截不受信任的弹出页面。' })
+      }
       return { action: 'deny' }
     })
     contents.on('will-attach-webview', (event) => event.preventDefault())
     contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-      if (isMainFrame && !isInPlace) this.pageRevision += 1
+      if (isMainFrame && !isInPlace) tab.pageRevision += 1
     })
     contents.on('will-navigate', (event, url) => {
       const target = safeExternalUrl(url)
       if (!target) {
         event.preventDefault()
         const systemTarget = safeSystemUrl(url)
-        if (systemTarget) void this.launchExternal(systemTarget, { successNotice: '外部协议已交给系统应用。' })
-        else this.mergeState({ error: '已阻止非 HTTP(S) 导航。' })
+        if (systemTarget) void this.launchExternal(systemTarget, { successNotice: '外部协议已交给系统应用。' }, tab)
+        else this.mergeTabState(tab, { error: '已阻止非 HTTP(S) 导航。' })
         return
       }
       if (shouldUseSystemBrowser(target)) {
         event.preventDefault()
-        void this.launchExternal(target, { successNotice: '视频或媒体页面已在系统浏览器打开。' })
+        void this.launchExternal(target, { successNotice: '视频或媒体页面已在系统浏览器打开。' }, tab)
       }
     })
     contents.on('will-redirect', (event, url) => {
@@ -261,24 +333,24 @@ export class ResearchBrowserService {
       if (!target || shouldUseSystemBrowser(target)) {
         event.preventDefault()
         const systemTarget = target ?? safeSystemUrl(url)
-        if (systemTarget) void this.launchExternal(systemTarget, { successNotice: '外部内容已交给系统应用。' })
-        else this.mergeState({ error: '已阻止不安全的重定向。' })
+        if (systemTarget) void this.launchExternal(systemTarget, { successNotice: '外部内容已交给系统应用。' }, tab)
+        else this.mergeTabState(tab, { error: '已阻止不安全的重定向。' })
       }
     })
-    contents.on('did-start-loading', () => this.mergeState({ error: undefined, notice: undefined }))
-    contents.on('did-stop-loading', () => this.mergeState())
-    contents.on('did-navigate', () => this.mergeState({ error: undefined }))
-    contents.on('did-navigate-in-page', () => this.mergeState())
-    contents.on('page-title-updated', (_event, title) => this.mergeState({ title: boundedString(title, 500) || '网页资料' }))
+    contents.on('did-start-loading', () => this.mergeTabState(tab, { error: undefined, notice: undefined }))
+    contents.on('did-stop-loading', () => this.mergeTabState(tab))
+    contents.on('did-navigate', () => this.mergeTabState(tab, { error: undefined }))
+    contents.on('did-navigate-in-page', () => this.mergeTabState(tab))
+    contents.on('page-title-updated', (_event, title) => this.mergeTabState(tab, { title: boundedString(title, 500) || '网页资料' }))
     contents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return
-      this.mergeState({
-        url: safeExternalUrl(validatedURL) ?? this.stateValue.url,
+      this.mergeTabState(tab, {
+        url: safeExternalUrl(validatedURL) ?? tab.state.url,
         error: `网页加载失败：${boundedString(errorDescription, 500) || errorCode}`
       })
     })
     contents.on('render-process-gone', (_event, details) => {
-      this.mergeState({ loading: false, error: `网页进程已停止：${details.reason}` })
+      this.mergeTabState(tab, { loading: false, error: `网页进程已停止：${details.reason}` })
     })
     contents.on('before-input-event', (event, input) => {
       if (!input.shift || !(input.meta || input.control) || input.key.toLocaleLowerCase() !== 'k') return
@@ -306,53 +378,97 @@ export class ResearchBrowserService {
 
   async open(url?: string): Promise<ResearchBrowserState> {
     this.visible = true
+    if (!this.activeTab) return this.newTab(url)
     if (url?.trim()) return this.navigate(url)
-    if (this.view) {
-      this.attachToWindow()
-      this.view.setBounds(this.bounds)
-      this.view.setVisible(true)
-    }
+    this.attachToWindow()
+    this.syncViewVisibility()
     return this.mergeState()
   }
 
+  async newTab(url?: string): Promise<ResearchBrowserState> {
+    if (this.tabs.length >= MAX_BROWSER_TABS) {
+      throw new Error(`最多同时打开 ${MAX_BROWSER_TABS} 个网页标签。`)
+    }
+    const id = randomUUID()
+    const tab: BrowserTab = {
+      id,
+      view: null,
+      state: emptyTabState(id),
+      pageRevision: 0
+    }
+    this.tabs.push(tab)
+    this.activeTabId = id
+    this.visible = true
+    this.syncViewVisibility()
+    this.emitState()
+    return url?.trim() ? this.navigate(url) : this.browserState()
+  }
+
+  activateTab(tabId: string): ResearchBrowserState {
+    const tab = this.tabs.find((candidate) => candidate.id === tabId)
+    if (!tab) throw new Error('浏览器标签页不存在或已经关闭。')
+    this.activeTabId = tab.id
+    if (this.visible) this.attachToWindow()
+    this.syncViewVisibility()
+    return this.mergeTabState(tab)
+  }
+
+  closeTab(tabId: string): ResearchBrowserState {
+    const index = this.tabs.findIndex((tab) => tab.id === tabId)
+    if (index < 0) return this.emitState()
+    const [tab] = this.tabs.splice(index, 1)
+    tab.pageRevision += 1
+    if (tab.view) {
+      if (this.parentWindow && !this.parentWindow.isDestroyed()) this.parentWindow.contentView.removeChildView(tab.view)
+      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close({ waitForBeforeUnload: false })
+    }
+    if (this.activeTabId === tabId) {
+      this.activeTabId = this.tabs[Math.min(index, this.tabs.length - 1)]?.id ?? null
+    }
+    this.syncViewVisibility()
+    return this.emitState()
+  }
+
   async navigate(input: string): Promise<ResearchBrowserState> {
+    const tab = this.requireActiveTab()
     const target = normalizeBrowserInput(input)
     if (shouldUseSystemBrowser(target)) {
       const opened = await this.launchExternal(target, {
         successNotice: '视频或媒体页面已在系统浏览器打开。',
         rateLimited: false
-      })
-      if (!opened) throw new Error(this.stateValue.error || '无法打开系统浏览器。')
-      return this.mergeState()
+      }, tab)
+      if (!opened) throw new Error(tab.state.error || '无法打开系统浏览器。')
+      return this.mergeTabState(tab)
     }
     this.visible = true
-    const view = this.ensureView()
+    const view = this.ensureView(tab)
     view.setBounds(this.bounds)
     view.setVisible(true)
     await view.webContents.loadURL(target, { userAgent: view.webContents.getUserAgent() })
-    return this.mergeState({ error: undefined, notice: undefined })
+    return this.mergeTabState(tab, { error: undefined, notice: undefined })
   }
 
   back(): ResearchBrowserState {
-    const contents = this.view?.webContents
+    const contents = this.activeTab?.view?.webContents
     if (contents && !contents.isDestroyed() && contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
     return this.mergeState()
   }
 
   forward(): ResearchBrowserState {
-    const contents = this.view?.webContents
+    const contents = this.activeTab?.view?.webContents
     if (contents && !contents.isDestroyed() && contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
     return this.mergeState()
   }
 
   reload(): ResearchBrowserState {
-    const contents = this.view?.webContents
-    if (contents && !contents.isDestroyed() && this.stateValue.url) contents.reload()
+    const tab = this.activeTab
+    const contents = tab?.view?.webContents
+    if (contents && !contents.isDestroyed() && tab?.state.url) contents.reload()
     return this.mergeState()
   }
 
   stop(): ResearchBrowserState {
-    const contents = this.view?.webContents
+    const contents = this.activeTab?.view?.webContents
     if (contents && !contents.isDestroyed()) contents.stop()
     return this.mergeState({ loading: false })
   }
@@ -366,27 +482,27 @@ export class ResearchBrowserService {
     const width = Math.max(0, Math.min(content.width - x, Math.round(Number(input.width) || 0)))
     const height = Math.max(0, Math.min(content.height - y, Math.round(Number(input.height) || 0)))
     this.bounds = { x, y, width, height }
-    if (this.view && !this.view.webContents.isDestroyed()) this.view.setBounds(this.bounds)
+    this.syncViewVisibility()
   }
 
   setVisible(visible: boolean): void {
     this.visible = Boolean(visible)
-    if (!this.view || this.view.webContents.isDestroyed()) return
     if (visible) this.attachToWindow()
-    this.view.setVisible(this.visible)
+    this.syncViewVisibility()
   }
 
   async extract(mode: ResearchBrowserExtractMode): Promise<ResearchBrowserExtractResult> {
     if (mode !== 'selection' && mode !== 'article') throw new Error('不支持的网页提取模式。')
-    const contents = this.view?.webContents
-    if (!contents || contents.isDestroyed() || !this.stateValue.url) throw new Error('请先打开一个网页。')
+    const tab = this.requireActiveTab()
+    const contents = tab.view?.webContents
+    if (!contents || contents.isDestroyed() || !tab.state.url) throw new Error('请先打开一个网页。')
     const raw = await contents.executeJavaScriptInIsolatedWorld(
       CAPTURE_WORLD_ID,
       [{ code: PAGE_CAPTURE_SCRIPT }]
     ) as RawPageCapture
-    this.mergeState()
-    const title = boundedString(raw?.title, 500) || new URL(this.stateValue.url).hostname
-    const url = validatedHttpUrl(boundedString(raw?.url, 8_000) || this.stateValue.url).toString()
+    this.mergeTabState(tab)
+    const title = boundedString(raw?.title, 500) || new URL(tab.state.url).hostname
+    const url = validatedHttpUrl(boundedString(raw?.url, 8_000) || tab.state.url).toString()
     const selection = boundedString(raw?.selection)
     const articleText = boundedString(raw?.text)
     const text = mode === 'selection' ? selection : articleText
@@ -419,14 +535,16 @@ export class ResearchBrowserService {
   }
 
   private assertSaveStillCurrent(
+    tab: BrowserTab,
     contents: Electron.WebContents,
     pageRevision: number,
     projectScope: ProjectWriteScope
   ): void {
     if (
-      this.view?.webContents !== contents ||
+      this.activeTab !== tab ||
+      tab.view?.webContents !== contents ||
       contents.isDestroyed() ||
-      pageRevision !== this.pageRevision
+      pageRevision !== tab.pageRevision
     ) {
       throw new Error('网页已关闭或发生导航，本次保存已取消。')
     }
@@ -437,12 +555,13 @@ export class ResearchBrowserService {
   }
 
   async saveArchive(): Promise<FileReadResult> {
-    const contents = this.view?.webContents
-    if (!contents || contents.isDestroyed() || !this.stateValue.url) throw new Error('请先打开一个网页。')
+    const tab = this.requireActiveTab()
+    const contents = tab.view?.webContents
+    if (!contents || contents.isDestroyed() || !tab.state.url) throw new Error('请先打开一个网页。')
     if (contents.isLoading()) throw new Error('网页仍在加载，请等待完成后再保存完整归档。')
-    const pageRevision = this.pageRevision
+    const pageRevision = tab.pageRevision
     const projectScope = this.project.captureWriteScope()
-    const title = contents.getTitle() || new URL(this.stateValue.url).hostname
+    const title = contents.getTitle() || new URL(tab.state.url).hostname
 
     const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'coscribe-web-archive-'))
     const temporaryPath = path.join(temporaryDirectory, `${randomUUID()}.mhtml`)
@@ -453,9 +572,9 @@ export class ResearchBrowserService {
         throw new Error('完整网页归档为空或超过 256 MB 限制。')
       }
       const archive = await readFile(temporaryPath)
-      this.assertSaveStillCurrent(contents, pageRevision, projectScope)
+      this.assertSaveStillCurrent(tab, contents, pageRevision, projectScope)
       const result = await this.createUnique(title, '.mhtml', (target) => this.project.createWebArchive(target, archive, projectScope))
-      this.mergeState({ notice: `已保存完整网页归档：${result.path}` })
+      this.mergeTabState(tab, { notice: `已保存完整网页归档：${result.path}` })
       return result
     } finally {
       await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined)
@@ -463,24 +582,26 @@ export class ResearchBrowserService {
   }
 
   async saveMarkdown(): Promise<FileReadResult> {
-    const contents = this.view?.webContents
-    if (!contents || contents.isDestroyed() || !this.stateValue.url) throw new Error('请先打开一个网页。')
-    const pageRevision = this.pageRevision
+    const tab = this.requireActiveTab()
+    const contents = tab.view?.webContents
+    if (!contents || contents.isDestroyed() || !tab.state.url) throw new Error('请先打开一个网页。')
+    const pageRevision = tab.pageRevision
     const projectScope = this.project.captureWriteScope()
     const capture = await this.extract('article')
-    this.assertSaveStillCurrent(contents, pageRevision, projectScope)
+    this.assertSaveStillCurrent(tab, contents, pageRevision, projectScope)
     const markdown = buildWebClipMarkdown({ ...capture, capturedAt: new Date() })
     const result = await this.createUnique(capture.title, '.md', (target) => this.project.createMarkdown(target, markdown, projectScope))
-    this.mergeState({ notice: `已保存 Markdown：${result.path}` })
+    this.mergeTabState(tab, { notice: `已保存 Markdown：${result.path}` })
     return result
   }
 
   async savePdf(): Promise<FileReadResult> {
-    const contents = this.view?.webContents
-    if (!contents || contents.isDestroyed() || !this.stateValue.url) throw new Error('请先打开一个网页。')
-    const pageRevision = this.pageRevision
+    const tab = this.requireActiveTab()
+    const contents = tab.view?.webContents
+    if (!contents || contents.isDestroyed() || !tab.state.url) throw new Error('请先打开一个网页。')
+    const pageRevision = tab.pageRevision
     const projectScope = this.project.captureWriteScope()
-    const title = contents.getTitle() || new URL(this.stateValue.url).hostname
+    const title = contents.getTitle() || new URL(tab.state.url).hostname
     const rawMetrics = await contents.executeJavaScriptInIsolatedWorld(
       CAPTURE_WORLD_ID,
       [{ code: PAGE_PRINT_BUDGET_SCRIPT }]
@@ -500,37 +621,38 @@ export class ResearchBrowserService {
       preferCSSPageSize: true,
       generateDocumentOutline: true
     })
-    this.assertSaveStillCurrent(contents, pageRevision, projectScope)
+    this.assertSaveStillCurrent(tab, contents, pageRevision, projectScope)
     const result = await this.createUnique(title, '.pdf', (target) => this.project.createWebPdf(target, data, projectScope))
-    this.mergeState({ notice: `已保存 PDF：${result.path}` })
+    this.mergeTabState(tab, { notice: `已保存 PDF：${result.path}` })
     return result
   }
 
   async openExternal(input?: string): Promise<void> {
-    const target = validatedHttpUrl(input?.trim() || this.stateValue.url).toString()
+    const tab = this.requireActiveTab()
+    const target = validatedHttpUrl(input?.trim() || tab.state.url).toString()
     const opened = await this.launchExternal(target, {
       successNotice: '当前网页已在系统浏览器打开。',
       rateLimited: false
-    })
-    if (!opened) throw new Error(this.stateValue.error || '无法打开系统浏览器。')
+    }, tab)
+    if (!opened) throw new Error(tab.state.error || '无法打开系统浏览器。')
   }
 
   close(): void {
-    this.pageRevision += 1
-    const view = this.view
-    if (view) {
-      if (this.parentWindow && !this.parentWindow.isDestroyed()) this.parentWindow.contentView.removeChildView(view)
-      if (!view.webContents.isDestroyed()) view.webContents.close({ waitForBeforeUnload: false })
+    for (const tab of this.tabs) {
+      tab.pageRevision += 1
+      if (!tab.view) continue
+      if (this.parentWindow && !this.parentWindow.isDestroyed()) this.parentWindow.contentView.removeChildView(tab.view)
+      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close({ waitForBeforeUnload: false })
     }
     this.browserSession?.removeListener('will-download', this.handleDownload)
     this.browserSession?.webRequest.onHeadersReceived(null)
     this.browserSession = null
-    this.view = null
+    this.tabs = []
+    this.activeTabId = null
     this.parentWindow = null
     this.visible = false
     this.externalLaunches = []
-    this.stateValue = emptyState()
-    this.mergeState()
+    this.emitState()
   }
 
   detachWindow(window: BrowserWindow): void {

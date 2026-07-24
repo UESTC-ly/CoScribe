@@ -187,7 +187,8 @@ export interface ResearchBrowserBounds {
   height: number
 }
 
-export interface ResearchBrowserState {
+export interface ResearchBrowserTabState {
+  id: string
   url: string
   title: string
   loading: boolean
@@ -196,6 +197,12 @@ export interface ResearchBrowserState {
   secure: boolean
   error?: string
   notice?: string
+}
+
+export interface ResearchBrowserState extends Omit<ResearchBrowserTabState, 'id'> {
+  activeTabId: string | null
+  tabs: ResearchBrowserTabState[]
+  maxTabs: number
 }
 
 export type ResearchBrowserExtractMode = 'selection' | 'article'
@@ -634,6 +641,16 @@ export interface AiSettings {
 
 export type AiProvider = 'openai' | 'anthropic'
 export type AiProtocol = 'auto' | 'responses' | 'chat-completions'
+export interface AiProviderProfile {
+  id: string
+  name: string
+  provider: AiProvider
+  baseUrl: string
+  model: string
+  apiProtocol: AiProtocol
+  hasApiKey: boolean
+  apiKey?: string
+}
 export const SELECTABLE_AI_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'] as const
 export const SELECTABLE_ANTHROPIC_MODELS = [
   'claude-sonnet-5',
@@ -653,6 +670,8 @@ export type SelectableAnthropicModel = (typeof SELECTABLE_ANTHROPIC_MODELS)[numb
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
 
 export interface AppSettings extends AiSettings {
+  activeAiProfileId: string
+  aiProfiles: AiProviderProfile[]
   apiKey?: string
   anthropicApiKey?: string
   imageBaseUrl: string
@@ -850,6 +869,9 @@ export interface CoScribeAPI {
   }
   browser: {
     open: (url?: string) => Promise<ResearchBrowserState>
+    newTab: (url?: string) => Promise<ResearchBrowserState>
+    activateTab: (tabId: string) => Promise<ResearchBrowserState>
+    closeTab: (tabId: string) => Promise<ResearchBrowserState>
     navigate: (url: string) => Promise<ResearchBrowserState>
     back: () => Promise<ResearchBrowserState>
     forward: () => Promise<ResearchBrowserState>
@@ -903,6 +925,27 @@ export const DEFAULT_WORKSPACE_STATE: WorkspaceState = {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   aiProvider: 'openai',
+  activeAiProfileId: 'openai-default',
+  aiProfiles: [
+    {
+      id: 'openai-default',
+      name: 'OpenAI',
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-5.6-terra',
+      apiProtocol: 'auto',
+      hasApiKey: false
+    },
+    {
+      id: 'anthropic-default',
+      name: 'Anthropic',
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-sonnet-4-6',
+      apiProtocol: 'auto',
+      hasApiKey: false
+    }
+  ],
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-5.6-terra',
   apiProtocol: 'auto',
