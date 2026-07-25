@@ -20,6 +20,7 @@ export interface ScreenshotCandidateGuides {
   horizontal: number[]
   regions: ScreenshotRegion[]
   predictionGrid: ScreenshotPredictionGrid
+  minimumPredictionSize: ScreenshotSize
 }
 
 interface ScreenshotEdgeMap extends ScreenshotSize {
@@ -34,6 +35,15 @@ const MIN_EDGE_SCORE = 18
 const MIN_LOCAL_EDGE_SCORE = 7
 const MIN_REGION_WIDTH = 16
 const MIN_REGION_HEIGHT = 12
+const MIN_PREDICTION_WIDTH_CSS = 96
+const MIN_PREDICTION_HEIGHT_CSS = 64
+const MIN_PREDICTION_VIEWPORT_RATIO = 0.1
+const MAX_PREDICTION_WIDTH_FLOOR_CSS = 320
+const MAX_PREDICTION_HEIGHT_FLOOR_CSS = 200
+const MAX_PREDICTION_ASPECT_RATIO = 4.5
+const MIN_COHERENT_EDGE_SCORE = 8
+const MIN_OPPOSITE_EDGE_BALANCE = 0.35
+const MAX_LOCAL_BOUND_OPTIONS = 16
 const LOCAL_BAND_CSS = 6
 const LOCAL_MAX_SPAN_CSS = 720
 const PREDICTION_CELL_CSS = 10
@@ -190,14 +200,20 @@ function nearbyPeaks(
   return peaks
 }
 
-function localBounds(
+function predictionMinimumCss(viewportLength: number, vertical: boolean): number {
+  const minimum = vertical ? MIN_PREDICTION_WIDTH_CSS : MIN_PREDICTION_HEIGHT_CSS
+  const maximum = vertical ? MAX_PREDICTION_WIDTH_FLOOR_CSS : MAX_PREDICTION_HEIGHT_FLOOR_CSS
+  return Math.max(minimum, Math.min(maximum, viewportLength * MIN_PREDICTION_VIEWPORT_RATIO))
+}
+
+function localBoundOptions(
   map: ScreenshotEdgeMap,
   axisPoint: number,
   crossPoint: number,
   sourceLength: number,
   viewportLength: number,
   vertical: boolean
-): [number, number] | null {
+): Array<[number, number]> {
   const crossLength = vertical ? map.height : map.width
   const crossViewportLength = vertical ? viewportLength * map.height / map.width : viewportLength * map.width / map.height
   const bandRadius = Math.max(1, Math.round(crossLength * LOCAL_BAND_CSS / Math.max(crossViewportLength, 1)))
@@ -207,18 +223,60 @@ function localBounds(
   )
   const minimumSize = Math.max(
     2,
-    Math.round(sourceLength * (vertical ? MIN_REGION_WIDTH : MIN_REGION_HEIGHT) / Math.max(viewportLength, 1))
+    Math.round(sourceLength * predictionMinimumCss(viewportLength, vertical) / Math.max(viewportLength, 1))
   )
   const left = nearbyPeaks(map, axisPoint, crossPoint, -1, vertical, bandRadius, maximumDistance)
   const right = nearbyPeaks(map, axisPoint, crossPoint, 1, vertical, bandRadius, maximumDistance)
-  let best: [number, number] | null = null
+  const options: Array<[number, number]> = []
   for (const start of left) {
     for (const end of right) {
       if (end - start < minimumSize) continue
-      if (!best || end - start < best[1] - best[0]) best = [start, end]
+      options.push([start, end])
     }
   }
-  return best
+  return options
+    .sort((leftBounds, rightBounds) => (
+      leftBounds[1] - leftBounds[0] - (rightBounds[1] - rightBounds[0])
+    ))
+    .slice(0, MAX_LOCAL_BOUND_OPTIONS)
+}
+
+function edgeRangeScore(
+  map: ScreenshotEdgeMap,
+  axis: number,
+  start: number,
+  end: number,
+  vertical: boolean
+): number {
+  if (end <= start) return 0
+  if (vertical) {
+    const offset = axis * (map.height + 1)
+    return (map.verticalColumnPrefix[offset + end] - map.verticalColumnPrefix[offset + start]) / (end - start)
+  }
+  const offset = axis * (map.width + 1)
+  return (map.horizontalRowPrefix[offset + end] - map.horizontalRowPrefix[offset + start]) / (end - start)
+}
+
+function coherentEdgeQuality(
+  map: ScreenshotEdgeMap,
+  horizontalBounds: [number, number],
+  verticalBounds: [number, number]
+): { weakest: number; balance: number } {
+  const [left, right] = horizontalBounds
+  const [top, bottom] = verticalBounds
+  const verticalScores = [
+    edgeRangeScore(map, left, top, bottom, true),
+    edgeRangeScore(map, right, top, bottom, true)
+  ]
+  const horizontalScores = [
+    edgeRangeScore(map, top, left, right, false),
+    edgeRangeScore(map, bottom, left, right, false)
+  ]
+  const balance = (scores: number[]): number => Math.min(...scores) / Math.max(...scores, 1)
+  return {
+    weakest: Math.min(...verticalScores, ...horizontalScores),
+    balance: Math.min(balance(verticalScores), balance(horizontalScores))
+  }
 }
 
 function predictFromEdgeMap(
@@ -228,15 +286,39 @@ function predictFromEdgeMap(
 ): ScreenshotRegion | null {
   const sourceX = clamp(Math.floor(point.x * map.width / viewport.width), 0, map.width - 1)
   const sourceY = clamp(Math.floor(point.y * map.height / viewport.height), 0, map.height - 1)
-  const horizontalBounds = localBounds(map, sourceX, sourceY, map.width, viewport.width, true)
-  const verticalBounds = localBounds(map, sourceY, sourceX, map.height, viewport.height, false)
-  if (!horizontalBounds || !verticalBounds) return null
-  return normalizedRegion({
-    x: Math.round(horizontalBounds[0] * viewport.width / map.width),
-    y: Math.round(verticalBounds[0] * viewport.height / map.height),
-    width: Math.round((horizontalBounds[1] - horizontalBounds[0]) * viewport.width / map.width),
-    height: Math.round((verticalBounds[1] - verticalBounds[0]) * viewport.height / map.height)
-  }, viewport)
+  const horizontalOptions = localBoundOptions(map, sourceX, sourceY, map.width, viewport.width, true)
+  const verticalOptions = localBoundOptions(map, sourceY, sourceX, map.height, viewport.height, false)
+  const candidates: Array<{ region: ScreenshotRegion; area: number; edgeScore: number }> = []
+
+  for (const horizontalBounds of horizontalOptions) {
+    for (const verticalBounds of verticalOptions) {
+      const width = (horizontalBounds[1] - horizontalBounds[0]) * viewport.width / map.width
+      const height = (verticalBounds[1] - verticalBounds[0]) * viewport.height / map.height
+      const aspectRatio = Math.max(width / Math.max(height, 1), height / Math.max(width, 1))
+      if (aspectRatio > MAX_PREDICTION_ASPECT_RATIO) continue
+      const edgeQuality = coherentEdgeQuality(map, horizontalBounds, verticalBounds)
+      if (
+        edgeQuality.weakest < MIN_COHERENT_EDGE_SCORE ||
+        edgeQuality.balance < MIN_OPPOSITE_EDGE_BALANCE
+      ) continue
+      const region = normalizedRegion({
+        x: Math.round(horizontalBounds[0] * viewport.width / map.width),
+        y: Math.round(verticalBounds[0] * viewport.height / map.height),
+        width: Math.round(width),
+        height: Math.round(height)
+      }, viewport)
+      if (region) {
+        candidates.push({
+          region,
+          area: region.width * region.height,
+          edgeScore: edgeQuality.weakest * edgeQuality.balance
+        })
+      }
+    }
+  }
+
+  candidates.sort((left, right) => left.area - right.area || right.edgeScore - left.edgeScore)
+  return candidates[0]?.region ?? null
 }
 
 export function predictScreenshotRegion(
@@ -276,7 +358,11 @@ export function screenshotCandidateGuides(
       vertical: [0, Math.max(0, viewport.width)],
       horizontal: [0, Math.max(0, viewport.height)],
       regions: [],
-      predictionGrid: { columns: 0, rows: 0, regions: [] }
+      predictionGrid: { columns: 0, rows: 0, regions: [] },
+      minimumPredictionSize: {
+        width: predictionMinimumCss(viewport.width, true),
+        height: predictionMinimumCss(viewport.height, false)
+      }
     }
   }
 
@@ -318,6 +404,10 @@ export function screenshotCandidateGuides(
     vertical,
     horizontal,
     regions: regions.slice(0, 300),
-    predictionGrid: predictionGrid(createEdgeMap(source), viewport)
+    predictionGrid: predictionGrid(createEdgeMap(source), viewport),
+    minimumPredictionSize: {
+      width: predictionMinimumCss(viewport.width, true),
+      height: predictionMinimumCss(viewport.height, false)
+    }
   }
 }

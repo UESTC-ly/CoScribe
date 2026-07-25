@@ -842,7 +842,36 @@ test('double-clicks a predicted screenshot region and adds the crop to chat atta
   })).toBe(true)
 
   await selector.mouse.move(700, 250)
+  const selectorViewport = await selector.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+  const expectedMinimumWidth = Math.max(96, Math.min(320, selectorViewport.width * 0.1))
+  const expectedMinimumHeight = Math.max(64, Math.min(200, selectorViewport.height * 0.1))
+  await selector.waitForFunction(({ minimumWidth, minimumHeight, pointerX, pointerY }) => {
+    const box = document.getElementById('selection')
+    if (!box) return false
+    const rect = box.getBoundingClientRect()
+    return (
+      rect.width >= minimumWidth - 2 &&
+      rect.height >= minimumHeight - 2 &&
+      rect.left <= pointerX &&
+      rect.right >= pointerX &&
+      rect.top <= pointerY &&
+      rect.bottom >= pointerY
+    )
+  }, {
+    minimumWidth: expectedMinimumWidth,
+    minimumHeight: expectedMinimumHeight,
+    pointerX: 700,
+    pointerY: 250
+  })
   await selector.screenshot({ path: testInfo.outputPath('screenshot-roi-selector.png') })
+  const predictedBox = await selector.locator('#selection').boundingBox()
+  expect(predictedBox).not.toBeNull()
+  expect(predictedBox!.width).toBeGreaterThanOrEqual(expectedMinimumWidth - 2)
+  expect(predictedBox!.height).toBeGreaterThanOrEqual(expectedMinimumHeight - 2)
+  expect(predictedBox!.x).toBeLessThanOrEqual(700)
+  expect(predictedBox!.x + predictedBox!.width).toBeGreaterThanOrEqual(700)
+  expect(predictedBox!.y).toBeLessThanOrEqual(250)
+  expect(predictedBox!.y + predictedBox!.height).toBeGreaterThanOrEqual(250)
   await selector.mouse.click(700, 250)
   expect(selector.isClosed()).toBe(false)
   await expect(selector.locator('#size')).toContainText('双击确认')
@@ -867,7 +896,7 @@ test('double-clicks a predicted screenshot region and adds the crop to chat atta
     return { size, inkRatio: samples ? ink / samples : 0 }
   }, source!)
   expect(attachmentStats.size.width).toBeGreaterThan(200)
-  expect(attachmentStats.size.height).toBeGreaterThan(24)
+  expect(attachmentStats.size.height).toBeGreaterThan(80)
   expect(attachmentStats.inkRatio).toBeGreaterThan(0.01)
 })
 

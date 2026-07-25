@@ -33,7 +33,7 @@ export function TabStrip({ pane, tabs, activeId, dirtyPaths, onActivate, onClose
             className={`editor-tab ${activeId === tab.id ? 'is-active' : ''} ${tab.missing ? 'is-missing' : ''}`}
             role="tab"
             aria-selected={activeId === tab.id}
-            title={tab.path}
+            aria-label={tab.name}
             draggable
             onDragStart={(event) => { event.dataTransfer.setData('application/x-vibe-tab', tab.id); event.dataTransfer.effectAllowed = 'move' }}
             onDragOver={(event) => event.preventDefault()}

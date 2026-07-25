@@ -57,7 +57,7 @@ function TreeItem({ node, depth, expanded, toggle, onContext, ...props }: TreeIt
       >
         <span className="tree-row__chevron">{isFolder && <ChevronRight size={13} className={isExpanded ? 'is-open' : ''} />}</span>
         <span className={`tree-row__icon kind-${node.kind}`}><FileIcon node={node} expanded={isExpanded} /></span>
-        <span className="tree-row__name" title={node.path}>{node.name}</span>
+        <span className="tree-row__name" aria-label={node.path}>{node.name}</span>
         <button className="tree-row__more" onClick={(event) => { event.stopPropagation(); onContext(event, node) }} aria-label={`${node.name} 的更多操作`}><MoreHorizontal size={14} /></button>
       </div>
       {isFolder && isExpanded && node.children && (

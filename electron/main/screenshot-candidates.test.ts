@@ -56,6 +56,27 @@ function subtleNestedPixels(width: number, height: number): Uint8Array {
   return pixels
 }
 
+function fragmentedControlPixels(width: number, height: number): Uint8Array {
+  const pixels = new Uint8Array(width * height * 4)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4
+      const shade = x >= 55 && x < 105 && y >= 45 && y < 55
+        ? 145
+        : x >= 45 && x < 115 && y >= 35 && y < 70
+          ? 130
+          : x >= 35 && x < 125 && y >= 25 && y < 80
+            ? 70
+            : 20
+      pixels[offset] = shade
+      pixels[offset + 1] = shade
+      pixels[offset + 2] = shade
+      pixels[offset + 3] = 255
+    }
+  }
+  return pixels
+}
+
 describe('screenshot candidate guides', () => {
   it('detects strong content boundaries and keeps fixed window regions', () => {
     const result = screenshotCandidateGuides(
@@ -108,6 +129,19 @@ describe('screenshot candidate guides', () => {
       y: 380,
       width: 160,
       height: 140
+    })
+  })
+
+  it('prefers a coherent content container over a thin fragment at the pointer', () => {
+    expect(predictScreenshotRegion(
+      { width: 160, height: 100, pixels: fragmentedControlPixels(160, 100) },
+      { width: 1_600, height: 1_000 },
+      { x: 800, y: 500 }
+    )).toEqual({
+      x: 450,
+      y: 350,
+      width: 700,
+      height: 350
     })
   })
 })

@@ -38,6 +38,7 @@ function selectionScript(guides: ScreenshotCandidateGuides, initialPoint: { x: n
   return `(() => new Promise((resolve) => {
   const candidates = ${JSON.stringify(guides.regions)}
   const predictionGrid = ${JSON.stringify(guides.predictionGrid)}
+  const minimumPredictionSize = ${JSON.stringify(guides.minimumPredictionSize)}
   const initialPoint = ${JSON.stringify(initialPoint)}
   const box = document.getElementById('selection')
   const size = document.getElementById('size')
@@ -48,6 +49,24 @@ function selectionScript(guides: ScreenshotCandidateGuides, initialPoint: { x: n
   let settled = false
 
   const clamp = (value, maximum) => Math.min(maximum, Math.max(0, value))
+  const regionKey = (region) => region
+    ? [region.x, region.y, region.width, region.height].map((value) => Math.round(value)).join(':')
+    : ''
+  const meetsMinimumSize = (region) => region && (
+    region.width >= minimumPredictionSize.width &&
+    region.height >= minimumPredictionSize.height
+  )
+  const insetScore = (region, clientX, clientY) => {
+    if (!region) return 0
+    const left = clientX - region.x
+    const right = region.x + region.width - clientX
+    const top = clientY - region.y
+    const bottom = region.y + region.height - clientY
+    return Math.min(
+      Math.min(left, right) / Math.max(region.width, 1),
+      Math.min(top, bottom) / Math.max(region.height, 1)
+    )
+  }
   const cleanup = () => {
     window.removeEventListener('pointerdown', pointerDown, true)
     window.removeEventListener('pointermove', pointerMove, true)
@@ -85,7 +104,25 @@ function selectionScript(guides: ScreenshotCandidateGuides, initialPoint: { x: n
     clientY <= region.y + region.height
   )
   const candidateAt = (clientX, clientY) => {
-    const local = []
+    const ranked = new Map()
+    const remember = (region, support, distance) => {
+      if (!contains(region, clientX, clientY)) return
+      const key = regionKey(region)
+      const existing = ranked.get(key)
+      if (existing) {
+        existing.support += support
+        existing.distance = Math.min(existing.distance, distance)
+        return
+      }
+      ranked.set(key, {
+        region,
+        support,
+        distance,
+        meetsMinimum: meetsMinimumSize(region),
+        inset: insetScore(region, clientX, clientY),
+        area: region.width * region.height
+      })
+    }
     if (predictionGrid.columns > 0 && predictionGrid.rows > 0) {
       const column = Math.max(0, Math.min(
         predictionGrid.columns - 1,
@@ -95,15 +132,24 @@ function selectionScript(guides: ScreenshotCandidateGuides, initialPoint: { x: n
         predictionGrid.rows - 1,
         Math.floor(clientY * predictionGrid.rows / window.innerHeight)
       ))
-      for (let y = Math.max(0, row - 1); y <= Math.min(predictionGrid.rows - 1, row + 1); y += 1) {
-        for (let x = Math.max(0, column - 1); x <= Math.min(predictionGrid.columns - 1, column + 1); x += 1) {
+      for (let y = Math.max(0, row - 2); y <= Math.min(predictionGrid.rows - 1, row + 2); y += 1) {
+        for (let x = Math.max(0, column - 2); x <= Math.min(predictionGrid.columns - 1, column + 2); x += 1) {
           const region = predictionGrid.regions[y * predictionGrid.columns + x]
-          if (contains(region, clientX, clientY)) local.push(region)
+          remember(region, 1, Math.abs(x - column) + Math.abs(y - row))
         }
       }
     }
-    local.sort((left, right) => left.width * left.height - right.width * right.height)
-    return local[0] || candidates.find((region) => contains(region, clientX, clientY)) || null
+    for (const region of candidates) {
+      remember(region, 0, Number.POSITIVE_INFINITY)
+    }
+    return [...ranked.values()]
+      .sort((left, right) => (
+        Number(right.meetsMinimum) - Number(left.meetsMinimum) ||
+        right.support - left.support ||
+        right.inset - left.inset ||
+        left.distance - right.distance ||
+        left.area - right.area
+      ))[0]?.region || null
   }
   const hover = (clientX, clientY) => {
     suggested = candidateAt(clientX, clientY)
