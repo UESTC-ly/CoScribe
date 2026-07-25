@@ -152,6 +152,7 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 
 ### 让 AI 整理和创建笔记
 
+- AI 回答生成期间会持续显示当前阶段、服务商/模型、正在处理的工具和本次请求已用时间，不再只显示无说明的等待动画。
 - 普通创建、追加或替换 Markdown 会先显示文件列表和差异，接受后才写盘。
 - “整理笔记”是明确的自动保存动作：AI 根据会话主题、项目目录和已有笔记选择目标，也可以创建子目录、多份笔记和互链结构；不会默认追加到当前文档。
 - 聊天输入框支持 `/compact`（AI 全量压缩并持久化会话摘要）、`/fork`、`/resume`、`/new`、`/clear`、`/note`、`/stop`、`/quit` 和 `/help`。普通的上下文自动压缩仍保留为轻量保护策略；全量压缩不会删除原始聊天。
@@ -170,7 +171,7 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 - 图片点击“本地文字识别”，PDF 点击“本地识别当前页”。内置 PP-OCRv6-small、ONNX Runtime Web 与 WASM 在本机运行，不需要首次下载模型。
 - “AI 增强”是单独的显式操作，会把当前图像发送到已配置的 AI 服务。
 - 可以直接把 PNG、JPEG、WebP 或非动画 GIF 粘贴进聊天；每条消息最多 4 张，单张最多 5 MB，合计最多 10 MB。
-- 点击“截图”或按 `Cmd/Ctrl + Shift + 8` 后，桌面保持原样，只覆盖透明十字取景层。鼠标附近会根据窗口和内容边缘显示候选框；单击候选框或拖拽自选区域后，应用重新捕获原始屏幕像素并裁剪。截图进入聊天附件但不会自动发送，`Esc` 取消。
+- 点击“截图”或按 `Cmd/Ctrl + Shift + 8` 后，桌面保持原样，只覆盖透明十字取景层。候选框会根据鼠标附近更细的控件、文字块和内容边缘实时变化；单击只保留预览，双击确认候选框，拖拽并松开可确认自选区域。确认后应用重新捕获原始屏幕像素并裁剪；截图进入聊天附件但不会自动发送，`Esc` 取消。
 - macOS Apple Silicon 点击“语音”可在本机实时转写中英文，文字边说边进入输入框。识别器按需启动，停止后退出；原始录音不会发往语音云服务。
 
 OCR 与 AI 输出都可能出错，重要内容需要对照原始资料。
@@ -365,6 +366,7 @@ Every sent turn freezes its project, pane, document, page or heading, webpage UR
 
 ### AI writing, project memory, and system prompts
 
+- While a response is running, the assistant shows the current stage, provider/model, active tool, and elapsed request time instead of an unexplained waiting animation.
 - Ordinary create, append, and replace operations show a file list and diff before writing.
 - Quick Note is the explicit automatic-save action. AI uses the conversation topic, project tree, and existing notes to choose a destination or create directories and linked notes; it does not default to the open document.
 - AI may create 1–50 Markdown files but cannot delete files, escape the project, follow symlinks, or overwrite binary sources.
@@ -381,7 +383,7 @@ Settings → AI Behavior groups the system prompt, context budget, reasoning eff
 - Local OCR uses bundled PP-OCRv6-small, ONNX Runtime Web, and WASM with no first-run model download.
 - AI Enhance is a separate opt-in action that sends only the current image or rendered PDF page to the configured AI service.
 - Paste or choose up to four PNG, JPEG, WebP, or non-animated GIF images per message; each is limited to 5 MB and the total to 10 MB.
-- `Cmd/Ctrl + Shift + 8` keeps the desktop visible beneath a transparent crosshair selector. Candidate regions follow the pointer using window and content edges; click a candidate or drag a custom region. CoScribe captures the original display pixels only after selection, attaches the crop without sending it, and uses `Esc` to cancel.
+- `Cmd/Ctrl + Shift + 8` keeps the desktop visible beneath a transparent crosshair selector. Fine-grained candidate regions follow the pointer using nearby controls, text blocks, and content edges. A single click keeps the preview open, a double click confirms it, and drag-release confirms a custom region. CoScribe captures the original display pixels only after selection, attaches the crop without sending it, and uses `Esc` to cancel.
 - On Apple Silicon macOS, Voice performs live bilingual transcription locally. Text appears in the composer while speaking, and the on-demand recognizer exits after recording.
 
 Always verify OCR and AI output against the primary source.

@@ -825,7 +825,7 @@ test('decodes streaming speech through the isolated native ASR process', async (
   expect(transcript).toContain('星期三')
 })
 
-test('drag-selects a screenshot region and adds the crop to chat attachments', async ({}, testInfo) => {
+test('double-clicks a predicted screenshot region and adds the crop to chat attachments', async ({}, testInfo) => {
   await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
   await expect(page.getByLabel('README.md Markdown 编辑器')).toBeVisible()
   const selectorWindow = electronApp.waitForEvent('window')
@@ -841,12 +841,13 @@ test('drag-selects a screenshot region and adds the crop to chat attachments', a
     return Boolean(main?.isVisible())
   })).toBe(true)
 
-  const closed = selector.waitForEvent('close')
   await selector.mouse.move(700, 250)
-  await selector.mouse.down()
-  await selector.mouse.move(1_120, 600, { steps: 5 })
   await selector.screenshot({ path: testInfo.outputPath('screenshot-roi-selector.png') })
-  await selector.mouse.up()
+  await selector.mouse.click(700, 250)
+  expect(selector.isClosed()).toBe(false)
+  await expect(selector.locator('#size')).toContainText('双击确认')
+  const closed = selector.waitForEvent('close')
+  await selector.mouse.dblclick(700, 250)
   await closed
 
   const attachment = page.getByRole('img', { name: /CoScribe-screenshot-/u })
@@ -866,7 +867,7 @@ test('drag-selects a screenshot region and adds the crop to chat attachments', a
     return { size, inkRatio: samples ? ink / samples : 0 }
   }, source!)
   expect(attachmentStats.size.width).toBeGreaterThan(200)
-  expect(attachmentStats.size.height).toBeGreaterThan(150)
+  expect(attachmentStats.size.height).toBeGreaterThan(24)
   expect(attachmentStats.inkRatio).toBeGreaterThan(0.01)
 })
 

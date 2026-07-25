@@ -727,8 +727,24 @@ export interface AiRequest {
   settings?: Partial<Pick<AppSettings, 'allowGeneralKnowledge'>>
 }
 
+export type AiRequestActivityStage =
+  | 'preparing'
+  | 'context'
+  | 'connecting'
+  | 'waiting'
+  | 'streaming'
+  | 'tool'
+
+export interface AiRequestActivity {
+  stage: AiRequestActivityStage
+  label: string
+  detail?: string
+  tool?: string
+}
+
 export type AiStreamEvent =
   | { requestId: string; type: 'start' }
+  | ({ requestId: string; type: 'activity' } & AiRequestActivity)
   | { requestId: string; type: 'context-usage'; usage: ContextWindowUsage }
   | {
       requestId: string

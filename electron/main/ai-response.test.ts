@@ -626,5 +626,13 @@ describe('Responses API parsing', () => {
       type: 'delta',
       text: '整理完成。'
     })
+    expect(send).toHaveBeenCalledWith(expect.any(String), {
+      requestId: 'request-1',
+      type: 'activity',
+      stage: 'tool',
+      label: '正在处理工具调用',
+      detail: '准备 Markdown 文件方案',
+      tool: 'propose_markdown_operation'
+    })
   })
 })

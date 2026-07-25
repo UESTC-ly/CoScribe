@@ -305,6 +305,34 @@ describe('AiWorkspace', () => {
     expect(screen.getByRole('region', { name: '整理笔记进度' })).toHaveTextContent('模型正在规划笔记结构')
   })
 
+  it('shows the current request activity, tool, and elapsed time while streaming', () => {
+    const now = 1_000_000
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    const activeSession: ChatSession = {
+      ...session,
+      messages: [{ id: 'assistant-active', role: 'assistant', content: '', createdAt: now - 12_000 }]
+    }
+
+    render(<AiWorkspace {...buildProps({
+      sessions: [activeSession],
+      isStreaming: true,
+      requestActivity: {
+        stage: 'tool',
+        label: '正在处理工具调用',
+        detail: '准备 Markdown 文件方案',
+        tool: 'propose_markdown_operation',
+        startedAt: now - 12_000
+      }
+    })} />)
+
+    const status = screen.getByRole('status', { name: 'AI 请求状态' })
+    expect(status).toHaveTextContent('正在处理工具调用')
+    expect(status).toHaveTextContent('准备 Markdown 文件方案')
+    expect(status).toHaveTextContent('propose_markdown_operation')
+    expect(status).toHaveTextContent('已用时 12 秒')
+    clock.mockRestore()
+  })
+
   it('places the AI collapse control inside the AI panel header', () => {
     const onClose = vi.fn()
     render(<AiWorkspace {...buildProps({ onClose })} />)

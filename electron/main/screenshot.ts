@@ -2,7 +2,7 @@ import { BrowserWindow, desktopCapturer, screen, type Display, type NativeImage 
 
 import { MAX_CHAT_IMAGE_BYTES } from '../../src/shared/chat-images'
 import type { ChatImageAttachment } from '../../src/shared/types'
-import { screenshotCandidateGuides } from './screenshot-candidates'
+import { screenshotCandidateGuides, type ScreenshotCandidateGuides } from './screenshot-candidates'
 import { screenshotCropBounds, type ScreenshotRegion } from './screenshot-region'
 
 const CAPTURE_RETRY_DELAYS_MS = [0, 140, 320] as const
@@ -34,9 +34,10 @@ const SELECTION_HTML = `<!doctype html>
 </body>
 </html>`
 
-function selectionScript(candidates: ScreenshotRegion[], initialPoint: { x: number; y: number }): string {
+function selectionScript(guides: ScreenshotCandidateGuides, initialPoint: { x: number; y: number }): string {
   return `(() => new Promise((resolve) => {
-  const candidates = ${JSON.stringify(candidates)}
+  const candidates = ${JSON.stringify(guides.regions)}
+  const predictionGrid = ${JSON.stringify(guides.predictionGrid)}
   const initialPoint = ${JSON.stringify(initialPoint)}
   const box = document.getElementById('selection')
   const size = document.getElementById('size')
@@ -52,6 +53,7 @@ function selectionScript(candidates: ScreenshotRegion[], initialPoint: { x: numb
     window.removeEventListener('pointermove', pointerMove, true)
     window.removeEventListener('pointerup', pointerUp, true)
     window.removeEventListener('pointercancel', pointerCancel, true)
+    window.removeEventListener('dblclick', doubleClick, true)
     window.removeEventListener('keydown', keyDown, true)
     window.removeEventListener('blur', cancel, true)
     window.removeEventListener('contextmenu', preventMenu, true)
@@ -72,16 +74,37 @@ function selectionScript(candidates: ScreenshotRegion[], initialPoint: { x: numb
     box.style.top = region.y + 'px'
     box.style.width = region.width + 'px'
     box.style.height = region.height + 'px'
-    size.textContent = Math.round(region.width) + ' × ' + Math.round(region.height)
+    size.textContent = Math.round(region.width) + ' × ' + Math.round(region.height) + (candidate ? ' · 双击确认' : ' · 松开确认')
     box.classList.toggle('candidate', candidate)
     box.classList.add('active')
   }
-  const candidateAt = (clientX, clientY) => candidates.find((region) => (
+  const contains = (region, clientX, clientY) => region && (
     clientX >= region.x &&
     clientX <= region.x + region.width &&
     clientY >= region.y &&
     clientY <= region.y + region.height
-  )) || null
+  )
+  const candidateAt = (clientX, clientY) => {
+    const local = []
+    if (predictionGrid.columns > 0 && predictionGrid.rows > 0) {
+      const column = Math.max(0, Math.min(
+        predictionGrid.columns - 1,
+        Math.floor(clientX * predictionGrid.columns / window.innerWidth)
+      ))
+      const row = Math.max(0, Math.min(
+        predictionGrid.rows - 1,
+        Math.floor(clientY * predictionGrid.rows / window.innerHeight)
+      ))
+      for (let y = Math.max(0, row - 1); y <= Math.min(predictionGrid.rows - 1, row + 1); y += 1) {
+        for (let x = Math.max(0, column - 1); x <= Math.min(predictionGrid.columns - 1, column + 1); x += 1) {
+          const region = predictionGrid.regions[y * predictionGrid.columns + x]
+          if (contains(region, clientX, clientY)) local.push(region)
+        }
+      }
+    }
+    local.sort((left, right) => left.width * left.height - right.width * right.height)
+    return local[0] || candidates.find((region) => contains(region, clientX, clientY)) || null
+  }
   const hover = (clientX, clientY) => {
     suggested = candidateAt(clientX, clientY)
     renderRegion(suggested, true)
@@ -129,9 +152,27 @@ function selectionScript(candidates: ScreenshotRegion[], initialPoint: { x: numb
   function pointerUp(event) {
     if (!start || event.pointerId !== start.pointerId) return
     event.preventDefault()
-    if (dragging) renderDrag(event.clientX, event.clientY)
+    if (dragging) {
+      renderDrag(event.clientX, event.clientY)
+      const selection = current
+      try { document.body.releasePointerCapture?.(event.pointerId) } catch {}
+      if (!selection || selection.width < ${MIN_SELECTION_SIZE} || selection.height < ${MIN_SELECTION_SIZE}) {
+        reset()
+        hover(event.clientX, event.clientY)
+        return
+      }
+      finish({ ...selection, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
+      return
+    }
     try { document.body.releasePointerCapture?.(event.pointerId) } catch {}
-    const selection = dragging ? current : suggested
+    start = null
+    dragging = false
+    hover(event.clientX, event.clientY)
+  }
+  function doubleClick(event) {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const selection = candidateAt(event.clientX, event.clientY)
     if (!selection || selection.width < ${MIN_SELECTION_SIZE} || selection.height < ${MIN_SELECTION_SIZE}) {
       reset()
       hover(event.clientX, event.clientY)
@@ -155,6 +196,7 @@ function selectionScript(candidates: ScreenshotRegion[], initialPoint: { x: numb
   window.addEventListener('pointermove', pointerMove, true)
   window.addEventListener('pointerup', pointerUp, true)
   window.addEventListener('pointercancel', pointerCancel, true)
+  window.addEventListener('dblclick', doubleClick, true)
   window.addEventListener('keydown', keyDown, true)
   window.addEventListener('blur', cancel, true)
   window.addEventListener('contextmenu', preventMenu, true)
@@ -235,7 +277,7 @@ export class ScreenshotService {
 
   private async selectRegion(
     display: Display,
-    candidates: ScreenshotRegion[],
+    guides: ScreenshotCandidateGuides,
     initialPoint: { x: number; y: number }
   ): Promise<ScreenshotSelection | null> {
     const overlay = new BrowserWindow({
@@ -272,7 +314,7 @@ export class ScreenshotService {
       await overlay.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SELECTION_HTML)}`)
       overlay.webContents.on('will-navigate', (event) => event.preventDefault())
       const closed = new Promise<null>((resolve) => overlay.once('closed', () => resolve(null)))
-      const selected = overlay.webContents.executeJavaScript(selectionScript(candidates, initialPoint), true).catch(() => null)
+      const selected = overlay.webContents.executeJavaScript(selectionScript(guides, initialPoint), true).catch(() => null)
       const timedOut = new Promise<null>((resolve) => {
         timeout = setTimeout(() => resolve(null), SELECTION_TIMEOUT_MS)
         timeout.unref()
@@ -310,7 +352,7 @@ export class ScreenshotService {
     )
     const analysisImage = await captureVisibleDisplay()
     const analysisSize = analysisImage.getSize()
-    const analysisScale = Math.min(1, 360 / Math.max(analysisSize.width, 1), 240 / Math.max(analysisSize.height, 1))
+    const analysisScale = Math.min(1, 720 / Math.max(analysisSize.width, 1), 480 / Math.max(analysisSize.height, 1))
     const sampledImage = analysisScale < 1
       ? analysisImage.resize({
           width: Math.max(1, Math.round(analysisSize.width * analysisScale)),
@@ -339,7 +381,7 @@ export class ScreenshotService {
     }
 
     try {
-      const selection = await this.selectRegion(display, guides.regions, initialPoint)
+      const selection = await this.selectRegion(display, guides, initialPoint)
       if (!selection) return null
       // The transparent selector is destroyed before pixels are captured, so
       // neither its dimming layer nor selection border can leak into the result.

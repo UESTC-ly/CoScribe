@@ -39,6 +39,7 @@ import {
   useAppStore
 } from './store'
 import type {
+  AiRequestActivity,
   AiStreamEvent,
   AiOperationHistoryEntry,
   Annotation,
@@ -119,6 +120,12 @@ interface ActiveAiRequest {
     throughMessageId: string
     sourceMessageCount: number
   }
+}
+
+interface ActiveAiRequestActivity extends AiRequestActivity {
+  requestId: string
+  sessionId: string
+  startedAt: number
 }
 
 interface AiSelectionCommand {
@@ -215,6 +222,7 @@ export default function App(): React.JSX.Element {
   const [promptValue, setPromptValue] = useState('')
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
   const [streamingRequestId, setStreamingRequestId] = useState<string | null>(null)
+  const [aiRequestActivity, setAiRequestActivity] = useState<ActiveAiRequestActivity | null>(null)
   const [imageGenerationRequestId, setImageGenerationRequestId] = useState<string | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
   const [applyingOperationId, setApplyingOperationId] = useState<string | null>(null)
@@ -245,6 +253,17 @@ export default function App(): React.JSX.Element {
   const refreshTimer = useRef<number | null>(null)
   const appShellRef = useRef<HTMLDivElement>(null)
   const panelResizeCleanupRef = useRef<((commit: boolean) => void) | null>(null)
+
+  const beginAiRequest = useCallback((requestId: string, sessionId: string, label: string): void => {
+    setStreamingRequestId(requestId)
+    setAiRequestActivity({
+      requestId,
+      sessionId,
+      stage: 'preparing',
+      label,
+      startedAt: Date.now()
+    })
+  }, [])
 
   const setStore = appStore.getState
   const openSettings = useCallback((initialPanel: SettingsPanel = 'general'): void => {
@@ -515,8 +534,31 @@ export default function App(): React.JSX.Element {
       if (!request) return
       const store = setStore()
       if (event.type === 'delta') {
+        setAiRequestActivity((current) => current?.requestId === event.requestId
+          ? {
+              requestId: current.requestId,
+              sessionId: current.sessionId,
+              stage: 'streaming',
+              label: '正在生成回答',
+              startedAt: current.startedAt
+            }
+          : current)
         pendingDeltas.set(event.requestId, `${pendingDeltas.get(event.requestId) ?? ''}${event.text}`)
         scheduleFlush()
+        return
+      }
+      if (event.type === 'activity') {
+        setAiRequestActivity((current) => current?.requestId === event.requestId
+          ? {
+              requestId: current.requestId,
+              sessionId: current.sessionId,
+              stage: event.stage,
+              label: event.label,
+              ...(event.detail ? { detail: event.detail } : {}),
+              ...(event.tool ? { tool: event.tool } : {}),
+              startedAt: current.startedAt
+            }
+          : current)
         return
       }
       if (event.type === 'context-usage') {
@@ -524,6 +566,23 @@ export default function App(): React.JSX.Element {
         return
       }
       if (event.type === 'progress') {
+        const activityStage: AiRequestActivity['stage'] = event.stage === 'context'
+          ? 'context'
+          : event.stage === 'model'
+            ? 'waiting'
+            : event.stage === 'validation'
+              ? 'tool'
+              : 'preparing'
+        setAiRequestActivity((current) => current?.requestId === event.requestId
+          ? {
+              requestId: current.requestId,
+              sessionId: current.sessionId,
+              stage: activityStage,
+              label: event.label,
+              ...(event.detail ? { detail: event.detail } : {}),
+              startedAt: current.startedAt
+            }
+          : current)
         store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({
           ...message,
           progress: mergeAiProgress(message.progress, {
@@ -699,6 +758,7 @@ export default function App(): React.JSX.Element {
       if (event.type === 'done' || event.type === 'stopped' || event.type === 'error') {
         activeRequests.current.delete(event.requestId)
         setStreamingRequestId((current) => current === event.requestId ? null : current)
+        setAiRequestActivity((current) => current?.requestId === event.requestId ? null : current)
         setReportedContextUsage((current) => current?.sessionId === request.sessionId ? null : current)
       }
     })
@@ -1051,7 +1111,7 @@ export default function App(): React.JSX.Element {
       ...(payload.autoApplyOperation ? { autoApplyOperation: true } : {}),
       ...(payload.operationMode ? { operationMode: payload.operationMode } : {})
     })
-    setStreamingRequestId(requestId)
+    beginAiRequest(requestId, sessionId, '正在准备请求')
     setAiError(null)
     try {
       await window.coscribe.ai.start({
@@ -1075,10 +1135,11 @@ export default function App(): React.JSX.Element {
       const message = reason instanceof Error ? reason.message : 'AI 请求无法启动'
       store.updateMessage(sessionId, assistantMessage.id, { error: message })
       activeRequests.current.delete(requestId)
-      setStreamingRequestId(null)
+      setStreamingRequestId((current) => current === requestId ? null : current)
+      setAiRequestActivity((current) => current?.requestId === requestId ? null : current)
       setAiError(message)
     }
-  }, [forceCompactSessionId, pendingWebContext, state.project, state.settings.allowGeneralKnowledge])
+  }, [beginAiRequest, forceCompactSessionId, pendingWebContext, state.project, state.settings.allowGeneralKnowledge])
 
   const captureScreenshot = useCallback(async (): Promise<void> => {
     try {
@@ -1130,7 +1191,7 @@ export default function App(): React.JSX.Element {
         sourceMessageCount: batch.sourceMessageCount
       }
     })
-    setStreamingRequestId(requestId)
+    beginAiRequest(requestId, sessionId, '正在准备整理新增会话')
     setAiError(null)
     const instruction = [
       `只整理本次传入的 ${batch.sourceMessageCount} 条新增会话内容；更早的 ${batch.previouslyOrganizedCount} 条内容已经整理过，禁止重复整理。`,
@@ -1161,11 +1222,12 @@ export default function App(): React.JSX.Element {
         })
       }))
       activeRequests.current.delete(requestId)
-      setStreamingRequestId(null)
+      setStreamingRequestId((current) => current === requestId ? null : current)
+      setAiRequestActivity((current) => current?.requestId === requestId ? null : current)
       setAiError(message)
       throw new Error(message)
     }
-  }, [applyingOperationId, imageGenerationRequestId, state.project, state.settings.allowGeneralKnowledge, streamingRequestId])
+  }, [applyingOperationId, beginAiRequest, imageGenerationRequestId, state.project, state.settings.allowGeneralKnowledge, streamingRequestId])
 
   const quickNote = useCallback(async (): Promise<void> => {
     try {
@@ -1209,7 +1271,7 @@ export default function App(): React.JSX.Element {
         sourceMessageCount: batch.sourceMessageCount
       }
     })
-    setStreamingRequestId(requestId)
+    beginAiRequest(requestId, sessionId, '正在准备全量压缩会话')
     setAiError(null)
     try {
       await window.coscribe.ai.start({
@@ -1234,11 +1296,12 @@ export default function App(): React.JSX.Element {
         })
       }))
       activeRequests.current.delete(requestId)
-      setStreamingRequestId(null)
+      setStreamingRequestId((current) => current === requestId ? null : current)
+      setAiRequestActivity((current) => current?.requestId === requestId ? null : current)
       setAiError(message)
       throw new Error(message)
     }
-  }, [applyingOperationId, imageGenerationRequestId, state.project, streamingRequestId])
+  }, [applyingOperationId, beginAiRequest, imageGenerationRequestId, state.project, streamingRequestId])
 
   const executeChatCommand = useCallback(async (command: ChatCommandInvocation): Promise<string | void> => {
     const store = appStore.getState()
@@ -1454,7 +1517,7 @@ export default function App(): React.JSX.Element {
       error: undefined
     })
     activeRequests.current.set(requestId, { requestId, sessionId: session.id, assistantMessageId: message.id })
-    setStreamingRequestId(requestId)
+    beginAiRequest(requestId, session.id, '正在准备重新生成')
     setAiError(null)
     try {
       await window.coscribe.ai.start({
@@ -1475,10 +1538,11 @@ export default function App(): React.JSX.Element {
       const errorMessage = reason instanceof Error ? reason.message : '无法重新生成回答'
       store.updateMessage(session.id, message.id, { error: errorMessage })
       activeRequests.current.delete(requestId)
-      setStreamingRequestId(null)
+      setStreamingRequestId((current) => current === requestId ? null : current)
+      setAiRequestActivity((current) => current?.requestId === requestId ? null : current)
       setAiError(errorMessage)
     }
-  }, [imageGenerationRequestId, streamingRequestId])
+  }, [beginAiRequest, imageGenerationRequestId, streamingRequestId])
 
   const updateOperation = useCallback((operationId: string, patch: Partial<FileOperationProposal>): void => {
     const store = appStore.getState()
@@ -1770,6 +1834,12 @@ export default function App(): React.JSX.Element {
   const activeTab = selectActiveTab(state)
   const activeDocument = selectActiveDocument(state)
   const currentSession = selectCurrentSession(state)
+  const currentRequestActivity = aiRequestActivity?.sessionId === currentSession?.id
+    ? aiRequestActivity
+    : null
+  const currentSessionStreaming = Boolean(
+    streamingRequestId && currentRequestActivity?.requestId === streamingRequestId
+  )
   const dirtyPaths = new Set(selectDirtyDocuments(state).map((document) => document.path))
   const activeContext = pendingWebContext ?? state.captureActiveContext(contextScope)
   const visibleLeftWidth = clampProjectNavigatorWidth(state.workspace.leftWidth)
@@ -1977,6 +2047,8 @@ export default function App(): React.JSX.Element {
             referencedFiles={state.referencedFiles}
             availableFiles={projectFiles.map((file) => ({ path: file.path, name: file.name, kind: file.kind }))}
             isStreaming={Boolean(streamingRequestId)}
+            isCurrentSessionStreaming={currentSessionStreaming}
+            requestActivity={currentRequestActivity ?? undefined}
             isGeneratingImage={Boolean(imageGenerationRequestId)}
             isConfigured={isConfigured}
             isImageConfigured={imageConfigured}

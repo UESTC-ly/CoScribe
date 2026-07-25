@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { screenshotCandidateGuides } from './screenshot-candidates'
+import { predictScreenshotRegion, screenshotCandidateGuides } from './screenshot-candidates'
 
 function blockedPixels(width: number, height: number): Uint8Array {
   const pixels = new Uint8Array(width * height * 4)
@@ -12,6 +12,44 @@ function blockedPixels(width: number, height: number): Uint8Array {
       pixels[offset] = shade + rowShade
       pixels[offset + 1] = shade + rowShade
       pixels[offset + 2] = shade + rowShade
+      pixels[offset + 3] = 255
+    }
+  }
+  return pixels
+}
+
+function nestedPixels(width: number, height: number): Uint8Array {
+  const pixels = new Uint8Array(width * height * 4)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4
+      const shade = x >= 42 && x < 78 && y >= 28 && y < 52
+        ? 220
+        : x >= 10 && x < 110 && y >= 8 && y < 72
+          ? 78
+          : 20
+      pixels[offset] = shade
+      pixels[offset + 1] = shade
+      pixels[offset + 2] = shade
+      pixels[offset + 3] = 255
+    }
+  }
+  return pixels
+}
+
+function subtleNestedPixels(width: number, height: number): Uint8Array {
+  const pixels = new Uint8Array(width * height * 4)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4
+      const shade = x >= 72 && x < 88 && y >= 38 && y < 52
+        ? 88
+        : x >= 20 && x < 140 && y >= 10 && y < 80
+          ? 80
+          : 20
+      pixels[offset] = shade
+      pixels[offset + 1] = shade
+      pixels[offset + 2] = shade
       pixels[offset + 3] = 255
     }
   }
@@ -36,10 +74,40 @@ describe('screenshot candidate guides', () => {
     expect(screenshotCandidateGuides(
       { width: 20, height: 10, pixels: new Uint8Array() },
       { width: 1_440, height: 900 }
-    )).toEqual({
+    )).toMatchObject({
       vertical: [0, 1_440],
       horizontal: [0, 900],
       regions: []
+    })
+  })
+
+  it('predicts the smallest local content rectangle around the pointer', () => {
+    const source = { width: 120, height: 80, pixels: nestedPixels(120, 80) }
+    const viewport = { width: 1_200, height: 800 }
+
+    expect(predictScreenshotRegion(source, viewport, { x: 600, y: 400 })).toEqual({
+      x: 420,
+      y: 280,
+      width: 360,
+      height: 240
+    })
+
+    const guides = screenshotCandidateGuides(source, viewport)
+    expect(guides.predictionGrid.regions.some((region) => (
+      region?.x === 420 && region.y === 280 && region.width === 360 && region.height === 240
+    ))).toBe(true)
+  })
+
+  it('keeps low-contrast compact controls available as pointer-local candidates', () => {
+    expect(predictScreenshotRegion(
+      { width: 160, height: 90, pixels: subtleNestedPixels(160, 90) },
+      { width: 1_600, height: 900 },
+      { x: 800, y: 450 }
+    )).toEqual({
+      x: 720,
+      y: 380,
+      width: 160,
+      height: 140
     })
   })
 })

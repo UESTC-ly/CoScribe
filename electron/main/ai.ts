@@ -9,6 +9,7 @@ import type {
   AiProvider,
   AiOcrRequest,
   AiRequest,
+  AiRequestActivityStage,
   AiStreamEvent,
   AppSettings,
   ContextSnapshot,
@@ -755,6 +756,17 @@ export class AiService {
     if (!sender.isDestroyed()) sender.send(IPC.aiStream, event)
   }
 
+  private sendToolActivity(sender: WebContents, requestId: string, toolName: string): void {
+    this.send(sender, {
+      requestId,
+      type: 'activity',
+      stage: 'tool',
+      label: '正在处理工具调用',
+      detail: toolName === 'propose_markdown_operation' ? '准备 Markdown 文件方案' : toolName,
+      tool: toolName
+    })
+  }
+
   stop(requestId: string): void {
     this.active.get(requestId)?.abort()
   }
@@ -1205,6 +1217,7 @@ export class AiService {
     const tools = new Map<number, ToolAccumulator>()
     let buffer = ''
     let content = ''
+    let announcedTool = ''
 
     const consumeLine = (line: string) => {
       const trimmed = line.trim()
@@ -1218,6 +1231,11 @@ export class AiService {
         throw new Error('AI 服务返回了无法解析的流数据。')
       }
       const delta = streamDelta(value, tools)
+      const activeTool = [...tools.values()].find((tool) => tool.name === 'propose_markdown_operation')
+      if (activeTool && activeTool.name !== announcedTool) {
+        announcedTool = activeTool.name
+        this.sendToolActivity(sender, requestId, activeTool.name)
+      }
       if (delta) {
         content += delta
         this.send(sender, { requestId, type: 'delta', text: delta })
@@ -1256,6 +1274,7 @@ export class AiService {
     let buffer = ''
     let content = ''
     let finalTool: ToolAccumulator | undefined
+    let announcedTool = ''
 
     const consumeLine = (line: string): void => {
       const trimmed = line.trim()
@@ -1269,6 +1288,11 @@ export class AiService {
         throw new Error('Anthropic Messages API 返回了无法解析的流数据。')
       }
       const event = anthropicStreamEvent(value, tools)
+      const activeTool = [...tools.values()].find((tool) => tool.name === 'propose_markdown_operation')
+      if (activeTool && activeTool.name !== announcedTool) {
+        announcedTool = activeTool.name
+        this.sendToolActivity(sender, requestId, activeTool.name)
+      }
       if (event.delta) {
         content += event.delta
         this.send(sender, { requestId, type: 'delta', text: event.delta })
@@ -1310,6 +1334,7 @@ export class AiService {
     let finalTool: ToolAccumulator | undefined
     let buffer = ''
     let content = ''
+    let announcedTool = ''
 
     const append = (text: string): void => {
       if (!text) return
@@ -1328,6 +1353,11 @@ export class AiService {
         throw new Error('Responses API 返回了无法解析的流数据。')
       }
       const event = responsesStreamEvent(value, tools)
+      const activeTool = [...tools.values()].find((tool) => tool.name === 'propose_markdown_operation')
+      if (activeTool && activeTool.name !== announcedTool) {
+        announcedTool = activeTool.name
+        this.sendToolActivity(sender, requestId, activeTool.name)
+      }
       if (event.delta) append(event.delta)
       if (event.completedText && !content) append(event.completedText)
       if (event.final) {
@@ -1361,6 +1391,29 @@ export class AiService {
     try {
       const preferences = await this.settings.get()
       const target = resolveActiveAiRequestTarget(preferences)
+      const activeProfile = preferences.aiProfiles.find((profile) => profile.id === preferences.activeAiProfileId)
+      const profileName = activeProfile?.name ?? (target.provider === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible')
+      const protocolLabel = target.protocol === 'anthropic-messages'
+        ? 'Anthropic Messages'
+        : target.protocol === 'responses'
+          ? 'Responses API'
+          : 'Chat Completions'
+      const activity = (
+        stage: AiRequestActivityStage,
+        label: string,
+        detail?: string,
+        tool?: string
+      ): void => {
+        this.send(sender, {
+          requestId: request.requestId,
+          type: 'activity',
+          stage,
+          label,
+          ...(detail ? { detail } : {}),
+          ...(tool ? { tool } : {})
+        })
+      }
+      activity('preparing', '正在校验请求与服务配置', `${profileName} · ${target.model}`)
       const apiKey = target.provider === 'anthropic'
         ? await this.settings.anthropicApiKey()
         : await this.settings.apiKey()
@@ -1407,6 +1460,11 @@ export class AiService {
       progress(
         'context',
         operationMode === 'compact-session' ? '正在建立会话语义结构' : '正在读取项目目录和相关笔记'
+      )
+      activity(
+        'context',
+        operationMode === 'compact-session' ? '正在建立会话语义结构' : '正在读取发送时上下文',
+        request.context.scope === 'project' ? '当前项目' : request.context.documentName || request.context.scope
       )
       const context = await this.validatedContext(request.context, retrievalQuestion, operationMode)
       const allowGeneralKnowledge = request.settings?.allowGeneralKnowledge ?? preferences.allowGeneralKnowledge
@@ -1577,6 +1635,7 @@ export class AiService {
         'model',
         operationMode === 'compact-session' ? '模型正在生成全量会话摘要' : '模型正在规划笔记结构和保存位置'
       )
+      activity('connecting', `正在连接 ${profileName}`, `${target.model} · ${protocolLabel}`)
       const headers = aiRequestHeaders(target.provider, apiKey)
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -1589,6 +1648,7 @@ export class AiService {
         await parseAiJsonResponse(response, endpoint)
         throw new Error(`AI 请求失败（HTTP ${response.status}，请求地址：${endpoint}）。`)
       }
+      activity('waiting', '模型已连接，等待首个响应', `${target.model} · ${protocolLabel}`)
 
       const contentType = response.headers.get('content-type') ?? ''
       let result: StreamResult
@@ -1608,6 +1668,14 @@ export class AiService {
         if (result.content) this.send(sender, { requestId: request.requestId, type: 'delta', text: result.content })
       }
 
+      if (result.tool?.name) {
+        activity(
+          'tool',
+          '正在处理工具调用',
+          result.tool.name === 'propose_markdown_operation' ? '准备 Markdown 文件方案' : result.tool.name,
+          result.tool.name
+        )
+      }
       progress(
         'validation',
         operationMode === 'compact-session' ? '正在校验压缩摘要' : '正在校验 Markdown 文件操作'

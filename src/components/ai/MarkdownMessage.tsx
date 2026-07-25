@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 import { writeClipboardText } from '../../lib/clipboard'
-import type { ChatMessage, ContextSnapshot, FileOperationProposal, SourceRef } from '../../shared/types'
+import type { AiRequestActivity, ChatMessage, ContextSnapshot, FileOperationProposal, SourceRef } from '../../shared/types'
 import { MermaidDiagram } from '../viewers/MermaidDiagram'
 import { AiCodeBlock } from './AiCodeBlock'
 import { MarkdownOperationCard } from './MarkdownOperationCard'
@@ -14,6 +14,7 @@ import { MarkdownOperationCard } from './MarkdownOperationCard'
 export interface MarkdownMessageProps {
   message: ChatMessage
   streaming?: boolean
+  requestActivity?: AiRequestActivity & { startedAt: number }
   operationBusy?: boolean
   onOpenSource: (source: SourceRef) => void
   onOpenContext: (context: ContextSnapshot) => void
@@ -49,6 +50,52 @@ function sourceMeta(source: SourceRef): string {
   if (source.heading) bits.push(source.heading)
   if (source.line) bits.push(`第 ${source.line} 行`)
   return bits.join(' · ')
+}
+
+function formatElapsedTime(seconds: number): string {
+  if (seconds < 60) return `${seconds} 秒`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分钟`
+}
+
+function RequestActivityStatus({
+  activity
+}: {
+  activity: AiRequestActivity & { startedAt: number }
+}): React.JSX.Element {
+  const [elapsedSeconds, setElapsedSeconds] = useState(() =>
+    Math.max(0, Math.floor((Date.now() - activity.startedAt) / 1_000))
+  )
+
+  useEffect(() => {
+    const update = (): void => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - activity.startedAt) / 1_000)))
+    }
+    update()
+    const timer = window.setInterval(update, 1_000)
+    return () => window.clearInterval(timer)
+  }, [activity.startedAt])
+
+  return (
+    <div
+      className="ai-request-activity"
+      data-stage={activity.stage}
+      role="status"
+      aria-label="AI 请求状态"
+      aria-live="polite"
+    >
+      <Loader2 className="ai-spin" aria-hidden="true" />
+      <span className="ai-request-activity__text">
+        <strong>{activity.label}</strong>
+        {activity.detail && <small>{activity.detail}</small>}
+      </span>
+      <span className="ai-request-activity__meta">
+        {activity.tool && <code title={`当前工具：${activity.tool}`}>{activity.tool}</code>}
+        <time>已用时 {formatElapsedTime(elapsedSeconds)}</time>
+      </span>
+    </div>
+  )
 }
 
 function ProgressTimeline({ message }: { message: ChatMessage }): React.JSX.Element | null {
@@ -160,6 +207,7 @@ function MessageActions({
 export const MarkdownMessage = memo(function MarkdownMessage({
   message,
   streaming = false,
+  requestActivity,
   operationBusy = false,
   onOpenSource,
   onOpenContext,
@@ -186,6 +234,8 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             {new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(message.createdAt)}
           </time>
         </div>
+
+        {streaming && requestActivity && <RequestActivityStatus activity={requestActivity} />}
 
         {message.context && message.role === 'user' && (
           <button

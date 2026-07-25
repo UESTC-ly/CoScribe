@@ -32,6 +32,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AiOperationMode,
+  AiRequestActivity,
   ChatMessage,
   ChatImageAttachment,
   ChatSession,
@@ -93,6 +94,8 @@ export interface AiWorkspaceProps {
   referencedFiles: readonly string[]
   availableFiles: readonly AiProjectFileOption[]
   isStreaming: boolean
+  isCurrentSessionStreaming?: boolean
+  requestActivity?: AiRequestActivity & { startedAt: number }
   isGeneratingImage?: boolean
   isConfigured: boolean
   isImageConfigured?: boolean
@@ -267,6 +270,8 @@ export function AiWorkspace({
   referencedFiles,
   availableFiles,
   isStreaming,
+  isCurrentSessionStreaming = isStreaming,
+  requestActivity,
   isGeneratingImage = false,
   isConfigured,
   isImageConfigured = false,
@@ -819,7 +824,12 @@ export function AiWorkspace({
                 key={message.id}
                 message={message}
                 streaming={
-                  isStreaming && index === activeSession.messages.length - 1 && message.role === 'assistant'
+                  isCurrentSessionStreaming && index === activeSession.messages.length - 1 && message.role === 'assistant'
+                }
+                requestActivity={
+                  isCurrentSessionStreaming && index === activeSession.messages.length - 1 && message.role === 'assistant'
+                    ? requestActivity
+                    : undefined
                 }
                 operationBusy={message.operation?.id === applyingOperationId}
                 onOpenSource={onOpenSource}
@@ -836,10 +846,10 @@ export function AiWorkspace({
               GPT-Image 2 正在生成图片…
             </div>
           )}
-          {isStreaming && lastMessage?.role !== 'assistant' && (
+          {isCurrentSessionStreaming && lastMessage?.role !== 'assistant' && (
             <div className="ai-stream-status" role="status">
               <Loader2 className="ai-spin" aria-hidden="true" />
-              正在读取上下文并组织回答…
+              {requestActivity?.label ?? '正在读取上下文并组织回答…'}
             </div>
           )}
           <div ref={bottomRef} />
