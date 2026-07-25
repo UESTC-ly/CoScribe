@@ -1,0 +1,176 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify release source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Require tag to match package version
+        run: node -e "const version=require('./package.json').version; if (process.env.GITHUB_REF_NAME !== 'v' + version) throw new Error('Tag must be v' + version)"
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run Vitest suites
+        run: npm test
+
+  package:
+    name: Package and smoke test (${{ matrix.id }})
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: macos-arm64
+            os: macos-15
+            build_command: npm run dist:mac:arm64
+            verify_command: npm run verify:package:mac
+            executable: release/mac-arm64/CoScribe.app/Contents/MacOS/CoScribe
+            e2e_command: npx playwright test
+            artifact_paths: |
+              release/CoScribe-*-arm64.dmg
+              release/CoScribe-*-arm64-mac.zip
+          - id: windows-x64
+            os: windows-2022
+            build_command: npm run dist:win:x64
+            verify_command: npm run verify:package:win
+            executable: release/win-unpacked/CoScribe.exe
+            e2e_command: npx playwright test
+            artifact_paths: release/CoScribe-Setup-*-x64.exe
+          - id: linux-x64
+            os: ubuntu-24.04
+            build_command: npm run dist:linux:x64
+            verify_command: npm run verify:package:linux
+            executable: release/linux-unpacked/coscribe
+            e2e_command: xvfb-run --auto-servernum npx playwright test
+            artifact_paths: |
+              release/CoScribe-*-x64.AppImage
+              release/CoScribe-*-x64.deb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Playwright runtime
+        if: runner.os != 'Linux'
+        run: npx playwright install chromium
+
+      - name: Install Playwright runtime and Linux libraries
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+
+      - name: Build installer
+        run: ${{ matrix.build_command }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Verify packaged contents and architecture
+        run: ${{ matrix.verify_command }}
+
+      - name: Smoke test packaged application
+        run: ${{ matrix.e2e_command }}
+        env:
+          COSCRIBE_E2E_EXECUTABLE: ${{ github.workspace }}/${{ matrix.executable }}
+
+      - name: Upload E2E diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics-${{ matrix.id }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.id }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify asset set and write checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          files=(
+            "dist/CoScribe-${version}-arm64.dmg"
+            "dist/CoScribe-${version}-arm64-mac.zip"
+            "dist/CoScribe-Setup-${version}-x64.exe"
+            "dist/CoScribe-${version}-x64.AppImage"
+            "dist/CoScribe-${version}-x64.deb"
+          )
+          for file in "${files[@]}"; do
+            test -s "$file"
+          done
+          sha256sum "${files[@]}" | LC_ALL=C sort -k2 > dist/SHA256SUMS.txt
+
+      - name: Create or update stable release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "CoScribe $GITHUB_REF_NAME" --latest
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "CoScribe $GITHUB_REF_NAME" \
+              --generate-notes \
+              --latest \
+              --verify-tag
+          fi

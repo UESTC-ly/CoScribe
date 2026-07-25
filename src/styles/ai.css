@@ -2288,6 +2288,15 @@
   border-color: color-mix(in srgb, var(--ai-accent) 58%, var(--ai-line));
 }
 
+.ai-composer.is-path-drag {
+  border-color: var(--ai-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ai-accent) 17%, transparent);
+}
+
+.ai-selection-context--web {
+  border-left-color: color-mix(in srgb, var(--ai-accent) 70%, #2473a8);
+}
+
 .ai-image-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { PAGE_CAPTURE_SCRIPT } from './web-page-capture'
+import {
+  PAGE_CAPTURE_SCRIPT,
+  SELECTION_CONSOLE_PREFIX,
+  parseSelectionConsoleMessage,
+  selectionWatchScript
+} from './web-page-capture'
 
 interface CaptureResult {
   title: string
@@ -51,5 +56,16 @@ describe('isolated webpage capture', () => {
     expect(result.text.length).toBeLessThanOrEqual(200_000)
     expect(result.markdown.length).toBeLessThanOrEqual(200_000)
     expect(result.markdown.startsWith('# Research')).toBe(true)
+  })
+
+  it('accepts selection messages only when they carry the isolated-world nonce', () => {
+    const nonce = 'tab-secret-nonce'
+    const valid = `${SELECTION_CONSOLE_PREFIX}${JSON.stringify({ nonce, text: ' selected text ' })}`
+    const spoofed = `${SELECTION_CONSOLE_PREFIX}${JSON.stringify({ nonce: 'page-controlled', text: 'spoofed' })}`
+
+    expect(parseSelectionConsoleMessage(valid, nonce)).toBe('selected text')
+    expect(parseSelectionConsoleMessage(spoofed, nonce)).toBeNull()
+    expect(parseSelectionConsoleMessage(`${SELECTION_CONSOLE_PREFIX}not-json`, nonce)).toBeNull()
+    expect(selectionWatchScript(nonce)).toContain(JSON.stringify(nonce))
   })
 })

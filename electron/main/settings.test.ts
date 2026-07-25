@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_SETTINGS } from '../../src/shared/types'
+import { DEFAULT_SETTINGS, SELECTABLE_AI_MODELS, type AiProviderProfile } from '../../src/shared/types'
 import { MAX_AI_PROFILES, MAX_CUSTOM_SYSTEM_PROMPT_CHARS, sanitizeSettings } from './settings'
 
 describe('v2 settings boundaries', () => {
@@ -68,6 +68,7 @@ describe('v2 settings boundaries', () => {
           provider: 'openai',
           baseUrl: 'https://proxy.example.com/v1/',
           model: '  gpt-team  ',
+          enabledModels: ['gpt-team', 'proxy-large', 'gpt-team'],
           apiProtocol: 'chat-completions',
           hasApiKey: true,
           apiKey: ['must', 'not', 'be', 'persisted'].join('-')
@@ -78,6 +79,7 @@ describe('v2 settings boundaries', () => {
           provider: 'anthropic',
           baseUrl: 'https://anthropic.example.com/v1/',
           model: ' claude-custom ',
+          enabledModels: ['claude-custom'],
           apiProtocol: 'responses',
           hasApiKey: false
         },
@@ -87,6 +89,7 @@ describe('v2 settings boundaries', () => {
           provider: 'openai',
           baseUrl: 'https://duplicate.example.com',
           model: 'duplicate',
+          enabledModels: ['duplicate'],
           apiProtocol: 'auto',
           hasApiKey: false
         }
@@ -101,12 +104,67 @@ describe('v2 settings boundaries', () => {
       model: 'gpt-team',
       apiProtocol: 'chat-completions'
     })
+    // Enabled models are deduped and always include the active model.
+    expect(settings.aiProfiles[0].enabledModels).toEqual(['gpt-team', 'proxy-large'])
     expect(settings.aiProfiles[0]).not.toHaveProperty('apiKey')
     expect(settings.baseUrl).toBe('https://proxy.example.com/v1')
     expect(settings.model).toBe('gpt-team')
     expect(settings.apiProtocol).toBe('chat-completions')
     expect(settings.anthropicBaseUrl).toBe('https://anthropic.example.com/v1')
     expect(settings.anthropicModel).toBe('claude-custom')
+  })
+
+  it('seeds enabled models when legacy profiles omit them', () => {
+    const settings = sanitizeSettings({
+      ...DEFAULT_SETTINGS,
+      activeAiProfileId: 'native-openai',
+      aiProfiles: [
+        {
+          id: 'native-openai',
+          name: 'OpenAI',
+          provider: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-5.6-terra',
+          apiProtocol: 'auto',
+          hasApiKey: false
+        },
+        {
+          id: 'ali-proxy',
+          name: 'Ali',
+          provider: 'openai',
+          baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+          model: 'qwen3-coder-plus',
+          apiProtocol: 'auto',
+          hasApiKey: false
+        }
+      ] as AiProviderProfile[]
+    })
+
+    // A first-party host keeps its preset menu; a third-party host is scoped to
+    // just its own configured model — no GPT presets leak in.
+    expect([...settings.aiProfiles[0].enabledModels].sort()).toEqual([...SELECTABLE_AI_MODELS].sort())
+    expect(settings.aiProfiles[1].enabledModels).toEqual(['qwen3-coder-plus'])
+  })
+
+  it('keeps an explicit empty third-party model unconfigured instead of restoring a GPT preset', () => {
+    const settings = sanitizeSettings({
+      ...DEFAULT_SETTINGS,
+      activeAiProfileId: 'empty-proxy',
+      aiProfiles: [{
+        id: 'empty-proxy',
+        name: 'Empty Proxy',
+        provider: 'openai',
+        baseUrl: 'https://proxy.example.com/v1',
+        model: '',
+        enabledModels: [],
+        apiProtocol: 'auto',
+        hasApiKey: false
+      }]
+    })
+
+    expect(settings.model).toBe('')
+    expect(settings.aiProfiles[0].model).toBe('')
+    expect(settings.aiProfiles[0].enabledModels).toEqual([])
   })
 
   it('bounds the number of saved AI profiles', () => {
@@ -118,6 +176,7 @@ describe('v2 settings boundaries', () => {
         provider: 'openai' as const,
         baseUrl: 'https://api.example.com/v1',
         model: 'gpt-example',
+        enabledModels: ['gpt-example'],
         apiProtocol: 'auto' as const,
         hasApiKey: false
       }))

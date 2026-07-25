@@ -2,6 +2,7 @@ import { app, clipboard, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } f
 
 import type {
   AiRequest,
+  AiModelListRequest,
   AiOcrRequest,
   Annotation,
   AppSettings,
@@ -244,6 +245,8 @@ export function registerIpc(services: Services): void {
   handle(IPC.browserSavePdf, () => browser.savePdf())
   handle(IPC.browserOpenExternal, (_event, url?: string) => browser.openExternal(url))
   handle(IPC.browserClose, () => browser.close())
+  handle(IPC.browserHistory, () => browser.listHistory())
+  handle(IPC.browserClearHistory, () => browser.clearHistory())
 
   handle(IPC.imagesGenerate, (_event, request: ImageGenerationRequest) => ai.generateImage(request))
   handle(IPC.imagesStop, (_event, requestId: string) => ai.stopImage(requestId))
@@ -251,6 +254,7 @@ export function registerIpc(services: Services): void {
   handle(IPC.settingsGet, () => settings.get())
   handle(IPC.settingsSave, (_event, value: AppSettings) => settings.save(value))
 
+  handle(IPC.aiListModels, (_event, request: AiModelListRequest) => ai.listModels(request))
   handle(IPC.aiStart, (event, request: AiRequest) => ai.start(event.sender, request))
   handle(IPC.aiStop, (_event, requestId: string) => ai.stop(requestId))
 }

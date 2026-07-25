@@ -302,7 +302,7 @@ void app.whenReady().then(() => {
     }
   })
   mainWindow = createWindow()
-  const screenshotShortcutRegistered = globalShortcut.register('CommandOrControl+Shift+8', () => {
+  const screenshotShortcutRegistered = globalShortcut.register('CommandOrControl+Shift+D', () => {
     void screenshot.capture().then(
       (attachment) => {
         if (attachment) mainWindow?.webContents.send(IPC.screenshotResult, { type: 'captured', attachment })
@@ -317,7 +317,7 @@ void app.whenReady().then(() => {
     mainWindow.once('ready-to-show', () => {
       mainWindow?.webContents.send(IPC.screenshotResult, {
         type: 'error',
-        message: '截图快捷键 Cmd/Ctrl+Shift+8 已被其他应用占用；仍可点击聊天窗口中的截图按钮。'
+        message: '截图快捷键 Cmd/Ctrl+Shift+D 已被其他应用占用；仍可点击聊天窗口中的截图按钮。'
       })
     })
   }

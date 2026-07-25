@@ -2,10 +2,12 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import type {
   AiRequest,
+  AiModelListRequest,
   AiOcrRequest,
   AiStreamEvent,
   Annotation,
   AppSettings,
+  BrowserHistoryEntry,
   ChatSession,
   FileChangeEvent,
   FileOperationProposal,
@@ -15,6 +17,7 @@ import type {
   ResearchBrowserExtractMode,
   ResearchBrowserSelectionEvent,
   ResearchBrowserState,
+  WebSelectionCandidate,
   OcrResult,
   SearchProgress,
   CoScribeAPI,
@@ -160,8 +163,12 @@ const api: CoScribeAPI = {
     savePdf: () => ipcRenderer.invoke(IPC.browserSavePdf),
     openExternal: (url?: string) => ipcRenderer.invoke(IPC.browserOpenExternal, url),
     close: () => ipcRenderer.invoke(IPC.browserClose),
+    history: (): Promise<BrowserHistoryEntry[]> => ipcRenderer.invoke(IPC.browserHistory),
+    clearHistory: (): Promise<BrowserHistoryEntry[]> => ipcRenderer.invoke(IPC.browserClearHistory),
     onState: (listener: (state: ResearchBrowserState) => void) => subscribe(IPC.browserState, listener),
-    onSelection: (listener: (event: ResearchBrowserSelectionEvent) => void) => subscribe(IPC.browserSelection, listener)
+    onSelection: (listener: (event: ResearchBrowserSelectionEvent) => void) => subscribe(IPC.browserSelection, listener),
+    onSelectionCandidate: (listener: (candidate: WebSelectionCandidate) => void) =>
+      subscribe(IPC.browserSelectionCandidate, listener)
   },
   images: {
     generate: (request) => ipcRenderer.invoke(IPC.imagesGenerate, request),
@@ -172,6 +179,7 @@ const api: CoScribeAPI = {
     save: (value: AppSettings) => ipcRenderer.invoke(IPC.settingsSave, value)
   },
   ai: {
+    listModels: (request: AiModelListRequest) => ipcRenderer.invoke(IPC.aiListModels, request),
     start: (request: AiRequest) => ipcRenderer.invoke(IPC.aiStart, request),
     stop: (requestId: string) => ipcRenderer.invoke(IPC.aiStop, requestId),
     onStream: (listener: (event: AiStreamEvent) => void) => subscribe(IPC.aiStream, listener)

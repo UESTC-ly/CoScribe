@@ -41,7 +41,8 @@ import type {
   ContextWindowUsage,
   FileKind,
   FileOperationProposal,
-  SourceRef
+  SourceRef,
+  WebSelectionCandidate
 } from '../../shared/types'
 import {
   CHAT_IMAGE_MIME_TYPES,
@@ -102,6 +103,7 @@ export interface AiWorkspaceProps {
   error?: string | null
   applyingOperationId?: string | null
   capturedImage?: ChatImageAttachment | null
+  webSelectionCandidate?: WebSelectionCandidate | null
   draftFocusToken?: number
   draft?: string
   disabled?: boolean
@@ -120,6 +122,8 @@ export interface AiWorkspaceProps {
   onStopImage?: () => void | Promise<void>
   onCaptureScreenshot?: () => void | Promise<void>
   onCapturedImageHandled?: () => void
+  onInsertWebSelectionCandidate?: (candidate: WebSelectionCandidate) => void
+  onClearWebSelectionCandidate?: () => void
   onQuickNote?: () => void | Promise<void>
   onOpenSource: (source: SourceRef) => void
   onOpenContext: (context: ContextSnapshot) => void
@@ -278,6 +282,7 @@ export function AiWorkspace({
   error = null,
   applyingOperationId = null,
   capturedImage = null,
+  webSelectionCandidate = null,
   draftFocusToken = 0,
   draft,
   disabled = false,
@@ -296,6 +301,8 @@ export function AiWorkspace({
   onStopImage,
   onCaptureScreenshot,
   onCapturedImageHandled,
+  onInsertWebSelectionCandidate,
+  onClearWebSelectionCandidate,
   onQuickNote,
   onOpenSource,
   onOpenContext,
@@ -322,6 +329,7 @@ export function AiWorkspace({
   const [composerMode, setComposerMode] = useState<'chat' | 'image'>('chat')
   const [imageSize, setImageSize] = useState<ImageGenerationPayload['size']>('1024x1024')
   const [imageQuality, setImageQuality] = useState<ImageGenerationPayload['quality']>('medium')
+  const [pathDragActive, setPathDragActive] = useState(false)
   const sessionMenuRef = useRef<HTMLDivElement>(null)
   const referenceMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -531,6 +539,42 @@ export function AiWorkspace({
       updateDraft(`${currentDraft.slice(0, start)}${pastedText}${currentDraft.slice(end)}`)
     }
     void addImages(files)
+  }
+
+  const acceptsPathDrop = (dataTransfer: DataTransfer): boolean => {
+    const types = Array.from(dataTransfer.types ?? [])
+    return types.includes('application/x-vibe-path') || types.includes('Files')
+  }
+
+  const droppedPaths = (dataTransfer: DataTransfer): string[] => {
+    const paths: string[] = []
+    try {
+      const internalPath = dataTransfer.getData('application/x-vibe-path')
+      if (internalPath.trim()) paths.push(internalPath)
+    } catch {
+      // Some operating-system drag sources expose files but reject getData().
+    }
+    for (const file of Array.from(dataTransfer.files ?? [])) {
+      try {
+        const filePath = window.coscribe.file.pathForDroppedFile(file)
+        if (filePath.trim()) paths.push(filePath)
+      } catch {
+        // Ignore individual entries Electron cannot resolve to a local path.
+      }
+    }
+    return [...new Set(paths)]
+  }
+
+  const appendDroppedPaths = (paths: readonly string[]): void => {
+    if (!paths.length) {
+      setComposerError('没有读取到可用的本地文件或文件夹路径。')
+      return
+    }
+    const pathBlock = paths.join('\n')
+    updateDraft(currentDraft.trim() ? `${currentDraft.trimEnd()}\n${pathBlock}` : pathBlock)
+    setComposerMode('chat')
+    setComposerError(null)
+    textareaRef.current?.focus()
   }
 
   const toggleImageMode = (): void => {
@@ -864,6 +908,36 @@ export function AiWorkspace({
       </div>
 
       <footer className="ai-composer-wrap">
+        {composerMode === 'chat' && webSelectionCandidate && (
+          <section className="ai-selection-context ai-selection-context--web" role="region" aria-label="网页选中内容候选">
+            <header>
+              <span className="ai-selection-context__icon"><TextQuote aria-hidden="true" /></span>
+              <span className="ai-selection-context__identity">
+                <strong>网页选中内容候选</strong>
+                <small>{webSelectionCandidate.title || webSelectionCandidate.url} · {webSelectionCandidate.text.length} 字</small>
+              </span>
+              <span className="ai-selection-context__actions">
+                <button
+                  type="button"
+                  aria-label="将网页选中内容加入输入框"
+                  title="加入输入框并作为本次网页上下文"
+                  onClick={() => onInsertWebSelectionCandidate?.(webSelectionCandidate)}
+                >
+                  <CornerDownLeft aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="移除网页选中内容候选"
+                  title="忽略此条候选"
+                  onClick={onClearWebSelectionCandidate}
+                >
+                  <X aria-hidden="true" />
+                </button>
+              </span>
+            </header>
+            <blockquote>“{webSelectionCandidate.text.slice(0, 180)}{webSelectionCandidate.text.length > 180 ? '…' : ''}”</blockquote>
+          </section>
+        )}
         {composerMode === 'chat' && context && capturedSelection && (
           <section className="ai-selection-context" role="region" aria-label="已捕获的 AI 选中内容">
             <header>
@@ -939,7 +1013,36 @@ export function AiWorkspace({
         )}
 
         {composerError && <p className="ai-composer__error" role="alert">{composerError}</p>}
-        <div className={clsx('ai-composer', composerMode === 'image' && 'is-image-mode', composerMode === 'chat' && !isConfigured && 'is-disabled')}>
+        <div
+          className={clsx(
+            'ai-composer',
+            composerMode === 'image' && 'is-image-mode',
+            composerMode === 'chat' && !isConfigured && 'is-disabled',
+            pathDragActive && 'is-path-drag'
+          )}
+          onDragEnter={(event) => {
+            if (!acceptsPathDrop(event.dataTransfer)) return
+            event.preventDefault()
+            setPathDragActive(true)
+          }}
+          onDragOver={(event) => {
+            if (!acceptsPathDrop(event.dataTransfer)) return
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'copy'
+            setPathDragActive(true)
+          }}
+          onDragLeave={(event) => {
+            const nextTarget = event.relatedTarget
+            if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) setPathDragActive(false)
+          }}
+          onDrop={(event) => {
+            if (!acceptsPathDrop(event.dataTransfer)) return
+            event.preventDefault()
+            event.stopPropagation()
+            setPathDragActive(false)
+            appendDroppedPaths(droppedPaths(event.dataTransfer))
+          }}
+        >
           {composerMode === 'image' && (
             <div className="ai-image-options" aria-label="图片生成选项">
               <span><WandSparkles aria-hidden="true" /> GPT-Image 2</span>
@@ -1074,7 +1177,7 @@ export function AiWorkspace({
               type="button"
               disabled={disabled || !activeSession || isBusy || speech.active}
               aria-label="截图"
-              title="框选屏幕区域并加入聊天（⌘⇧8 / Ctrl+Shift+8；Esc 取消）"
+              title="框选屏幕区域并加入聊天（⌘⇧D / Ctrl+Shift+D；Esc 取消）"
               onClick={() => void onCaptureScreenshot?.()}
             >
               <ScanLine aria-hidden="true" />

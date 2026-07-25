@@ -10,10 +10,12 @@ import {
   anthropicReasoningRequestFields,
   anthropicResult,
   anthropicStreamEvent,
+  availableModelIds,
   chatEndpoint,
   imageGenerationEndpoint,
   imageGenerationRequestBody,
   imageGenerationResult,
+  modelListEndpoint,
   parseAiJsonResponse,
   reasoningRequestFields,
   resolveActiveAiRequestTarget,
@@ -119,6 +121,127 @@ describe('AI endpoint resolution', () => {
     expect(imageGenerationEndpoint('https://images.example.com/custom/v1/images/generations')).toBe(
       'https://images.example.com/custom/v1/images/generations'
     )
+  })
+
+  it('builds model-list endpoints for OpenAI-compatible and Anthropic-compatible bases', () => {
+    expect(modelListEndpoint('https://proxy.example.com/v1')).toBe('https://proxy.example.com/v1/models')
+    expect(modelListEndpoint('https://proxy.example.com/custom/v1/chat/completions')).toBe(
+      'https://proxy.example.com/custom/v1/models'
+    )
+    expect(modelListEndpoint('https://anthropic.example.com/v1/messages')).toBe(
+      'https://anthropic.example.com/v1/models'
+    )
+  })
+
+  it('keeps non-GPT model IDs from compatible model-list responses', () => {
+    expect(availableModelIds({
+      data: [
+        { id: 'qwen3-coder-plus' },
+        { id: 'deepseek-v3.2' },
+        { id: 'qwen3-coder-plus' }
+      ]
+    })).toEqual(['qwen3-coder-plus', 'deepseek-v3.2'])
+    expect(availableModelIds({ models: [{ model: 'glm-4.5' }, 'moonshot-v1'] })).toEqual([
+      'glm-4.5',
+      'moonshot-v1'
+    ])
+  })
+})
+
+describe('AI model discovery', () => {
+  it('uses a draft key for an OpenAI-compatible provider', async () => {
+    const headerValue = 'fixture-draft-key'
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ id: 'qwen3-coder-plus' }, { id: 'deepseek-v3.2' }]
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const settings = { apiKeyForProfile: vi.fn() } as unknown as SettingsStore
+    const ai = new AiService(
+      settings,
+      {} as ProjectService,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+
+    await expect(ai.listModels({
+      profileId: 'openai-compatible',
+      provider: 'openai',
+      baseUrl: 'https://proxy.example.com/v1',
+      apiKey: headerValue,
+      useStoredApiKey: false
+    })).resolves.toEqual({ models: ['qwen3-coder-plus', 'deepseek-v3.2'] })
+    expect(settings.apiKeyForProfile).not.toHaveBeenCalled()
+    expect(fetchSpy).toHaveBeenCalledWith('https://proxy.example.com/v1/models', expect.objectContaining({
+      method: 'GET',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${headerValue}` },
+      redirect: 'error'
+    }))
+  })
+
+  it('uses the saved profile key and Anthropic headers for an Anthropic-compatible provider', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ id: 'qwen3-235b-anthropic' }]
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const settings = {
+      get: vi.fn().mockResolvedValue({
+        aiProfiles: [{
+          id: 'anthropic-compatible',
+          provider: 'anthropic',
+          baseUrl: 'https://anthropic.example.com/v1/messages'
+        }]
+      }),
+      apiKeyForProfile: vi.fn().mockResolvedValue('fixture-anthropic-key')
+    } as unknown as SettingsStore
+    const ai = new AiService(
+      settings,
+      {} as ProjectService,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+
+    await expect(ai.listModels({
+      profileId: 'anthropic-compatible',
+      provider: 'anthropic',
+      baseUrl: 'https://anthropic.example.com/v1/messages',
+      useStoredApiKey: true
+    })).resolves.toEqual({ models: ['qwen3-235b-anthropic'] })
+    expect(settings.get).toHaveBeenCalledOnce()
+    expect(settings.apiKeyForProfile).toHaveBeenCalledWith('anthropic-compatible')
+    expect(fetchSpy).toHaveBeenCalledWith('https://anthropic.example.com/v1/models', expect.objectContaining({
+      headers: {
+        Accept: 'application/json',
+        'anthropic-version': '2023-06-01',
+        'x-api-key': 'fixture-anthropic-key'
+      }
+    }))
+  })
+
+  it('never sends a saved profile key to an unsaved service address', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const settings = {
+      get: vi.fn().mockResolvedValue({
+        aiProfiles: [{
+          id: 'openai-compatible',
+          provider: 'openai',
+          baseUrl: 'https://trusted.example.com/v1'
+        }]
+      }),
+      apiKeyForProfile: vi.fn().mockResolvedValue('fixture-saved-key')
+    } as unknown as SettingsStore
+    const ai = new AiService(
+      settings,
+      {} as ProjectService,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+
+    await expect(ai.listModels({
+      profileId: 'openai-compatible',
+      provider: 'openai',
+      baseUrl: 'https://untrusted.example.com/v1',
+      useStoredApiKey: true
+    })).rejects.toThrow('服务地址或接口格式已修改')
+    expect(settings.apiKeyForProfile).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
 

@@ -61,7 +61,8 @@ import type {
   ResearchBrowserState,
   ResearchReference,
   SearchResult,
-  SourceRef
+  SourceRef,
+  WebSelectionCandidate
 } from './shared/types'
 import { DEFAULT_SETTINGS } from './shared/types'
 import { planContextWindow } from './lib/context-window'
@@ -235,6 +236,7 @@ export default function App(): React.JSX.Element {
   const [operationHistory, setOperationHistory] = useState<AiOperationHistoryEntry[]>([])
   const [undoingOperationId, setUndoingOperationId] = useState<string | null>(null)
   const [pendingWebContext, setPendingWebContext] = useState<ContextSnapshot | null>(null)
+  const [webSelectionCandidate, setWebSelectionCandidate] = useState<WebSelectionCandidate | null>(null)
   const [forceCompactSessionId, setForceCompactSessionId] = useState<string | null>(null)
   const [reportedContextUsage, setReportedContextUsage] = useState<{
     sessionId: string
@@ -477,6 +479,11 @@ export default function App(): React.JSX.Element {
       return
     }
     setAiError(event.message)
+    setStore().setAiVisible(true)
+  }), [])
+
+  useEffect(() => window.coscribe.browser.onSelectionCandidate((candidate) => {
+    setWebSelectionCandidate(candidate)
     setStore().setAiVisible(true)
   }), [])
 
@@ -1042,9 +1049,36 @@ export default function App(): React.JSX.Element {
       ? [`网页选中内容：[${context.documentName}](${capture.url})`, '', capture.text].join('\n')
       : `请基于这篇网页的完整正文回答：\n\n[${context.documentName}](${capture.url})`
     setPendingWebContext(context)
+    setWebSelectionCandidate(null)
     setContextScope(scope)
     setChatDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft)
     setStore().setAiVisible(true)
+    setChatDraftFocusToken((token) => token + 1)
+    setAiError(null)
+  }, [])
+
+  const insertWebSelectionCandidate = useCallback((candidate: WebSelectionCandidate): void => {
+    const store = appStore.getState()
+    if (!store.project) return
+    const title = candidate.title || new URL(candidate.url).hostname
+    const context: ContextSnapshot = {
+      projectName: store.project.name,
+      projectPath: store.project.path,
+      pane: store.workspace.activePane,
+      documentName: title,
+      webUrl: candidate.url,
+      selection: candidate.text,
+      visibleText: candidate.text,
+      scope: 'selection',
+      referencedFiles: [...store.referencedFiles],
+      capturedAt: Date.now()
+    }
+    const content = [`网页选中内容：[${title}](${candidate.url})`, '', candidate.text].join('\n')
+    setPendingWebContext(context)
+    setContextScope('selection')
+    setChatDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${content}` : content)
+    setWebSelectionCandidate(null)
+    store.setAiVisible(true)
     setChatDraftFocusToken((token) => token + 1)
     setAiError(null)
   }, [])
@@ -2055,6 +2089,7 @@ export default function App(): React.JSX.Element {
             error={aiError}
             applyingOperationId={applyingOperationId}
             capturedImage={capturedImage}
+            webSelectionCandidate={webSelectionCandidate}
             draft={chatDraft}
             draftFocusToken={chatDraftFocusToken}
             onSelectSession={state.setCurrentSession}
@@ -2094,6 +2129,8 @@ export default function App(): React.JSX.Element {
             onStopImage={stopImage}
             onCaptureScreenshot={captureScreenshot}
             onCapturedImageHandled={() => setCapturedImage(null)}
+            onInsertWebSelectionCandidate={insertWebSelectionCandidate}
+            onClearWebSelectionCandidate={() => setWebSelectionCandidate(null)}
             onQuickNote={quickNote}
             onOpenSource={openSource}
             onOpenContext={openContext}

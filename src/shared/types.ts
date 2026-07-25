@@ -219,6 +219,20 @@ export type ResearchBrowserSelectionEvent =
   | { type: 'captured'; result: ResearchBrowserExtractResult }
   | { type: 'error'; message: string }
 
+// Auto-detected browser text selection, staged as chat candidate content
+// (never auto-sent, never overwriting the composer draft).
+export interface WebSelectionCandidate {
+  text: string
+  title: string
+  url: string
+}
+
+export interface BrowserHistoryEntry {
+  url: string
+  title: string
+  visitedAt: number
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -647,9 +661,23 @@ export interface AiProviderProfile {
   provider: AiProvider
   baseUrl: string
   model: string
+  // The minimal set of models the user has enabled for this provider. This is
+  // the ONLY list shown in the bottom-right quick switcher; the full catalogue
+  // is browsed via search on the settings page. Always contains `model`.
+  enabledModels: string[]
   apiProtocol: AiProtocol
   hasApiKey: boolean
   apiKey?: string
+}
+export interface AiModelListRequest {
+  profileId: string
+  provider: AiProvider
+  baseUrl: string
+  apiKey?: string
+  useStoredApiKey: boolean
+}
+export interface AiModelListResult {
+  models: string[]
 }
 export const SELECTABLE_AI_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'] as const
 export const SELECTABLE_ANTHROPIC_MODELS = [
@@ -668,6 +696,40 @@ export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'ultra', 'ma
 export type SelectableAiModel = (typeof SELECTABLE_AI_MODELS)[number]
 export type SelectableAnthropicModel = (typeof SELECTABLE_ANTHROPIC_MODELS)[number]
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
+
+// Native first-party hosts. Only these seed the built-in preset model lists;
+// third-party OpenAI-/Anthropic-compatible endpoints start with just their own
+// configured model so the quick switcher never leaks unrelated presets.
+const NATIVE_OPENAI_HOST = 'api.openai.com'
+const NATIVE_ANTHROPIC_HOST = 'api.anthropic.com'
+
+// The union of every built-in preset model. Used to strip presets that no
+// longer apply when a profile's endpoint changes, while preserving models the
+// user fetched and enabled themselves.
+export const ALL_PRESET_MODELS: readonly string[] = [...SELECTABLE_AI_MODELS, ...SELECTABLE_ANTHROPIC_MODELS]
+
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * The default enabled-model set for a provider profile: the built-in presets
+ * for genuine first-party OpenAI/Anthropic hosts, otherwise just the profile's
+ * own configured model. Always includes `model` and never returns an empty set
+ * when `model` is non-empty.
+ */
+export function defaultEnabledModels(provider: AiProvider, baseUrl: string, model: string): string[] {
+  const host = hostOf(baseUrl)
+  const presets = provider === 'anthropic'
+    ? host === NATIVE_ANTHROPIC_HOST ? SELECTABLE_ANTHROPIC_MODELS : []
+    : host === NATIVE_OPENAI_HOST ? SELECTABLE_AI_MODELS : []
+  const trimmed = model.trim()
+  return [...new Set([...(trimmed ? [trimmed] : []), ...presets])]
+}
 
 export interface AppSettings extends AiSettings {
   activeAiProfileId: string
@@ -902,8 +964,11 @@ export interface CoScribeAPI {
     savePdf: () => Promise<FileReadResult>
     openExternal: (url?: string) => Promise<void>
     close: () => Promise<void>
+    history: () => Promise<BrowserHistoryEntry[]>
+    clearHistory: () => Promise<BrowserHistoryEntry[]>
     onState: (listener: (state: ResearchBrowserState) => void) => () => void
     onSelection: (listener: (event: ResearchBrowserSelectionEvent) => void) => () => void
+    onSelectionCandidate: (listener: (candidate: WebSelectionCandidate) => void) => () => void
   }
   images: {
     generate: (request: ImageGenerationRequest) => Promise<ImageGenerationResult>
@@ -914,6 +979,7 @@ export interface CoScribeAPI {
     save: (settings: AppSettings) => Promise<AppSettings>
   }
   ai: {
+    listModels: (request: AiModelListRequest) => Promise<AiModelListResult>
     start: (request: AiRequest) => Promise<void>
     stop: (requestId: string) => Promise<void>
     onStream: (listener: (event: AiStreamEvent) => void) => () => void
@@ -949,6 +1015,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
       provider: 'openai',
       baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-5.6-terra',
+      enabledModels: [...SELECTABLE_AI_MODELS],
       apiProtocol: 'auto',
       hasApiKey: false
     },
@@ -958,6 +1025,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
       provider: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
       model: 'claude-sonnet-4-6',
+      enabledModels: [...SELECTABLE_ANTHROPIC_MODELS],
       apiProtocol: 'auto',
       hasApiKey: false
     }

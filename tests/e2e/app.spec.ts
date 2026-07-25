@@ -474,13 +474,18 @@ test('renders PPTX slides locally and searches extracted slide text', async () =
 
 test('browses an original isolated webpage and saves complete MHTML, semantic Markdown, and PDF', async ({}, testInfo) => {
   test.setTimeout(90_000)
+  const articleRequestCookies: string[] = []
   const server = createServer((request, response) => {
     if (request.url === '/pixel.png') {
       response.writeHead(200, { 'Content-Type': 'image/png' })
       response.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'))
       return
     }
-    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    if (request.url === '/article') articleRequestCookies.push(request.headers.cookie ?? '')
+    response.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Set-Cookie': 'coscribe_login=retained; Path=/; HttpOnly; SameSite=Lax'
+    })
     response.end([
       '<!doctype html>',
       '<html><head><title>Isolated Research Page</title>',
@@ -513,6 +518,13 @@ test('browses an original isolated webpage and saves complete MHTML, semantic Ma
     }, url)).toBe(true)
     const loadedBrowserTab = page.getByRole('tab', { name: 'Isolated Research Page' })
     await expect(loadedBrowserTab).toBeVisible()
+    await expect.poll(async () => {
+      const stored = await readFile(path.join(userDataPath, 'browser-history.json'), 'utf8').catch(() => '[]')
+      return (JSON.parse(stored) as Array<{ url?: string }>).some((entry) => entry.url === url)
+    }).toBe(true)
+    await page.getByRole('button', { name: '浏览历史记录' }).click()
+    await expect(page.getByRole('dialog', { name: '浏览历史记录' })).toContainText('Isolated Research Page')
+    await page.getByRole('button', { name: '浏览历史记录' }).click()
 
     const newBrowserTab = page.getByRole('button', { name: '新建浏览器标签页' })
     for (let index = 1; index < 10; index += 1) await newBrowserTab.click()
@@ -612,7 +624,18 @@ test('browses an original isolated webpage and saves complete MHTML, semantic Ma
         const selection = window.getSelection()
         selection.removeAllRanges()
         selection.addRange(range)
+        document.querySelector('#selection').dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
       })()`)
+    }, url)
+    const browserSelectionCandidate = page.getByRole('region', { name: '网页选中内容候选' })
+    await expect(browserSelectionCandidate).toContainText('WEB_SELECTION_SENTINEL')
+    await expect(page.getByLabel('向 AI 提问')).toHaveValue('')
+    await page.getByRole('button', { name: '移除网页选中内容候选' }).click()
+    await expect(browserSelectionCandidate).toBeHidden()
+
+    await electronApp.evaluate(async ({ webContents }, expectedUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === expectedUrl)
+      if (!contents) throw new Error('research WebContents not found')
       contents.focus()
       contents.sendInputEvent({
         type: 'keyDown',
@@ -661,6 +684,16 @@ test('browses an original isolated webpage and saves complete MHTML, semantic Ma
     expect(pdf.length).toBeGreaterThan(1_000)
 
     await page.screenshot({ path: testInfo.outputPath('research-browser.png') })
+
+    // Destroy and recreate every browser WebContents; the persistent partition
+    // must still send the login cookie on the next article request.
+    await page.getByRole('button', { name: '关闭资料浏览器' }).click()
+    await expect(page.getByRole('region', { name: '资料浏览器' })).toBeHidden()
+    await page.getByRole('button', { name: '资料浏览器', exact: true }).click()
+    await page.getByLabel('网址或搜索内容').fill(url)
+    await page.getByLabel('网址或搜索内容').press('Enter')
+    await expect.poll(() => articleRequestCookies.length).toBeGreaterThanOrEqual(2)
+    expect(articleRequestCookies.at(-1)).toContain('coscribe_login=retained')
 
     const secondProject = path.join(projectPath, 'project-b')
     await mkdir(secondProject)
@@ -825,15 +858,16 @@ test('decodes streaming speech through the isolated native ASR process', async (
   expect(transcript).toContain('星期三')
 })
 
-test('double-clicks a predicted screenshot region and adds the crop to chat attachments', async ({}, testInfo) => {
+test('drag-selects a screenshot region and adds the crop to chat attachments', async ({}, testInfo) => {
   await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
   await expect(page.getByLabel('README.md Markdown 编辑器')).toBeVisible()
   const selectorWindow = electronApp.waitForEvent('window')
   await page.getByRole('button', { name: '截图', exact: true }).click()
   const selector = await selectorWindow
   await selector.waitForLoadState('domcontentloaded')
-  await expect(selector.locator('#selection')).toBeVisible()
-  await expect(selector.locator('#selection')).toHaveClass(/candidate/u)
+  // The crosshair overlay starts empty — no predicted candidate box appears
+  // until the user drags a region.
+  await expect(selector.locator('#selection')).not.toHaveClass(/active/u)
   await expect(selector.locator('#screen')).toHaveCount(0)
   expect(await selector.locator('body').evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
   await expect.poll(async () => electronApp.evaluate(({ BrowserWindow }) => {
@@ -841,42 +875,26 @@ test('double-clicks a predicted screenshot region and adds the crop to chat atta
     return Boolean(main?.isVisible())
   })).toBe(true)
 
-  await selector.mouse.move(700, 250)
-  const selectorViewport = await selector.evaluate(() => ({ width: innerWidth, height: innerHeight }))
-  const expectedMinimumWidth = Math.max(96, Math.min(320, selectorViewport.width * 0.1))
-  const expectedMinimumHeight = Math.max(64, Math.min(200, selectorViewport.height * 0.1))
-  await selector.waitForFunction(({ minimumWidth, minimumHeight, pointerX, pointerY }) => {
-    const box = document.getElementById('selection')
-    if (!box) return false
-    const rect = box.getBoundingClientRect()
-    return (
-      rect.width >= minimumWidth - 2 &&
-      rect.height >= minimumHeight - 2 &&
-      rect.left <= pointerX &&
-      rect.right >= pointerX &&
-      rect.top <= pointerY &&
-      rect.bottom >= pointerY
-    )
-  }, {
-    minimumWidth: expectedMinimumWidth,
-    minimumHeight: expectedMinimumHeight,
-    pointerX: 700,
-    pointerY: 250
-  })
+  // Manual drag: use viewport-relative points because BrowserWindow coordinates
+  // differ from CSS pixels on scaled displays.
+  const selectorViewport = await selector.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
+  const dragStart = { x: selectorViewport.width * 0.2, y: selectorViewport.height * 0.2 }
+  const dragEnd = { x: selectorViewport.width * 0.72, y: selectorViewport.height * 0.58 }
+  await selector.mouse.move(dragStart.x, dragStart.y)
+  await selector.mouse.down()
+  await selector.mouse.move(dragEnd.x, dragEnd.y, { steps: 8 })
+  await expect(selector.locator('#selection')).toHaveClass(/active/u)
+  await expect(selector.locator('#size')).toContainText('松开确认')
+  const draggedBox = await selector.locator('#selection').boundingBox()
+  expect(draggedBox).not.toBeNull()
+  // Playwright's synthetic mouse coordinates can be transformed twice by
+  // macOS display scaling. The functional contract is a valid manual region;
+  // the captured attachment assertions below verify the resulting crop.
+  expect(draggedBox!.width).toBeGreaterThanOrEqual(8)
+  expect(draggedBox!.height).toBeGreaterThanOrEqual(8)
   await selector.screenshot({ path: testInfo.outputPath('screenshot-roi-selector.png') })
-  const predictedBox = await selector.locator('#selection').boundingBox()
-  expect(predictedBox).not.toBeNull()
-  expect(predictedBox!.width).toBeGreaterThanOrEqual(expectedMinimumWidth - 2)
-  expect(predictedBox!.height).toBeGreaterThanOrEqual(expectedMinimumHeight - 2)
-  expect(predictedBox!.x).toBeLessThanOrEqual(700)
-  expect(predictedBox!.x + predictedBox!.width).toBeGreaterThanOrEqual(700)
-  expect(predictedBox!.y).toBeLessThanOrEqual(250)
-  expect(predictedBox!.y + predictedBox!.height).toBeGreaterThanOrEqual(250)
-  await selector.mouse.click(700, 250)
-  expect(selector.isClosed()).toBe(false)
-  await expect(selector.locator('#size')).toContainText('双击确认')
   const closed = selector.waitForEvent('close')
-  await selector.mouse.dblclick(700, 250)
+  await selector.mouse.up()
   await closed
 
   const attachment = page.getByRole('img', { name: /CoScribe-screenshot-/u })
@@ -1268,6 +1286,51 @@ test('stores multiple named AI providers with separately encrypted credentials',
   const restored = await page.evaluate(() => window.coscribe.settings.get())
   expect(restored.aiProfiles.filter((profile) => profile.hasApiKey)).toHaveLength(2)
   expect(restored.aiProfiles.find((profile) => profile.name === '第二供应商')?.baseUrl).toBe('https://second.example.com/v1')
+})
+
+test('discovers and selects non-GPT models from an OpenAI-compatible provider', async () => {
+  let requestPath: string | null = null
+  let authorization: string | null = null
+  const server = createServer((request, response) => {
+    requestPath = request.url ?? null
+    authorization = typeof request.headers.authorization === 'string' ? request.headers.authorization : null
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({
+      object: 'list',
+      data: [{ id: 'qwen3-coder-plus' }, { id: 'deepseek-v3.2' }]
+    }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const port = (server.address() as AddressInfo).port
+    await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+    await page.getByRole('button', { name: /AI 服务商/u }).click()
+    await page.getByLabel('服务地址').fill(`http://127.0.0.1:${port}/v1`)
+    const apiKeyInput = page.getByLabel('API Key')
+    await apiKeyInput.fill('fixture-compatible-e2e-key')
+    await expect(apiKeyInput).toHaveValue('fixture-compatible-e2e-key')
+    await page.getByRole('button', { name: '获取可用模型' }).click()
+
+    // The fetched catalogue is offered as enable/disable checkboxes; the old
+    // native GPT presets are stripped once the profile targets a third-party host.
+    await expect(page.getByRole('checkbox', { name: '在模型菜单中显示 qwen3-coder-plus' })).toBeVisible()
+    await expect(page.getByRole('checkbox', { name: '在模型菜单中显示 gpt-5.6-luna' })).toHaveCount(0)
+    await page.getByRole('checkbox', { name: '在模型菜单中显示 qwen3-coder-plus' }).check()
+    await page.getByLabel('模型', { exact: true }).fill('deepseek-v3.2')
+    await page.getByRole('button', { name: '保存设置' }).click()
+    await expect(page.getByRole('dialog', { name: '设置' })).toBeHidden()
+
+    expect(requestPath).toBe('/v1/models')
+    expect(authorization).toBe('Bearer fixture-compatible-e2e-key')
+    const saved = await page.evaluate(() => window.coscribe.settings.get())
+    expect(saved.model).toBe('deepseek-v3.2')
+    const savedProfile = saved.aiProfiles.find((profile) => profile.id === saved.activeAiProfileId)
+    expect(savedProfile?.enabledModels).toEqual(expect.arrayContaining(['qwen3-coder-plus', 'deepseek-v3.2']))
+    expect(savedProfile?.enabledModels).not.toContain('gpt-5.6-luna')
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
 })
 
 test('uses the Anthropic Messages wire format with its isolated provider profile', async () => {

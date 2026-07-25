@@ -4,18 +4,21 @@ import os from 'node:os'
 import path from 'node:path'
 
 import type { Session } from 'electron'
-import { BrowserWindow, shell, WebContentsView } from 'electron'
+import { app, BrowserWindow, shell, WebContentsView } from 'electron'
 
 import type {
+  BrowserHistoryEntry,
   FileReadResult,
   ResearchBrowserBounds,
   ResearchBrowserExtractMode,
   ResearchBrowserExtractResult,
   ResearchBrowserState,
-  ResearchBrowserTabState
+  ResearchBrowserTabState,
+  WebSelectionCandidate
 } from '../../src/shared/types'
 import { IPC } from '../ipc-channels'
 import { ProjectService, type ProjectWriteScope } from './project'
+import { atomicWriteJson, readJson } from './storage'
 import {
   buildWebClipMarkdown,
   normalizeBrowserInput,
@@ -23,15 +26,25 @@ import {
   shouldUseSystemBrowser,
   validatedHttpUrl
 } from './web-clip'
-import { PAGE_CAPTURE_SCRIPT, PAGE_PRINT_BUDGET_SCRIPT } from './web-page-capture'
+import {
+  PAGE_CAPTURE_SCRIPT,
+  PAGE_PRINT_BUDGET_SCRIPT,
+  parseSelectionConsoleMessage,
+  selectionWatchScript
+} from './web-page-capture'
 
-const BROWSER_PARTITION = 'coscribe-research-browser'
+// A `persist:` partition keeps cookies, localStorage and login state on disk
+// under userData so research sessions survive a restart. Every tab shares this
+// one session, so signing in once applies across tabs.
+const BROWSER_PARTITION = 'persist:coscribe-research-browser'
 const CAPTURE_WORLD_ID = 13_337
 const MAX_CAPTURE_CHARS = 200_000
 const MAX_WEB_ARCHIVE_BYTES = 256 * 1024 * 1024
 export const MAX_BROWSER_TABS = 10
 const EXTERNAL_LAUNCH_LIMIT = 4
 const EXTERNAL_LAUNCH_WINDOW_MS = 10_000
+const MAX_HISTORY_ENTRIES = 500
+const MAX_SELECTION_CANDIDATE_CHARS = 20_000
 
 interface RawPageCapture {
   title?: unknown
@@ -62,6 +75,7 @@ interface BrowserTab {
   view: WebContentsView | null
   state: ResearchBrowserTabState
   pageRevision: number
+  selectionNonce: string
 }
 
 function safeExternalUrl(value: string): string | null {
@@ -69,6 +83,18 @@ function safeExternalUrl(value: string): string | null {
     return validatedHttpUrl(value).toString()
   } catch {
     return null
+  }
+}
+
+function sanitizedHistoryEntry(value: unknown): BrowserHistoryEntry | null {
+  if (!value || typeof value !== 'object') return null
+  const entry = value as Partial<BrowserHistoryEntry>
+  const url = typeof entry.url === 'string' ? safeExternalUrl(entry.url) : null
+  if (!url || typeof entry.visitedAt !== 'number' || !Number.isFinite(entry.visitedAt)) return null
+  return {
+    url,
+    title: boundedString(entry.title, 500) || new URL(url).hostname,
+    visitedAt: entry.visitedAt
   }
 }
 
@@ -92,6 +118,10 @@ export class ResearchBrowserService {
   private bounds: ResearchBrowserBounds = { x: 0, y: 0, width: 0, height: 0 }
   private visible = false
   private externalLaunches: number[] = []
+  private history: BrowserHistoryEntry[] = []
+  private historyLoaded = false
+  private historyLoadPromise: Promise<void> | null = null
+  private historyWriteQueue: Promise<void> = Promise.resolve()
 
   private readonly handleDownload = (event: Electron.Event, item: Electron.DownloadItem): void => {
     event.preventDefault()
@@ -172,6 +202,74 @@ export class ResearchBrowserService {
   private mergeState(patch: Partial<ResearchBrowserTabState> = {}): ResearchBrowserState {
     const tab = this.activeTab
     return tab ? this.mergeTabState(tab, patch) : this.emitState()
+  }
+
+  private historyFilePath(): string {
+    return path.join(app.getPath('userData'), 'browser-history.json')
+  }
+
+  private async ensureHistoryLoaded(): Promise<void> {
+    if (this.historyLoaded) return
+    if (!this.historyLoadPromise) {
+      this.historyLoadPromise = (async () => {
+        const stored = await readJson<BrowserHistoryEntry[]>(this.historyFilePath(), []).catch(() => [])
+        if (Array.isArray(stored)) {
+          this.history = stored
+            .map(sanitizedHistoryEntry)
+            .filter((entry): entry is BrowserHistoryEntry => Boolean(entry))
+            .slice(0, MAX_HISTORY_ENTRIES)
+        }
+        this.historyLoaded = true
+      })()
+    }
+    await this.historyLoadPromise
+  }
+
+  private persistHistory(): Promise<void> {
+    const snapshot = this.history.map((entry) => ({ ...entry }))
+    const write = this.historyWriteQueue
+      .catch(() => undefined)
+      .then(() => atomicWriteJson(this.historyFilePath(), snapshot))
+    this.historyWriteQueue = write
+    return write
+  }
+
+  // Records a visit and lets late title changes update an existing entry
+  // without recreating a page immediately after the user clears history.
+  private recordHistory(url: string, title: string, create = true): void {
+    if (!this.historyLoaded) return
+    const safeUrl = safeExternalUrl(url)
+    if (!safeUrl) return
+    const cleanTitle = boundedString(title, 500) || new URL(safeUrl).hostname
+    const existingIndex = this.history.findIndex((entry) => entry.url === safeUrl)
+    if (!create) {
+      if (existingIndex < 0) return
+      this.history[existingIndex] = { ...this.history[existingIndex], title: cleanTitle }
+    } else {
+      if (existingIndex >= 0) this.history.splice(existingIndex, 1)
+      this.history.unshift({ url: safeUrl, title: cleanTitle, visitedAt: Date.now() })
+      if (this.history.length > MAX_HISTORY_ENTRIES) {
+        this.history.length = MAX_HISTORY_ENTRIES
+      }
+    }
+    void this.persistHistory().catch(() => undefined)
+  }
+
+  async listHistory(): Promise<BrowserHistoryEntry[]> {
+    await this.ensureHistoryLoaded()
+    return this.history.map((entry) => ({ ...entry }))
+  }
+
+  async clearHistory(): Promise<BrowserHistoryEntry[]> {
+    await this.ensureHistoryLoaded()
+    this.history = []
+    await this.persistHistory()
+    return []
+  }
+
+  private emitSelectionCandidate(candidate: WebSelectionCandidate): void {
+    const window = this.getWindow()
+    if (window && !window.isDestroyed()) window.webContents.send(IPC.browserSelectionCandidate, candidate)
   }
 
   private syncViewVisibility(): void {
@@ -312,7 +410,10 @@ export class ResearchBrowserService {
     })
     contents.on('will-attach-webview', (event) => event.preventDefault())
     contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-      if (isMainFrame && !isInPlace) tab.pageRevision += 1
+      if (isMainFrame && !isInPlace) {
+        tab.pageRevision += 1
+        tab.selectionNonce = randomUUID()
+      }
     })
     contents.on('will-navigate', (event, url) => {
       const target = safeExternalUrl(url)
@@ -339,9 +440,36 @@ export class ResearchBrowserService {
     })
     contents.on('did-start-loading', () => this.mergeTabState(tab, { error: undefined, notice: undefined }))
     contents.on('did-stop-loading', () => this.mergeTabState(tab))
-    contents.on('did-navigate', () => this.mergeTabState(tab, { error: undefined }))
-    contents.on('did-navigate-in-page', () => this.mergeTabState(tab))
-    contents.on('page-title-updated', (_event, title) => this.mergeTabState(tab, { title: boundedString(title, 500) || '网页资料' }))
+    contents.on('did-navigate', (_event, url) => {
+      this.mergeTabState(tab, { error: undefined })
+      this.recordHistory(url, contents.isDestroyed() ? '' : contents.getTitle())
+    })
+    contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+      this.mergeTabState(tab)
+      if (isMainFrame) this.recordHistory(url, contents.isDestroyed() ? '' : contents.getTitle())
+    })
+    contents.on('page-title-updated', (_event, title) => {
+      this.mergeTabState(tab, { title: boundedString(title, 500) || '网页资料' })
+      if (!contents.isDestroyed()) this.recordHistory(contents.getURL(), title, false)
+    })
+    // Re-inject after each document loads: the isolated world is reset on
+    // navigation, and the watcher self-guards against duplicate listeners.
+    contents.on('dom-ready', () => {
+      void contents.executeJavaScriptInIsolatedWorld(
+        CAPTURE_WORLD_ID,
+        [{ code: selectionWatchScript(tab.selectionNonce) }]
+      ).catch(() => undefined)
+    })
+    contents.on('console-message', (details) => {
+      const message = typeof details === 'object' && details && 'message' in details
+        ? String((details as { message?: unknown }).message ?? '')
+        : ''
+      const text = parseSelectionConsoleMessage(message, tab.selectionNonce, MAX_SELECTION_CANDIDATE_CHARS)
+      if (!text || this.activeTab !== tab || contents.isDestroyed()) return
+      const url = safeExternalUrl(contents.getURL())
+      if (!url) return
+      this.emitSelectionCandidate({ text, title: tab.state.title || (url ? new URL(url).hostname : '网页资料'), url })
+    })
     contents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return
       this.mergeTabState(tab, {
@@ -378,6 +506,7 @@ export class ResearchBrowserService {
 
   async open(url?: string): Promise<ResearchBrowserState> {
     this.visible = true
+    await this.ensureHistoryLoaded()
     if (!this.activeTab) return this.newTab(url)
     if (url?.trim()) return this.navigate(url)
     this.attachToWindow()
@@ -386,6 +515,7 @@ export class ResearchBrowserService {
   }
 
   async newTab(url?: string): Promise<ResearchBrowserState> {
+    await this.ensureHistoryLoaded()
     if (this.tabs.length >= MAX_BROWSER_TABS) {
       throw new Error(`最多同时打开 ${MAX_BROWSER_TABS} 个网页标签。`)
     }
@@ -394,7 +524,8 @@ export class ResearchBrowserService {
       id,
       view: null,
       state: emptyTabState(id),
-      pageRevision: 0
+      pageRevision: 0,
+      selectionNonce: randomUUID()
     }
     this.tabs.push(tab)
     this.activeTabId = id
@@ -430,6 +561,8 @@ export class ResearchBrowserService {
   }
 
   async navigate(input: string): Promise<ResearchBrowserState> {
+    await this.ensureHistoryLoaded()
+    if (!this.activeTab) return this.newTab(input)
     const tab = this.requireActiveTab()
     const target = normalizeBrowserInput(input)
     if (shouldUseSystemBrowser(target)) {

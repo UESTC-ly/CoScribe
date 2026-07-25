@@ -30,15 +30,15 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 ### 下载与安装
 
-从 [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest) 下载稳定版 `v3.1.0`：
+从 [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest) 下载稳定版 `v3.2.2`：
 
 | 系统 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS | `CoScribe-3.1.0-arm64.dmg` | Apple Silicon，macOS 13+ |
-| macOS | `CoScribe-3.1.0-arm64-mac.zip` | Apple Silicon 免安装压缩包 |
-| Windows | `CoScribe-Setup-3.1.0-x64.exe` | Windows 10/11 x64 |
-| Linux | `CoScribe-3.1.0-x64.AppImage` | 通用 x86-64 便携包 |
-| Linux | `CoScribe-3.1.0-x64.deb` | Debian / Ubuntu x86-64 |
+| macOS | `CoScribe-3.2.2-arm64.dmg` | Apple Silicon，macOS 13+ |
+| macOS | `CoScribe-3.2.2-arm64-mac.zip` | Apple Silicon 免安装压缩包 |
+| Windows | `CoScribe-Setup-3.2.2-x64.exe` | Windows 10/11 x64 |
+| Linux | `CoScribe-3.2.2-x64.AppImage` | 通用 x86-64 便携包 |
+| Linux | `CoScribe-3.2.2-x64.deb` | Debian / Ubuntu x86-64 |
 | 全平台 | `SHA256SUMS.txt` | 安装包 SHA-256 校验值 |
 
 这些安装包目前没有 Apple Developer ID、Windows Authenticode 或 Linux 发行版签名。
@@ -52,7 +52,7 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 #### Windows
 
-1. 运行 `CoScribe-Setup-3.1.0-x64.exe`。
+1. 运行 `CoScribe-Setup-3.2.2-x64.exe`。
 2. 如果 SmartScreen 拦截未签名安装包，确认文件来自本仓库并核对 SHA-256 后，选择“更多信息 → 仍要运行”。
 3. 安装完成后从开始菜单启动 CoScribe。
 
@@ -61,19 +61,19 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 AppImage：
 
 ```bash
-chmod +x CoScribe-3.1.0-x64.AppImage
-./CoScribe-3.1.0-x64.AppImage
+chmod +x CoScribe-3.2.2-x64.AppImage
+./CoScribe-3.2.2-x64.AppImage
 ```
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install ./CoScribe-3.1.0-x64.deb
+sudo apt install ./CoScribe-3.2.2-x64.deb
 ```
 
 Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门户配置。
 
-> macOS Apple Silicon 成品已执行真实窗口冒烟测试。Windows 和 Linux 安装包在 macOS 上完成交叉构建、架构与内容静态校验，但尚未在真实 Windows/Linux 主机上安装启动。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
+> v3.2.2 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并通过架构、打包内容和成品窗口 E2E 验证。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
 
 ### 五分钟开始使用
 
@@ -97,10 +97,10 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 | 接口格式 | 选择 OpenAI-compatible 或 Anthropic Messages |
 | 服务地址 | 基础地址，如 `https://api.openai.com/v1`；也支持完整的 `/responses` 或 `/chat/completions` 地址 |
 | 接口协议 | OpenAI-compatible 配置建议选择“自动”；第三方服务不兼容时再固定协议 |
-| 模型 | 填写服务端真实支持的模型名 |
+| 模型 | 点击“获取模型”读取该服务商实际返回的模型，再选择要启用的模型 |
 | API Key | 远程服务必须填写；本机回环服务可不填 |
 
-底部状态栏可在已保存的服务商配置间切换，并调整模型与思考强度。第三方站点是否接受所选模型和档位，以其服务端实现为准。
+“获取模型”成功后会把模型列表保存到当前服务商；修改服务地址会清除旧列表，避免跨服务商误用。底部状态栏只显示配置页已经保存并启用的模型，不会临时刷新或混入 GPT/Claude 预设。第三方站点是否接受所选思考档位，以其服务端实现为准。
 
 - 远程 AI 地址必须使用 HTTPS；HTTP 只允许 `localhost`、`127.0.0.0/8` 和 `::1`。
 - API Key 通过 Electron `safeStorage` 加密保存在系统用户数据目录，不写进项目。
@@ -171,7 +171,7 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 - 图片点击“本地文字识别”，PDF 点击“本地识别当前页”。内置 PP-OCRv6-small、ONNX Runtime Web 与 WASM 在本机运行，不需要首次下载模型。
 - “AI 增强”是单独的显式操作，会把当前图像发送到已配置的 AI 服务。
 - 可以直接把 PNG、JPEG、WebP 或非动画 GIF 粘贴进聊天；每条消息最多 4 张，单张最多 5 MB，合计最多 10 MB。
-- 点击“截图”或按 `Cmd/Ctrl + Shift + 8` 后，桌面保持原样，只覆盖透明十字取景层。候选框会根据鼠标附近更细的控件、文字块和内容边缘实时变化；单击只保留预览，双击确认候选框，拖拽并松开可确认自选区域。确认后应用重新捕获原始屏幕像素并裁剪；截图进入聊天附件但不会自动发送，`Esc` 取消。
+- 点击“截图”或按 `Cmd/Ctrl + Shift + D` 后，桌面保持原样，只覆盖透明十字取景层。按住鼠标拖出需要的区域并松开即可确认；应用随后从原始屏幕像素裁剪，截图进入聊天附件但不会自动发送，`Esc` 取消。截图不再自动识别或预选区域。
 - macOS Apple Silicon 点击“语音”可在本机实时转写中英文，文字边说边进入输入框。识别器按需启动，停止后退出；原始录音不会发往语音云服务。
 
 OCR 与 AI 输出都可能出错，重要内容需要对照原始资料。
@@ -183,6 +183,8 @@ OCR 与 AI 输出都可能出错，重要内容需要对照原始资料。
 左侧地球图标打开轻量资料浏览器。它复用 Electron 的 Chromium，最多同时保留 10 个独立标签页，不引入第二套浏览器内核。
 
 - 标签栏支持新建、切换和关闭页面；达到 10 页后需先关闭一个标签。
+- 浏览历史保存在本地并可随时清空；Cookie 与登录状态使用独立持久会话保留。
+- 选中网页文字后会自动形成可移除的聊天候选，不覆盖现有输入，也不会自动发送。
 - 页面保留原始 DOM、样式和交互，不会被纯文本阅读模式替换。
 - 可把网页选区、正文或引用来源发送给 AI。
 - 可保存完整 MHTML、语义化 Markdown 或保持打印排版的 PDF。
@@ -219,7 +221,7 @@ MCP 是显式连接边界，不是自动代理权限。每次能力发现和工�
 | 操作 | macOS | Windows / Linux |
 | --- | --- | --- |
 | 发送选中内容到聊天 | `⌘ ⇧ K` | `Ctrl + Shift + K` |
-| 框选截图到聊天 | `⌘ ⇧ 8` | `Ctrl + Shift + 8` |
+| 框选截图到聊天 | `⌘ ⇧ D` | `Ctrl + Shift + D` |
 | 保存 Markdown | `⌘ S` | `Ctrl + S` |
 | 查找 | `⌘ F` | `Ctrl + F` |
 | 撤销 / 重做 | `⌘ Z` / `⇧ ⌘ Z` | `Ctrl + Z` / `Ctrl + Shift + Z` |
@@ -274,7 +276,7 @@ npm run verify:package:linux
 
 - 没有云同步、账号、多用户协作、移动端，以及 PDF/DOCX/PPTX 原文编辑。
 - 本地实时语音识别和系统日历/提醒事项同步只支持 Apple Silicon macOS。
-- Windows/Linux 产物已静态验证，但本次发布没有真实系统运行测试。
+- Windows/Linux 成品由各自的 GitHub 托管原生运行器完成打包内容校验和窗口 E2E；仍建议在目标硬件与桌面环境中核对系统级截图权限。
 - 插件中心尚不能安装第三方插件包。
 - 旧版 `.ppt` 依赖用户自行安装 LibreOffice；复杂 PPTX 字体、视频、宏和特殊对象可能与 PowerPoint 有差异。
 - 资料浏览器最多保留 10 个标签页，不提供密码管理、扩展、复杂下载和视频播放。
@@ -287,25 +289,25 @@ npm run verify:package:linux
 
 ### Download and install
 
-Download the stable `v3.1.0` release from [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest):
+Download the stable `v3.2.2` release from [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest):
 
 | Platform | Artifact | Target |
 | --- | --- | --- |
-| macOS | `CoScribe-3.1.0-arm64.dmg` | Apple Silicon, macOS 13+ |
-| macOS | `CoScribe-3.1.0-arm64-mac.zip` | Portable Apple Silicon archive |
-| Windows | `CoScribe-Setup-3.1.0-x64.exe` | Windows 10/11 x64 |
-| Linux | `CoScribe-3.1.0-x64.AppImage` | Portable x86-64 AppImage |
-| Linux | `CoScribe-3.1.0-x64.deb` | Debian / Ubuntu x86-64 |
+| macOS | `CoScribe-3.2.2-arm64.dmg` | Apple Silicon, macOS 13+ |
+| macOS | `CoScribe-3.2.2-arm64-mac.zip` | Portable Apple Silicon archive |
+| Windows | `CoScribe-Setup-3.2.2-x64.exe` | Windows 10/11 x64 |
+| Linux | `CoScribe-3.2.2-x64.AppImage` | Portable x86-64 AppImage |
+| Linux | `CoScribe-3.2.2-x64.deb` | Debian / Ubuntu x86-64 |
 | All | `SHA256SUMS.txt` | SHA-256 checksums |
 
 The builds are currently unsigned.
 
 - **macOS:** drag CoScribe into Applications, then right-click and choose **Open**. If blocked, use System Settings → Privacy & Security → Open Anyway. Screen Recording is used only for region capture; Microphone is used only for local speech input.
 - **Windows:** run the x64 installer. If SmartScreen appears, verify the checksum and source before choosing **More info → Run anyway**.
-- **Linux AppImage:** run `chmod +x CoScribe-3.1.0-x64.AppImage`, then `./CoScribe-3.1.0-x64.AppImage`.
-- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-3.1.0-x64.deb`.
+- **Linux AppImage:** run `chmod +x CoScribe-3.2.2-x64.AppImage`, then `./CoScribe-3.2.2-x64.AppImage`.
+- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-3.2.2-x64.deb`.
 
-> The Apple Silicon macOS package passed real-window smoke tests. Windows and Linux were cross-built on macOS and passed architecture and packaged-content verification, but were not installed or launched on physical Windows/Linux hosts. Local speech recognition and system Calendar integration remain macOS-only.
+> v3.2.2 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked for architecture, packaged contents, and packaged-window E2E behavior. Local speech recognition and system Calendar integration remain macOS-only.
 
 ### Start in five minutes
 
@@ -321,9 +323,9 @@ Existing files and nested folders appear directly. `.git`, `.venv`, `node_module
 
 ### Configure AI and image generation
 
-System appearance, project, and save preferences live under General. Settings → AI Providers stores multiple named OpenAI-compatible or Anthropic profiles, each with its own endpoint, model, protocol, and encrypted key. OpenAI-compatible profiles accept a base URL such as `https://api.openai.com/v1` or a full `/responses` or `/chat/completions` endpoint. Remote services require HTTPS and an API key; loopback services may use HTTP without a key.
+System appearance, project, and save preferences live under General. Settings → AI Providers stores multiple named OpenAI-compatible or Anthropic profiles, each with its own endpoint, protocol, encrypted key, and fetched model list. **Fetch Models** reads the models actually exposed by that endpoint and persists the enabled selection. Changing the endpoint invalidates its old list; the status-bar switcher only uses the saved list and does not inject GPT or Claude presets into third-party profiles. OpenAI-compatible profiles accept a base URL such as `https://api.openai.com/v1` or a full `/responses` or `/chat/completions` endpoint. Remote services require HTTPS and an API key; loopback services may use HTTP without a key.
 
-The status bar switches among saved provider profiles and adjusts their model and reasoning level. A third-party provider must actually support the chosen values. Keys are encrypted separately with Electron `safeStorage` outside the project.
+The status bar switches among saved provider profiles and their enabled models, then adjusts reasoning level where supported. Keys are encrypted separately with Electron `safeStorage` outside the project.
 
 `Unexpected token '<'` means the server returned HTML rather than JSON. Check the final request URL, protocol, proxy route, and `/v1` path. HTTP 401 means the provider rejected the key.
 
@@ -383,7 +385,7 @@ Settings → AI Behavior groups the system prompt, context budget, reasoning eff
 - Local OCR uses bundled PP-OCRv6-small, ONNX Runtime Web, and WASM with no first-run model download.
 - AI Enhance is a separate opt-in action that sends only the current image or rendered PDF page to the configured AI service.
 - Paste or choose up to four PNG, JPEG, WebP, or non-animated GIF images per message; each is limited to 5 MB and the total to 10 MB.
-- `Cmd/Ctrl + Shift + 8` keeps the desktop visible beneath a transparent crosshair selector. Fine-grained candidate regions follow the pointer using nearby controls, text blocks, and content edges. A single click keeps the preview open, a double click confirms it, and drag-release confirms a custom region. CoScribe captures the original display pixels only after selection, attaches the crop without sending it, and uses `Esc` to cancel.
+- `Cmd/Ctrl + Shift + D` keeps the desktop visible beneath a transparent crosshair selector. Drag the exact region and release to confirm; CoScribe then crops the original display pixels, attaches the result without sending it, and uses `Esc` to cancel. Automatic detection and preselection are intentionally disabled.
 - On Apple Silicon macOS, Voice performs live bilingual transcription locally. Text appears in the composer while speaking, and the on-demand recognizer exits after recording.
 
 Always verify OCR and AI output against the primary source.
@@ -392,7 +394,7 @@ Always verify OCR and AI output against the primary source.
 
 ![CoScribe research browser preserving the original webpage](docs/images/research-browser.png)
 
-The globe icon opens a research browser backed by Electron's existing Chromium, with up to 10 independent tabs. It keeps the original DOM, styling, and interaction visible. Send a selection, extracted article text, or a citation to AI; save the page as complete MHTML, semantic Markdown, or print-layout PDF.
+The globe icon opens a research browser backed by Electron's existing Chromium, with up to 10 independent tabs. Local history can be reviewed or cleared, while a dedicated persistent session preserves cookies and logins. Selecting webpage text creates a removable chat candidate without replacing or sending the current draft. Send a selection, extracted article text, or a citation to AI; save the page as complete MHTML, semantic Markdown, or print-layout PDF.
 
 MHTML preserves the currently loaded HTML, styles, and resources as one all-or-nothing file up to 256 MB without passing through the AI text limit. Video, complex downloads, direct media, and popups go to the system browser.
 
@@ -424,7 +426,7 @@ MCP is an explicit connection boundary, not ambient agent authority. Discovery a
 | Action | macOS | Windows / Linux |
 | --- | --- | --- |
 | Send selection to chat | `⌘ ⇧ K` | `Ctrl + Shift + K` |
-| Capture a region to chat | `⌘ ⇧ 8` | `Ctrl + Shift + 8` |
+| Capture a region to chat | `⌘ ⇧ D` | `Ctrl + Shift + D` |
 | Save Markdown | `⌘ S` | `Ctrl + S` |
 | Find | `⌘ F` | `Ctrl + F` |
 | Undo / Redo | `⌘ Z` / `⇧ ⌘ Z` | `Ctrl + Z` / `Ctrl + Shift + Z` |
@@ -472,7 +474,7 @@ npm run verify:package:linux
 
 ### Current limits
 
-CoScribe does not provide cloud sync, accounts, multi-user collaboration, mobile clients, or source editing for PDF/DOCX/PPTX. Local live speech and system Calendar/Reminders integration are Apple Silicon macOS-only. Windows and Linux packages are statically verified but were not runtime-tested on native hosts for this release. The plugin center accepts audited built-ins only. Legacy PPT conversion requires a separate LibreOffice installation. The research browser is limited to 10 tabs and intentionally omits passwords, extensions, advanced downloads, and video playback.
+CoScribe does not provide cloud sync, accounts, multi-user collaboration, mobile clients, or source editing for PDF/DOCX/PPTX. Local live speech and system Calendar/Reminders integration are Apple Silicon macOS-only. Windows and Linux packages run packaged-window E2E checks on native GitHub-hosted runners, but system-level capture permissions can still vary by hardware and desktop environment. The plugin center accepts audited built-ins only. Legacy PPT conversion requires a separate LibreOffice installation. The research browser is limited to 10 tabs and intentionally omits password management, extensions, advanced downloads, and video playback.
 
 ## License
 

@@ -212,3 +212,57 @@ export const PAGE_PRINT_BUDGET_SCRIPT = String.raw`(() => {
     height: Math.max(root?.scrollHeight || 0, root?.offsetHeight || 0, body?.scrollHeight || 0, body?.offsetHeight || 0)
   }
 })()`
+
+// Prefix for the console channel the selection watcher uses to push settled
+// selections out of the isolated world. The isolated world has no ipcRenderer,
+// so it emits a console line the main process filters on. This is strictly less
+// privileged than a preload bridge: a page can only surface its own selected
+// text, and the renderer merely stages it as a removable, non-auto-sent chip.
+export const SELECTION_CONSOLE_PREFIX = '__COSCRIBE_SELECTION__'
+
+export function parseSelectionConsoleMessage(
+  message: string,
+  expectedNonce: string,
+  maximum = 20_000
+): string | null {
+  if (!message.startsWith(SELECTION_CONSOLE_PREFIX) || message.length > maximum * 8 + 1_000) return null
+  try {
+    const payload = JSON.parse(message.slice(SELECTION_CONSOLE_PREFIX.length)) as {
+      nonce?: unknown
+      text?: unknown
+    }
+    if (payload.nonce !== expectedNonce || typeof payload.text !== 'string') return null
+    return payload.text.trim().slice(0, maximum) || null
+  } catch {
+    return null
+  }
+}
+
+// Injected once per document into the capture isolated world. The per-tab
+// nonce is unavailable to page JavaScript, so a site cannot forge the console
+// message that stages selected text in CoScribe.
+export function selectionWatchScript(nonce: string): string {
+  return String.raw`(() => {
+  if (window.__coscribeSelectionWatch) return
+  window.__coscribeSelectionWatch = true
+  const PREFIX = '${SELECTION_CONSOLE_PREFIX}'
+  const NONCE = ${JSON.stringify(nonce)}
+  const MAX = 20000
+  let timer = 0
+  let last = ''
+  const emit = () => {
+    const text = String(window.getSelection ? window.getSelection()?.toString() || '' : '').trim().slice(0, MAX)
+    if (!text) { last = ''; return }
+    if (text === last) return
+    last = text
+    try { console.info(PREFIX + JSON.stringify({ nonce: NONCE, text })) } catch (error) {}
+  }
+  const schedule = () => {
+    window.clearTimeout(timer)
+    timer = window.setTimeout(emit, 320)
+  }
+  document.addEventListener('mouseup', schedule, true)
+  document.addEventListener('keyup', (event) => { if (event.shiftKey || event.key === 'Shift') schedule() }, true)
+  document.addEventListener('selectionchange', schedule, true)
+})()`
+}

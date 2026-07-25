@@ -10,7 +10,8 @@ import type {
   ChatMessage,
   ChatSession,
   ContextSnapshot,
-  FileOperationProposal
+  FileOperationProposal,
+  WebSelectionCandidate
 } from '../../shared/types'
 
 afterEach(cleanup)
@@ -25,6 +26,9 @@ beforeEach(() => {
         audio: vi.fn(),
         stop: vi.fn().mockResolvedValue(undefined),
         onEvent: vi.fn().mockReturnValue(() => undefined)
+      },
+      file: {
+        pathForDroppedFile: vi.fn((file: File) => `/Users/li/Downloads/${file.name}`)
       }
     }
   })
@@ -356,6 +360,69 @@ describe('AiWorkspace', () => {
     expect(onDraftChange).not.toHaveBeenCalled()
   })
 
+  it('adds internally dragged folders and OS-dropped file paths as separate draft lines', () => {
+    const onDraftChange = vi.fn()
+    const { rerender } = render(<AiWorkspace {...buildProps({ draft: '比较这些资料', onDraftChange })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+
+    const internalPath = '/projects/langgraph/参考资料'
+    fireEvent.drop(textbox, {
+      dataTransfer: {
+        types: ['application/x-vibe-path'],
+        files: [],
+        getData: (type: string) => type === 'application/x-vibe-path' ? internalPath : ''
+      }
+    })
+    expect(onDraftChange).toHaveBeenLastCalledWith(`比较这些资料\n${internalPath}`)
+
+    const withFolder = `比较这些资料\n${internalPath}`
+    rerender(<AiWorkspace {...buildProps({ draft: withFolder, onDraftChange })} />)
+    fireEvent.drop(textbox, {
+      dataTransfer: {
+        types: ['Files'],
+        files: [
+          new File(['report'], '报告.pdf', { type: 'application/pdf' }),
+          new File(['notes'], '笔记.md', { type: 'text/markdown' })
+        ],
+        getData: () => ''
+      }
+    })
+    expect(onDraftChange).toHaveBeenLastCalledWith([
+      withFolder,
+      '/Users/li/Downloads/报告.pdf',
+      '/Users/li/Downloads/笔记.md'
+    ].join('\n'))
+  })
+
+  it('preserves the current draft while staging a removable browser selection candidate', () => {
+    const candidate: WebSelectionCandidate = {
+      text: 'WEB_SELECTION_CANDIDATE',
+      title: '研究资料',
+      url: 'https://example.com/article'
+    }
+    const onInsertWebSelectionCandidate = vi.fn()
+    const onClearWebSelectionCandidate = vi.fn()
+    render(<AiWorkspace {...buildProps({
+      draft: '保留现有问题',
+      webSelectionCandidate: candidate,
+      onInsertWebSelectionCandidate,
+      onClearWebSelectionCandidate
+    })} />)
+
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+    expect(textbox).toHaveValue('保留现有问题')
+    const card = screen.getByRole('region', { name: '网页选中内容候选' })
+    expect(card).toHaveTextContent('WEB_SELECTION_CANDIDATE')
+    expect(card).toHaveTextContent('研究资料')
+
+    fireEvent.click(within(card).getByRole('button', { name: '将网页选中内容加入输入框' }))
+    expect(onInsertWebSelectionCandidate).toHaveBeenCalledWith(candidate)
+    expect(textbox).toHaveValue('保留现有问题')
+
+    fireEvent.click(within(card).getByRole('button', { name: '移除网页选中内容候选' }))
+    expect(onClearWebSelectionCandidate).toHaveBeenCalledOnce()
+  })
+
   it('switches to GPT-Image 2 mode and sends the selected generation options', () => {
     const onSend = vi.fn()
     const onGenerateImage = vi.fn()
@@ -428,7 +495,7 @@ describe('AiWorkspace', () => {
   it('shows keyboard shortcuts in hover titles for composer actions', () => {
     render(<AiWorkspace {...buildProps({ onCaptureScreenshot: vi.fn() })} />)
 
-    expect(screen.getByRole('button', { name: '截图' })).toHaveAttribute('title', expect.stringContaining('⌘⇧8'))
+    expect(screen.getByRole('button', { name: '截图' })).toHaveAttribute('title', expect.stringContaining('⌘⇧D'))
     expect(screen.getByRole('button', { name: '发送消息' })).toHaveAttribute('title', expect.stringContaining('Enter'))
   })
 

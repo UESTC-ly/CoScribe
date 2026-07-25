@@ -5,6 +5,8 @@ import type { WebContents } from 'electron'
 
 import type {
   AiOperationMode,
+  AiModelListRequest,
+  AiModelListResult,
   AiProtocol,
   AiProvider,
   AiOcrRequest,
@@ -29,7 +31,7 @@ import { PdfTextService } from './pdf'
 import { fileKind, ProjectService } from './project'
 import { projectMemoryPromptBlock } from './project-memory'
 import { ProjectSearchService } from './search'
-import { isLoopbackHost, SettingsStore } from './settings'
+import { isLoopbackHost, sanitizeBaseUrl, SettingsStore } from './settings'
 
 interface ToolAccumulator {
   name: string
@@ -198,6 +200,23 @@ export function imageGenerationEndpoint(baseUrl: string): string {
       ? `${cleanPath}/images/generations`.replace(/^\/+/u, '/')
       : '/v1/images/generations'
   }
+  parsed.search = ''
+  parsed.hash = ''
+  return parsed.toString()
+}
+
+export function modelListEndpoint(baseUrl: string): string {
+  const parsed = new URL(baseUrl)
+  let cleanPath = parsed.pathname.replace(/\/+$/u, '')
+  for (const suffix of ['/chat/completions', '/responses', '/messages']) {
+    if (cleanPath.endsWith(suffix)) {
+      cleanPath = cleanPath.slice(0, -suffix.length)
+      break
+    }
+  }
+  if (cleanPath.endsWith('/models')) parsed.pathname = cleanPath
+  else if (cleanPath) parsed.pathname = `${cleanPath}/models`.replace(/^\/+/, '/')
+  else parsed.pathname = '/v1/models'
   parsed.search = ''
   parsed.hash = ''
   return parsed.toString()
@@ -454,6 +473,33 @@ export function aiConversationMessages(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function availableModelIds(value: unknown): string[] {
+  const items = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.data)
+      ? value.data
+      : isRecord(value) && Array.isArray(value.models)
+        ? value.models
+        : null
+  if (!items) throw new Error('模型列表接口返回格式无效。')
+
+  const models: string[] = []
+  const seen = new Set<string>()
+  for (const item of items) {
+    const candidate = typeof item === 'string'
+      ? item
+      : isRecord(item)
+        ? [item.id, item.model, item.name].find((entry): entry is string => typeof entry === 'string') ?? ''
+        : ''
+    const model = candidate.trim().slice(0, 200)
+    if (!model || seen.has(model)) continue
+    seen.add(model)
+    models.push(model)
+    if (models.length >= 1_000) break
+  }
+  return models
 }
 
 const IMAGE_GENERATION_SIZES = new Set<ImageGenerationRequest['size']>([
@@ -783,6 +829,51 @@ export class AiService {
 
   stopImage(requestId: string): void {
     this.imageActive.get(requestId)?.abort()
+  }
+
+  async listModels(request: AiModelListRequest): Promise<AiModelListResult> {
+    if (!request || typeof request.profileId !== 'string' || !request.profileId.trim()) {
+      throw new Error('AI 服务商配置 ID 无效。')
+    }
+    if (request.provider !== 'openai' && request.provider !== 'anthropic') {
+      throw new Error('AI 接口格式无效。')
+    }
+    const baseUrl = sanitizeBaseUrl(request.baseUrl, '', 'AI 服务地址')
+    const endpoint = modelListEndpoint(baseUrl)
+    const draftKey = typeof request.apiKey === 'string' ? request.apiKey.trim() : ''
+    if (draftKey.length > 16_000) throw new Error('API Key 过长。')
+    let apiKey: string | null = draftKey || null
+    if (!apiKey && request.useStoredApiKey) {
+      const preferences = await this.settings.get()
+      const storedProfile = preferences.aiProfiles.find((profile) => profile.id === request.profileId)
+      if (
+        !storedProfile ||
+        storedProfile.provider !== request.provider ||
+        storedProfile.baseUrl !== baseUrl
+      ) {
+        throw new Error('服务地址或接口格式已修改，请重新输入 API Key 后获取模型，或先保存当前配置。')
+      }
+      apiKey = await this.settings.apiKeyForProfile(request.profileId)
+    }
+    if (!apiKey && !isLoopbackHost(new URL(endpoint).hostname)) {
+      throw new Error('远程 AI 服务尚未配置 API Key；无 Key 模式只允许本机回环服务。')
+    }
+
+    const headers = aiRequestHeaders(request.provider, apiKey, 'application/json')
+    delete headers['Content-Type']
+    try {
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        headers,
+        signal: AbortSignal.timeout(15_000),
+        redirect: 'error'
+      })
+      const value = await parseAiJsonResponse(response, endpoint)
+      return { models: availableModelIds(value) }
+    } catch (error) {
+      if ((error as Error).name === 'TimeoutError') throw new Error('获取模型列表超时，请检查服务地址后重试。')
+      throw error
+    }
   }
 
   async generateImage(request: ImageGenerationRequest): Promise<ImageGenerationResult> {

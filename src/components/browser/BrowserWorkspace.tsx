@@ -7,6 +7,7 @@ import {
   FileDown,
   FileText,
   Globe2,
+  History,
   LoaderCircle,
   Plus,
   Quote,
@@ -15,10 +16,12 @@ import {
   ShieldCheck,
   Square,
   TextSelect,
+  Trash2,
   X
 } from 'lucide-react'
 
 import type {
+  BrowserHistoryEntry,
   FileReadResult,
   ResearchBrowserExtractMode,
   ResearchBrowserExtractResult,
@@ -56,10 +59,14 @@ export function BrowserWorkspace({
   onError
 }: BrowserWorkspaceProps): React.JSX.Element {
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const historyRef = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ResearchBrowserState>(EMPTY_STATE)
   const [address, setAddress] = useState('')
   const [busy, setBusy] = useState<'selection' | 'article' | 'archive' | 'markdown' | 'pdf' | null>(null)
   const [localMessage, setLocalMessage] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyBusy, setHistoryBusy] = useState(false)
+  const [historyEntries, setHistoryEntries] = useState<BrowserHistoryEntry[]>([])
 
   const reportError = useCallback((reason: unknown): void => {
     const message = reason instanceof Error ? reason.message : '资料浏览器操作失败。'
@@ -98,8 +105,24 @@ export function BrowserWorkspace({
   }, [acceptState, onSendToAi, reportError])
 
   useEffect(() => {
-    void window.coscribe.browser.setVisible(!suspended)
-  }, [suspended])
+    void window.coscribe.browser.setVisible(!suspended && !historyOpen)
+  }, [historyOpen, suspended])
+
+  useEffect(() => {
+    if (!historyOpen) return
+    const dismiss = (event: PointerEvent): void => {
+      if (!historyRef.current?.contains(event.target as Node)) setHistoryOpen(false)
+    }
+    const escape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setHistoryOpen(false)
+    }
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [historyOpen])
 
   useEffect(() => {
     const surface = surfaceRef.current
@@ -239,6 +262,44 @@ export function BrowserWorkspace({
     }
   }
 
+  const toggleHistory = async (): Promise<void> => {
+    if (historyOpen) {
+      setHistoryOpen(false)
+      return
+    }
+    setHistoryOpen(true)
+    setHistoryBusy(true)
+    try {
+      setHistoryEntries(await window.coscribe.browser.history())
+    } catch (reason) {
+      reportError(reason)
+      setHistoryOpen(false)
+    } finally {
+      setHistoryBusy(false)
+    }
+  }
+
+  const openHistoryEntry = async (entry: BrowserHistoryEntry): Promise<void> => {
+    setHistoryOpen(false)
+    try {
+      setLocalMessage(null)
+      acceptState(await window.coscribe.browser.navigate(entry.url))
+    } catch (reason) {
+      reportError(reason)
+    }
+  }
+
+  const clearHistory = async (): Promise<void> => {
+    setHistoryBusy(true)
+    try {
+      setHistoryEntries(await window.coscribe.browser.clearHistory())
+    } catch (reason) {
+      reportError(reason)
+    } finally {
+      setHistoryBusy(false)
+    }
+  }
+
   const hasPage = Boolean(state.url)
   const status = localMessage || state.error || state.notice || (state.loading ? '正在加载原网页…' : '')
 
@@ -278,6 +339,50 @@ export function BrowserWorkspace({
           {state.loading ? <LoaderCircle className="is-spinning" size={14} aria-hidden="true" /> : <Search size={14} aria-hidden="true" />}
           <input value={address} onChange={(event) => setAddress(event.target.value)} aria-label="网址或搜索内容" placeholder="网址或搜索内容" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
         </form>
+
+        <div className="research-browser__history-control" ref={historyRef}>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="浏览历史记录"
+            aria-haspopup="dialog"
+            aria-expanded={historyOpen}
+            title="浏览历史记录"
+            onClick={() => void toggleHistory()}
+          >
+            <History size={16} />
+          </button>
+          {historyOpen && (
+            <div className="research-browser__history" role="dialog" aria-label="浏览历史记录">
+              <header>
+                <span><strong>浏览历史</strong><small>保存在本机</small></span>
+                <button type="button" disabled={historyBusy || historyEntries.length === 0} onClick={() => void clearHistory()} aria-label="清空历史记录" title="清空历史记录">
+                  <Trash2 size={13} />
+                </button>
+              </header>
+              <div className="research-browser__history-list">
+                {historyBusy && historyEntries.length === 0 ? (
+                  <p><LoaderCircle className="is-spinning" size={14} />正在读取历史记录…</p>
+                ) : historyEntries.length === 0 ? (
+                  <p>暂无浏览历史</p>
+                ) : historyEntries.map((entry, index) => (
+                  <button
+                    type="button"
+                    key={`${entry.visitedAt}-${entry.url}-${index}`}
+                    aria-label={`重新打开：${entry.title || entry.url}`}
+                    title={entry.url}
+                    onClick={() => void openHistoryEntry(entry)}
+                  >
+                    <span><strong>{entry.title || new URL(entry.url).hostname}</strong><small>{entry.url}</small></span>
+                    <time dateTime={new Date(entry.visitedAt).toISOString()}>
+                      {new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(entry.visitedAt)}
+                    </time>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
         <span className="research-browser__tool-separator" />
         <button className="icon-button" type="button" disabled={!hasPage || state.loading || busy !== null} onClick={() => void extract('selection')} title="把网页选中内容发送到 AI（⌘⇧K / Ctrl+Shift+K）" aria-label="发送网页选中内容到 AI"><TextSelect size={16} /></button>

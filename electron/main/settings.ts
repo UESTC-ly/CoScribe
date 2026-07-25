@@ -4,6 +4,7 @@ import path from 'node:path'
 import {
   DEFAULT_SETTINGS,
   REASONING_EFFORTS,
+  defaultEnabledModels,
   type AiProtocol,
   type AiProvider,
   type AiProviderProfile,
@@ -44,6 +45,7 @@ const TRUSTED_PLUGIN_PERMISSIONS = new Map(
 )
 export const MAX_CUSTOM_SYSTEM_PROMPT_CHARS = 20_000
 export const MAX_AI_PROFILES = 20
+const MAX_ENABLED_MODELS = 60
 
 export function isLoopbackHost(hostname: string): boolean {
   return (
@@ -59,7 +61,7 @@ function clampedInteger(value: unknown, fallback: number, minimum: number, maxim
   return Math.min(maximum, Math.max(minimum, numeric))
 }
 
-function sanitizeBaseUrl(value: unknown, fallback: string, label: string): string {
+export function sanitizeBaseUrl(value: unknown, fallback: string, label: string): string {
   const candidate = typeof value === 'string' ? value.trim() : fallback
   let parsed: URL
   try {
@@ -88,18 +90,24 @@ function profileDefaults(provider: AiProvider): AiProviderProfile {
 function legacyProfiles(input: Partial<AppSettings>): AiProviderProfile[] {
   const openai = profileDefaults('openai')
   const anthropic = profileDefaults('anthropic')
+  const openaiBaseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : openai.baseUrl
+  const openaiModel = typeof input.model === 'string' ? input.model : openai.model
+  const anthropicBaseUrl = typeof input.anthropicBaseUrl === 'string' ? input.anthropicBaseUrl : anthropic.baseUrl
+  const anthropicModel = typeof input.anthropicModel === 'string' ? input.anthropicModel : anthropic.model
   return [
     {
       ...openai,
-      baseUrl: typeof input.baseUrl === 'string' ? input.baseUrl : openai.baseUrl,
-      model: typeof input.model === 'string' ? input.model : openai.model,
+      baseUrl: openaiBaseUrl,
+      model: openaiModel,
+      enabledModels: defaultEnabledModels('openai', openaiBaseUrl, openaiModel),
       apiProtocol: AI_PROTOCOLS.has(input.apiProtocol as AiProtocol) ? input.apiProtocol as AiProtocol : openai.apiProtocol,
       hasApiKey: Boolean(input.hasApiKey)
     },
     {
       ...anthropic,
-      baseUrl: typeof input.anthropicBaseUrl === 'string' ? input.anthropicBaseUrl : anthropic.baseUrl,
-      model: typeof input.anthropicModel === 'string' ? input.anthropicModel : anthropic.model,
+      baseUrl: anthropicBaseUrl,
+      model: anthropicModel,
+      enabledModels: defaultEnabledModels('anthropic', anthropicBaseUrl, anthropicModel),
       hasApiKey: Boolean(input.hasAnthropicApiKey)
     }
   ]
@@ -108,6 +116,30 @@ function legacyProfiles(input: Partial<AppSettings>): AiProviderProfile[] {
 function profileId(value: unknown, provider: AiProvider, index: number): string {
   const candidate = typeof value === 'string' ? value.trim().slice(0, 80) : ''
   return /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(candidate) ? candidate : `${provider}-${index + 1}`
+}
+
+// The quick switcher only shows this list, so it must be well-formed: deduped,
+// length-capped, and always containing the active model. When absent (legacy
+// data), fall back to the provider defaults so first-party profiles keep their
+// preset menu and third-party ones stay scoped to their own model.
+function sanitizeEnabledModels(
+  raw: unknown,
+  provider: AiProvider,
+  baseUrl: string,
+  model: string
+): string[] {
+  if (!Array.isArray(raw)) return defaultEnabledModels(provider, baseUrl, model)
+  const models: string[] = []
+  const seen = new Set<string>()
+  for (const entry of [model, ...raw]) {
+    if (typeof entry !== 'string') continue
+    const trimmed = entry.trim().slice(0, 200)
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    models.push(trimmed)
+    if (models.length >= MAX_ENABLED_MODELS) break
+  }
+  return models.length ? models : defaultEnabledModels(provider, baseUrl, model)
 }
 
 function sanitizeProfiles(input: Partial<AppSettings>): AiProviderProfile[] {
@@ -143,12 +175,18 @@ function sanitizeProfiles(input: Partial<AppSettings>): AiProviderProfile[] {
     const name = typeof raw.name === 'string' && raw.name.trim()
       ? raw.name.trim().slice(0, 60)
       : fallback.name
+    const cleanBaseUrl = sanitizeBaseUrl(baseUrl, fallback.baseUrl, `${name} 服务地址`)
+    const requestedModel = typeof model === 'string' ? model.trim().slice(0, 200) : ''
+    const cleanModel = requestedModel || (
+      defaultEnabledModels(provider, cleanBaseUrl, '').length ? fallback.model : ''
+    )
     profiles.push({
       id,
       name,
       provider,
-      baseUrl: sanitizeBaseUrl(baseUrl, fallback.baseUrl, `${name} 服务地址`),
-      model: typeof model === 'string' && model.trim() ? model.trim().slice(0, 200) : fallback.model,
+      baseUrl: cleanBaseUrl,
+      model: cleanModel,
+      enabledModels: sanitizeEnabledModels(raw.enabledModels, provider, cleanBaseUrl, cleanModel),
       apiProtocol: AI_PROTOCOLS.has(protocol as AiProtocol) ? protocol as AiProtocol : fallback.apiProtocol,
       hasApiKey: Boolean(raw.hasApiKey)
     })
@@ -317,6 +355,13 @@ export class SettingsStore {
 
   async get(): Promise<AppSettings> {
     return this.publicSettings(await this.stored())
+  }
+
+  async apiKeyForProfile(profileId: string): Promise<string | null> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(profileId)) return null
+    const stored = await this.stored()
+    const profile = stored.settings.aiProfiles.find((candidate) => candidate.id === profileId)
+    return decryptSecret(profile ? stored.encryptedApiKeys[profile.id] : undefined, `${profile?.name ?? 'AI'} API Key`)
   }
 
   private async activeApiKey(provider: AiProvider): Promise<string | null> {

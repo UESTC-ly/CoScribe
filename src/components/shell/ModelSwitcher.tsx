@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { Bot, Check, ChevronDown } from 'lucide-react'
 
 import {
-  SELECTABLE_ANTHROPIC_MODELS,
-  SELECTABLE_AI_MODELS,
   type AiProvider,
   type AiProviderProfile,
   type ReasoningEffort,
@@ -93,10 +91,10 @@ export function ModelSwitcher({
   }
   const model = provider === 'anthropic' ? anthropicModel : openAiModel
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId)
-  const modelOptions = [...new Set([
-    model,
-    ...(provider === 'anthropic' ? SELECTABLE_ANTHROPIC_MODELS : SELECTABLE_AI_MODELS)
-  ])]
+  // Only the active provider's explicitly-enabled models appear here — no
+  // hardcoded presets, no network fetch. The active model is always included so
+  // the current selection stays visible even before the user curates a set.
+  const modelOptions = [...new Set([model, ...(activeProfile?.enabledModels ?? [])].filter(Boolean))]
   const reasoningOptions = provider === 'anthropic'
     ? REASONING_OPTIONS.filter((option) => option.value !== 'ultra')
     : REASONING_OPTIONS

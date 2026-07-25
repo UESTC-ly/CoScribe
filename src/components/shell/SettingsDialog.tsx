@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
   BrainCircuit,
@@ -8,13 +8,14 @@ import {
   KeyRound,
   MonitorCog,
   Plus,
+  RefreshCw,
   RotateCcw,
   Trash2
 } from 'lucide-react'
 import {
+  ALL_PRESET_MODELS,
   REASONING_EFFORTS,
-  SELECTABLE_AI_MODELS,
-  SELECTABLE_ANTHROPIC_MODELS,
+  defaultEnabledModels,
   type AiProvider,
   type AiProviderProfile,
   type AppSettings
@@ -41,6 +42,12 @@ interface SettingsDialogProps {
   onClose: () => void
 }
 
+interface ModelDiscoveryState {
+  status: 'loading' | 'success' | 'error'
+  models: string[]
+  message: string
+}
+
 function providerDefaults(provider: AiProvider): Pick<AiProviderProfile, 'name' | 'baseUrl' | 'model' | 'apiProtocol'> {
   return provider === 'anthropic'
     ? {
@@ -65,8 +72,21 @@ function newProfile(index: number): AiProviderProfile {
     provider: 'openai',
     baseUrl: defaults.baseUrl,
     model: defaults.model,
+    enabledModels: defaultEnabledModels('openai', defaults.baseUrl, defaults.model),
     apiProtocol: defaults.apiProtocol,
     hasApiKey: false
+  }
+}
+
+function endpointIdentity(value: string): string | null {
+  try {
+    const parsed = new URL(value.trim())
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+    parsed.hash = ''
+    parsed.search = ''
+    return parsed.toString().replace(/\/$/u, '')
+  } catch {
+    return null
   }
 }
 
@@ -76,12 +96,18 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
   const [showProfileKey, setShowProfileKey] = useState(false)
   const [showImageKey, setShowImageKey] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [modelDiscovery, setModelDiscovery] = useState<Record<string, ModelDiscoveryState>>({})
+  const [modelFilter, setModelFilter] = useState('')
+  const modelDiscoveryRequests = useRef<Record<string, number>>({})
 
   useEffect(() => {
     setDraft(settings)
     setPanel(initialPanel)
     setShowProfileKey(false)
     setShowImageKey(false)
+    setModelDiscovery({})
+    setModelFilter('')
+    modelDiscoveryRequests.current = {}
   }, [initialPanel, settings, open])
 
   const activeProfile = useMemo(
@@ -108,28 +134,77 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
   }
   const updateProfile = (patch: Partial<AiProviderProfile>): void => {
     if (!activeProfile) return
+    if ('provider' in patch || 'baseUrl' in patch || 'apiKey' in patch || patch.hasApiKey === false) {
+      modelDiscoveryRequests.current[activeProfile.id] = (modelDiscoveryRequests.current[activeProfile.id] ?? 0) + 1
+      setModelDiscovery((current) => {
+        const next = { ...current }
+        delete next[activeProfile.id]
+        return next
+      })
+    }
     setDraft((current) => ({
       ...current,
       aiProvider: patch.provider ?? activeProfile.provider,
       ...(patch.provider === 'anthropic' && current.reasoningEffort === 'ultra'
         ? { reasoningEffort: 'max' as const }
         : {}),
-      aiProfiles: current.aiProfiles.map((profile) => (
-        profile.id === activeProfile.id ? { ...profile, ...patch } : profile
-      ))
+      aiProfiles: current.aiProfiles.map((profile) => {
+        if (profile.id !== activeProfile.id) return profile
+        const merged = { ...profile, ...patch }
+        let model = merged.model.trim()
+        let enabledModels = merged.enabledModels
+        // A completed endpoint change invalidates the old endpoint's catalogue.
+        // Do not clear while the user is midway through typing an invalid URL.
+        if (('baseUrl' in patch || 'provider' in patch) && !('enabledModels' in patch)) {
+          const previousEndpoint = endpointIdentity(profile.baseUrl)
+          const nextEndpoint = endpointIdentity(merged.baseUrl)
+          if (nextEndpoint && (merged.provider !== profile.provider || nextEndpoint !== previousEndpoint)) {
+            const nativePresets = defaultEnabledModels(merged.provider, merged.baseUrl, '')
+            if (nativePresets.length) {
+              const applicable = new Set(nativePresets)
+              enabledModels = enabledModels.filter((entry) =>
+                applicable.has(entry) || !ALL_PRESET_MODELS.includes(entry)
+              )
+              enabledModels = [...new Set([...nativePresets, ...enabledModels])]
+            } else {
+              enabledModels = []
+              model = ''
+            }
+          }
+        }
+        // The default model must always remain part of the enabled set so the
+        // quick switcher can show the current selection.
+        if (model && !enabledModels.includes(model)) enabledModels = [...enabledModels, model]
+        return { ...merged, model, enabledModels }
+      })
     }))
   }
   const changeProfileProvider = (provider: AiProvider): void => {
     const defaults = providerDefaults(provider)
+    // Switching provider replaces the endpoint entirely, so reseed the enabled
+    // set from the new provider's defaults — never carry the old provider's
+    // models into the new one's quick switcher.
     updateProfile({
       provider,
       baseUrl: defaults.baseUrl,
       model: defaults.model,
+      enabledModels: defaultEnabledModels(provider, defaults.baseUrl, defaults.model),
       apiProtocol: defaults.apiProtocol,
       apiKey: '',
       hasApiKey: false
     })
     setShowProfileKey(false)
+  }
+  const toggleEnabledModel = (model: string): void => {
+    if (!activeProfile) return
+    const trimmed = model.trim()
+    if (!trimmed) return
+    const isDefault = trimmed === activeProfile.model.trim()
+    if (isDefault) return
+    const enabledModels = activeProfile.enabledModels.includes(trimmed)
+      ? activeProfile.enabledModels.filter((entry) => entry !== trimmed)
+      : [...activeProfile.enabledModels, trimmed]
+    updateProfile({ enabledModels })
   }
   const addProfile = (): void => {
     setDraft((current) => {
@@ -145,6 +220,12 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
     setShowProfileKey(false)
   }
   const removeProfile = (id: string): void => {
+    modelDiscoveryRequests.current[id] = (modelDiscoveryRequests.current[id] ?? 0) + 1
+    setModelDiscovery((current) => {
+      const next = { ...current }
+      delete next[id]
+      return next
+    })
     setDraft((current) => {
       if (current.aiProfiles.length <= 1) return current
       const index = current.aiProfiles.findIndex((profile) => profile.id === id)
@@ -172,9 +253,90 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
       setSaving(false)
     }
   }
+  const discoverModels = async (): Promise<void> => {
+    if (!activeProfile) return
+    const profile = activeProfile
+    const requestVersion = (modelDiscoveryRequests.current[profile.id] ?? 0) + 1
+    modelDiscoveryRequests.current[profile.id] = requestVersion
+    setModelDiscovery((current) => ({
+      ...current,
+      [profile.id]: { status: 'loading', models: [], message: '正在获取可用模型…' }
+    }))
+    try {
+      const result = await window.coscribe.ai.listModels({
+        profileId: profile.id,
+        provider: profile.provider,
+        baseUrl: profile.baseUrl,
+        ...(profile.apiKey?.trim() ? { apiKey: profile.apiKey.trim() } : {}),
+        useStoredApiKey: profile.hasApiKey && !profile.apiKey?.trim()
+      })
+      if (modelDiscoveryRequests.current[profile.id] !== requestVersion) return
+      const models = [...new Set(result.models.map((model) => model.trim()).filter(Boolean))]
+      setDraft((current) => ({
+        ...current,
+        aiProfiles: current.aiProfiles.map((candidate) => {
+          if (candidate.id !== profile.id) return candidate
+          const nativePresets = defaultEnabledModels(candidate.provider, candidate.baseUrl, '')
+          if (!models.length) {
+            return nativePresets.length
+              ? candidate
+              : { ...candidate, model: '', enabledModels: [] }
+          }
+          const model = models.includes(candidate.model.trim())
+            ? candidate.model.trim()
+            : nativePresets.includes(candidate.model.trim())
+              ? candidate.model.trim()
+              : models[0]
+          const available = new Set([...models, ...nativePresets])
+          const enabledModels = [...new Set([
+            model,
+            ...nativePresets,
+            ...candidate.enabledModels.filter((entry) => available.has(entry))
+          ].filter(Boolean))]
+          return { ...candidate, model, enabledModels }
+        })
+      }))
+      setModelFilter('')
+      setModelDiscovery((current) => ({
+        ...current,
+        [profile.id]: {
+          status: 'success',
+          models,
+          message: models.length
+            ? `已获取 ${models.length} 个可用模型；勾选需要在模型菜单中显示的模型。`
+            : '服务没有返回可用模型。'
+        }
+      }))
+    } catch (error) {
+      if (modelDiscoveryRequests.current[profile.id] !== requestVersion) return
+      setModelDiscovery((current) => ({
+        ...current,
+        [profile.id]: {
+          status: 'error',
+          models: [],
+          message: error instanceof Error ? error.message : '获取模型列表失败。'
+        }
+      }))
+    }
+  }
   const reasoningEfforts = activeProfile?.provider === 'anthropic'
     ? REASONING_EFFORTS.filter((effort) => effort !== 'ultra')
     : REASONING_EFFORTS
+  const activeModelDiscovery = activeProfile ? modelDiscovery[activeProfile.id] : undefined
+  // The default-model datalist offers the profile's own enabled models plus any
+  // freshly fetched catalogue — never hardcoded presets from other providers.
+  const modelOptions = activeProfile
+    ? [...new Set([activeProfile.model, ...activeProfile.enabledModels, ...(activeModelDiscovery?.models ?? [])].filter(Boolean))]
+    : []
+  // The full catalogue (enabled ∪ fetched) is only browsable here via search, so
+  // hundreds-of-model providers stay manageable while the switcher stays minimal.
+  const modelCatalog = activeProfile
+    ? [...new Set([...activeProfile.enabledModels, ...(activeModelDiscovery?.models ?? [])].filter(Boolean))]
+    : []
+  const normalizedFilter = modelFilter.trim().toLowerCase()
+  const filteredCatalog = normalizedFilter
+    ? modelCatalog.filter((model) => model.toLowerCase().includes(normalizedFilter))
+    : modelCatalog
 
   return (
     <Dialog
@@ -302,16 +464,71 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
                     )}
                     <label className={`field-label ${activeProfile.provider === 'anthropic' ? 'span-2' : ''}`}>
                       {activeProfile.provider === 'anthropic' ? 'Anthropic 模型' : '模型'}
-                      <input
-                        className="field"
-                        aria-label={activeProfile.provider === 'anthropic' ? 'Anthropic 模型' : '模型'}
-                        list={activeProfile.provider === 'anthropic' ? 'anthropic-model-options' : 'openai-model-options'}
-                        value={activeProfile.model}
-                        onChange={(event) => updateProfile({ model: event.target.value })}
-                      />
+                      <div className="settings-model-field">
+                        <input
+                          className="field"
+                          aria-label={activeProfile.provider === 'anthropic' ? 'Anthropic 模型' : '模型'}
+                          list="active-model-options"
+                          value={activeProfile.model}
+                          onChange={(event) => updateProfile({ model: event.target.value })}
+                        />
+                        <button
+                          className="secondary-button settings-model-fetch"
+                          type="button"
+                          disabled={!activeProfile.baseUrl.trim() || activeModelDiscovery?.status === 'loading'}
+                          onClick={() => void discoverModels()}
+                          aria-label="获取可用模型"
+                        >
+                          <RefreshCw size={13} className={activeModelDiscovery?.status === 'loading' ? 'is-spinning' : ''} />
+                          {activeModelDiscovery?.status === 'loading' ? '获取中' : '获取模型'}
+                        </button>
+                      </div>
+                      <datalist id="active-model-options">{modelOptions.map((model) => <option key={model} value={model} />)}</datalist>
+                      {activeModelDiscovery && (
+                        <small className={`field-caption model-discovery-${activeModelDiscovery.status}`} role={activeModelDiscovery.status === 'error' ? 'alert' : 'status'}>
+                          {activeModelDiscovery.message}
+                        </small>
+                      )}
+                      {!activeModelDiscovery && (
+                        <small className="field-caption">默认模型即发送对话时使用的模型；勾选下方模型可加入右下角快捷菜单。可手动输入模型 ID，或填写服务地址和 API Key 后获取列表。</small>
+                      )}
+                      <div className="settings-model-catalog" role="group" aria-label="启用的模型">
+                        {modelCatalog.length > 8 && (
+                          <input
+                            className="field settings-model-search"
+                            type="search"
+                            aria-label="搜索模型"
+                            placeholder="搜索模型…"
+                            value={modelFilter}
+                            onChange={(event) => setModelFilter(event.target.value)}
+                          />
+                        )}
+                        {filteredCatalog.length ? (
+                          <ul className="settings-model-list">
+                            {filteredCatalog.map((model) => {
+                              const isDefault = model === activeProfile.model.trim()
+                              return (
+                                <li key={model}>
+                                  <label className="settings-model-option">
+                                    <input
+                                      type="checkbox"
+                                      aria-label={`在模型菜单中显示 ${model}`}
+                                      checked={activeProfile.enabledModels.includes(model)}
+                                      disabled={isDefault}
+                                      onChange={() => toggleEnabledModel(model)}
+                                    />
+                                    <span>{model}</span>
+                                    {isDefault && <small>默认</small>}
+                                  </label>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        ) : (
+                          <small className="field-caption">{modelCatalog.length ? '没有匹配的模型。' : '暂无已启用的模型；获取列表或输入模型 ID 后可在此勾选。'}</small>
+                        )}
+                      </div>
                     </label>
-                    <datalist id="openai-model-options">{SELECTABLE_AI_MODELS.map((model) => <option key={model} value={model} />)}</datalist>
-                    <datalist id="anthropic-model-options">{SELECTABLE_ANTHROPIC_MODELS.map((model) => <option key={model} value={model} />)}</datalist>
                     <label className="field-label span-2">
                       {activeProfile.provider === 'anthropic' ? 'Anthropic API Key' : 'API Key'}
                       <div className="field-password">
