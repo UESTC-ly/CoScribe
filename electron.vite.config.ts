@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { normalizePath } from 'vite'
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url))
 
@@ -40,11 +41,11 @@ export default defineConfig({
       viteStaticCopy({
         targets: [
           {
-            src: resolve(rootDir, 'resources/ocr/*.tar'),
+            src: normalizePath(resolve(rootDir, 'resources/ocr/*.tar')),
             dest: 'assets/ocr/models'
           },
           {
-            src: resolve(rootDir, 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.{mjs,wasm}'),
+            src: normalizePath(resolve(rootDir, 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.{mjs,wasm}')),
             dest: 'assets/ocr/ort'
           }
         ]
