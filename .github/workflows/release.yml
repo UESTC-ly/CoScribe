@@ -51,7 +51,7 @@ jobs:
             build_command: npm run dist:mac:arm64
             verify_command: npm run verify:package:mac
             executable: release/mac-arm64/CoScribe.app/Contents/MacOS/CoScribe
-            e2e_command: npx playwright test --grep "opens a real local project"
+            e2e_command: npx playwright test tests/e2e/package-smoke.spec.ts
             artifact_paths: |
               release/CoScribe-*-arm64.dmg
               release/CoScribe-*-arm64-mac.zip
@@ -60,14 +60,14 @@ jobs:
             build_command: npm run dist:win:x64
             verify_command: npm run verify:package:win
             executable: release/win-unpacked/CoScribe.exe
-            e2e_command: npx playwright test --grep "opens a real local project"
+            e2e_command: npx playwright test tests/e2e/package-smoke.spec.ts
             artifact_paths: release/CoScribe-Setup-*-x64.exe
           - id: linux-x64
             os: ubuntu-24.04
             build_command: npm run dist:linux:x64
             verify_command: npm run verify:package:linux
             executable: release/linux-unpacked/coscribe
-            e2e_command: xvfb-run --auto-servernum npx playwright test --grep "opens a real local project"
+            e2e_command: xvfb-run --auto-servernum npx playwright test tests/e2e/package-smoke.spec.ts
             artifact_paths: |
               release/CoScribe-*-x64.AppImage
               release/CoScribe-*-x64.deb

@@ -34,7 +34,10 @@ const asarCli = require.resolve('@electron/asar/bin/asar.js')
 const entries = execFileSync(process.execPath, [asarCli, 'list', asarPath], {
   encoding: 'utf8',
   maxBuffer: 20 * 1024 * 1024
-}).split(/\r?\n/u).filter(Boolean)
+}).split(/\r?\n/u).filter(Boolean).map((entry) => {
+  const normalized = entry.replaceAll('\\', '/')
+  return normalized.startsWith('/') ? normalized : `/${normalized}`
+})
 const entrySet = new Set(entries)
 
 const requiredEntries = [
