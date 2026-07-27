@@ -2482,18 +2482,16 @@
 }
 
 .ai-composer__stop {
-  padding: 0 8px;
+  width: 29px;
+  padding: 0;
   color: var(--ai-danger);
   background: var(--ai-danger-wash);
   border: 1px solid color-mix(in srgb, var(--ai-danger) 35%, var(--ai-line));
-  gap: 4px;
-  font-size: 9px;
-  font-weight: 700;
 }
 
 .ai-composer__stop svg {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   fill: currentColor;
 }
 

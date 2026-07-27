@@ -1252,8 +1252,14 @@ export function AiWorkspace({
             </button>
             <span className="ai-composer__hint">{composerMode === 'image' ? 'Enter 生成 · Shift Enter 换行' : 'Enter 发送 · Shift Enter 换行'}</span>
             {isBusy ? (
-              <button className="ai-composer__stop" type="button" onClick={() => void (isGeneratingImage ? onStopImage?.() : onStop())}>
-                <Square aria-hidden="true" /> 停止
+              <button
+                className="ai-composer__stop"
+                type="button"
+                aria-label={isGeneratingImage ? '停止图片生成' : '停止 AI 请求'}
+                title={isGeneratingImage ? '停止图片生成' : '停止 AI 请求'}
+                onClick={() => void (isGeneratingImage ? onStopImage?.() : onStop())}
+              >
+                <Square aria-hidden="true" />
               </button>
             ) : (
               <button

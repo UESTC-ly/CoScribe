@@ -13,6 +13,11 @@ interface ScreenshotSelection extends ScreenshotRegion {
   viewportHeight: number
 }
 
+interface ScreenshotSelectionSession {
+  selection: ScreenshotSelection
+  close: () => void
+}
+
 const SELECTION_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -55,6 +60,8 @@ function selectionScript(): string {
     if (settled) return
     settled = true
     cleanup()
+    box.classList.remove('active')
+    size.textContent = ''
     resolve(value)
   }
   const renderRegion = (region) => {
@@ -197,7 +204,7 @@ export class ScreenshotService {
     return capture
   }
 
-  private async selectRegion(display: Display): Promise<ScreenshotSelection | null> {
+  private async selectRegion(display: Display): Promise<ScreenshotSelectionSession | null> {
     const overlay = new BrowserWindow({
       x: display.bounds.x,
       y: display.bounds.y,
@@ -228,6 +235,10 @@ export class ScreenshotService {
     overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
     let timeout: NodeJS.Timeout | null = null
+    let keepOverlayOpen = false
+    const closeOverlay = (): void => {
+      if (!overlay.isDestroyed()) overlay.destroy()
+    }
     try {
       await overlay.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SELECTION_HTML)}`)
       overlay.webContents.on('will-navigate', (event) => event.preventDefault())
@@ -247,10 +258,14 @@ export class ScreenshotService {
       if (!fields.every((field) => typeof candidate[field] === 'number' && Number.isFinite(candidate[field]))) {
         throw new Error('截图区域无效。')
       }
-      return candidate as unknown as ScreenshotSelection
+      keepOverlayOpen = true
+      return {
+        selection: candidate as unknown as ScreenshotSelection,
+        close: closeOverlay
+      }
     } finally {
       if (timeout) clearTimeout(timeout)
-      if (!overlay.isDestroyed()) overlay.destroy()
+      if (!keepOverlayOpen) closeOverlay()
     }
   }
 
@@ -269,11 +284,14 @@ export class ScreenshotService {
         : captureDisplayImage(display, captureSize)
     )
 
+    let selectionSession: ScreenshotSelectionSession | null = null
     try {
-      const selection = await this.selectRegion(display)
-      if (!selection) return null
-      // The transparent selector is destroyed before pixels are captured, so
-      // neither its dimming layer nor selection border can leak into the result.
+      selectionSession = await this.selectRegion(display)
+      if (!selectionSession) return null
+      const { selection } = selectionSession
+      // Keep the now-empty transparent selector alive while the first native
+      // screen capture initializes. Destroying its focused window beforehand
+      // lets macOS promote an unrelated application during that slower call.
       await delay(70)
       const displayImage = await captureVisibleDisplay()
       const crop = screenshotCropBounds(
@@ -302,8 +320,12 @@ export class ScreenshotService {
       if (!window.isDestroyed()) {
         if (window.isMinimized()) window.restore()
         if (!window.isVisible()) window.show()
-        window.focus()
+        // Transfer focus back before destroying the selector so the operating
+        // system never has to choose another application's window.
+        if (selectionSession) window.focus()
       }
+      selectionSession?.close()
+      if (!window.isDestroyed()) window.focus()
     }
   }
 }

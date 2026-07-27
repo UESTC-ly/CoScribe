@@ -248,6 +248,18 @@ describe('AiWorkspace', () => {
     expect(onCapturedImageHandled).toHaveBeenCalledOnce()
   })
 
+  it('uses an icon-only stop control that cannot wrap in a narrow composer', () => {
+    const onStop = vi.fn()
+    render(<AiWorkspace {...buildProps({ isStreaming: true, onStop })} />)
+
+    const stop = screen.getByRole('button', { name: '停止 AI 请求' })
+    expect(stop).toHaveAttribute('title', '停止 AI 请求')
+    expect(stop).toHaveTextContent('')
+    expect(stop.querySelector('svg')).not.toBeNull()
+    fireEvent.click(stop)
+    expect(onStop).toHaveBeenCalledOnce()
+  })
+
   it('offers one-click note organization for a non-empty conversation', () => {
     const onQuickNote = vi.fn()
     const sessionWithContent: ChatSession = {
