@@ -267,7 +267,7 @@ export class ResearchBrowserService {
     return []
   }
 
-  private emitSelectionCandidate(candidate: WebSelectionCandidate): void {
+  private emitSelectionCandidate(candidate: WebSelectionCandidate | null): void {
     const window = this.getWindow()
     if (window && !window.isDestroyed()) window.webContents.send(IPC.browserSelectionCandidate, candidate)
   }
@@ -438,7 +438,10 @@ export class ResearchBrowserService {
         else this.mergeTabState(tab, { error: '已阻止不安全的重定向。' })
       }
     })
-    contents.on('did-start-loading', () => this.mergeTabState(tab, { error: undefined, notice: undefined }))
+    contents.on('did-start-loading', () => {
+      if (this.activeTab === tab) this.emitSelectionCandidate(null)
+      this.mergeTabState(tab, { error: undefined, notice: undefined })
+    })
     contents.on('did-stop-loading', () => this.mergeTabState(tab))
     contents.on('did-navigate', (_event, url) => {
       this.mergeTabState(tab, { error: undefined })
@@ -465,7 +468,11 @@ export class ResearchBrowserService {
         ? String((details as { message?: unknown }).message ?? '')
         : ''
       const text = parseSelectionConsoleMessage(message, tab.selectionNonce, MAX_SELECTION_CANDIDATE_CHARS)
-      if (!text || this.activeTab !== tab || contents.isDestroyed()) return
+      if (text === null || this.activeTab !== tab || contents.isDestroyed()) return
+      if (!text) {
+        this.emitSelectionCandidate(null)
+        return
+      }
       const url = safeExternalUrl(contents.getURL())
       if (!url) return
       this.emitSelectionCandidate({ text, title: tab.state.title || (url ? new URL(url).hostname : '网页资料'), url })
@@ -529,6 +536,7 @@ export class ResearchBrowserService {
     }
     this.tabs.push(tab)
     this.activeTabId = id
+    this.emitSelectionCandidate(null)
     this.visible = true
     this.syncViewVisibility()
     this.emitState()
@@ -539,6 +547,7 @@ export class ResearchBrowserService {
     const tab = this.tabs.find((candidate) => candidate.id === tabId)
     if (!tab) throw new Error('浏览器标签页不存在或已经关闭。')
     this.activeTabId = tab.id
+    this.emitSelectionCandidate(null)
     if (this.visible) this.attachToWindow()
     this.syncViewVisibility()
     return this.mergeTabState(tab)
@@ -555,6 +564,7 @@ export class ResearchBrowserService {
     }
     if (this.activeTabId === tabId) {
       this.activeTabId = this.tabs[Math.min(index, this.tabs.length - 1)]?.id ?? null
+      this.emitSelectionCandidate(null)
     }
     this.syncViewVisibility()
     return this.emitState()
@@ -782,6 +792,7 @@ export class ResearchBrowserService {
     this.browserSession = null
     this.tabs = []
     this.activeTabId = null
+    this.emitSelectionCandidate(null)
     this.parentWindow = null
     this.visible = false
     this.externalLaunches = []

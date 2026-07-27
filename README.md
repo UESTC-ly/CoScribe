@@ -30,15 +30,15 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 ### 下载与安装
 
-从 [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest) 下载稳定版 `v3.2.2`：
+从 [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest) 下载稳定版 `v3.2.3`：
 
 | 系统 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS | `CoScribe-3.2.2-arm64.dmg` | Apple Silicon，macOS 13+ |
-| macOS | `CoScribe-3.2.2-arm64-mac.zip` | Apple Silicon 免安装压缩包 |
-| Windows | `CoScribe-Setup-3.2.2-x64.exe` | Windows 10/11 x64 |
-| Linux | `CoScribe-3.2.2-x64.AppImage` | 通用 x86-64 便携包 |
-| Linux | `CoScribe-3.2.2-x64.deb` | Debian / Ubuntu x86-64 |
+| macOS | `CoScribe-3.2.3-arm64.dmg` | Apple Silicon，macOS 13+ |
+| macOS | `CoScribe-3.2.3-arm64-mac.zip` | Apple Silicon 免安装压缩包 |
+| Windows | `CoScribe-Setup-3.2.3-x64.exe` | Windows 10/11 x64 |
+| Linux | `CoScribe-3.2.3-x64.AppImage` | 通用 x86-64 便携包 |
+| Linux | `CoScribe-3.2.3-x64.deb` | Debian / Ubuntu x86-64 |
 | 全平台 | `SHA256SUMS.txt` | 安装包 SHA-256 校验值 |
 
 这些安装包目前没有 Apple Developer ID、Windows Authenticode 或 Linux 发行版签名。
@@ -52,7 +52,7 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 #### Windows
 
-1. 运行 `CoScribe-Setup-3.2.2-x64.exe`。
+1. 运行 `CoScribe-Setup-3.2.3-x64.exe`。
 2. 如果 SmartScreen 拦截未签名安装包，确认文件来自本仓库并核对 SHA-256 后，选择“更多信息 → 仍要运行”。
 3. 安装完成后从开始菜单启动 CoScribe。
 
@@ -61,19 +61,19 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 AppImage：
 
 ```bash
-chmod +x CoScribe-3.2.2-x64.AppImage
-./CoScribe-3.2.2-x64.AppImage
+chmod +x CoScribe-3.2.3-x64.AppImage
+./CoScribe-3.2.3-x64.AppImage
 ```
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install ./CoScribe-3.2.2-x64.deb
+sudo apt install ./CoScribe-3.2.3-x64.deb
 ```
 
 Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门户配置。
 
-> v3.2.2 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并通过架构、打包内容和成品窗口 E2E 验证。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
+> v3.2.3 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并通过架构、打包内容和成品窗口 E2E 验证。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
 
 ### 五分钟开始使用
 
@@ -289,25 +289,25 @@ npm run verify:package:linux
 
 ### Download and install
 
-Download the stable `v3.2.2` release from [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest):
+Download the stable `v3.2.3` release from [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest):
 
 | Platform | Artifact | Target |
 | --- | --- | --- |
-| macOS | `CoScribe-3.2.2-arm64.dmg` | Apple Silicon, macOS 13+ |
-| macOS | `CoScribe-3.2.2-arm64-mac.zip` | Portable Apple Silicon archive |
-| Windows | `CoScribe-Setup-3.2.2-x64.exe` | Windows 10/11 x64 |
-| Linux | `CoScribe-3.2.2-x64.AppImage` | Portable x86-64 AppImage |
-| Linux | `CoScribe-3.2.2-x64.deb` | Debian / Ubuntu x86-64 |
+| macOS | `CoScribe-3.2.3-arm64.dmg` | Apple Silicon, macOS 13+ |
+| macOS | `CoScribe-3.2.3-arm64-mac.zip` | Portable Apple Silicon archive |
+| Windows | `CoScribe-Setup-3.2.3-x64.exe` | Windows 10/11 x64 |
+| Linux | `CoScribe-3.2.3-x64.AppImage` | Portable x86-64 AppImage |
+| Linux | `CoScribe-3.2.3-x64.deb` | Debian / Ubuntu x86-64 |
 | All | `SHA256SUMS.txt` | SHA-256 checksums |
 
 The builds are currently unsigned.
 
 - **macOS:** drag CoScribe into Applications, then right-click and choose **Open**. If blocked, use System Settings → Privacy & Security → Open Anyway. Screen Recording is used only for region capture; Microphone is used only for local speech input.
 - **Windows:** run the x64 installer. If SmartScreen appears, verify the checksum and source before choosing **More info → Run anyway**.
-- **Linux AppImage:** run `chmod +x CoScribe-3.2.2-x64.AppImage`, then `./CoScribe-3.2.2-x64.AppImage`.
-- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-3.2.2-x64.deb`.
+- **Linux AppImage:** run `chmod +x CoScribe-3.2.3-x64.AppImage`, then `./CoScribe-3.2.3-x64.AppImage`.
+- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-3.2.3-x64.deb`.
 
-> v3.2.2 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked for architecture, packaged contents, and packaged-window E2E behavior. Local speech recognition and system Calendar integration remain macOS-only.
+> v3.2.3 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked for architecture, packaged contents, and packaged-window E2E behavior. Local speech recognition and system Calendar integration remain macOS-only.
 
 ### Start in five minutes
 

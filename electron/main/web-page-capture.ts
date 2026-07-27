@@ -232,7 +232,7 @@ export function parseSelectionConsoleMessage(
       text?: unknown
     }
     if (payload.nonce !== expectedNonce || typeof payload.text !== 'string') return null
-    return payload.text.trim().slice(0, maximum) || null
+    return payload.text.trim().slice(0, maximum)
   } catch {
     return null
   }
@@ -252,7 +252,6 @@ export function selectionWatchScript(nonce: string): string {
   let last = ''
   const emit = () => {
     const text = String(window.getSelection ? window.getSelection()?.toString() || '' : '').trim().slice(0, MAX)
-    if (!text) { last = ''; return }
     if (text === last) return
     last = text
     try { console.info(PREFIX + JSON.stringify({ nonce: NONCE, text })) } catch (error) {}

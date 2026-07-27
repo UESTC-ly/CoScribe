@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   PAGE_CAPTURE_SCRIPT,
@@ -61,11 +61,44 @@ describe('isolated webpage capture', () => {
   it('accepts selection messages only when they carry the isolated-world nonce', () => {
     const nonce = 'tab-secret-nonce'
     const valid = `${SELECTION_CONSOLE_PREFIX}${JSON.stringify({ nonce, text: ' selected text ' })}`
+    const cleared = `${SELECTION_CONSOLE_PREFIX}${JSON.stringify({ nonce, text: '' })}`
     const spoofed = `${SELECTION_CONSOLE_PREFIX}${JSON.stringify({ nonce: 'page-controlled', text: 'spoofed' })}`
 
     expect(parseSelectionConsoleMessage(valid, nonce)).toBe('selected text')
+    expect(parseSelectionConsoleMessage(cleared, nonce)).toBe('')
     expect(parseSelectionConsoleMessage(spoofed, nonce)).toBeNull()
     expect(parseSelectionConsoleMessage(`${SELECTION_CONSOLE_PREFIX}not-json`, nonce)).toBeNull()
     expect(selectionWatchScript(nonce)).toContain(JSON.stringify(nonce))
+  })
+
+  it('emits an authenticated empty selection after the page selection is cleared', () => {
+    vi.useFakeTimers()
+    let selectedText = ''
+    const selection = { toString: () => selectedText } as Selection
+    const getSelection = vi.spyOn(window, 'getSelection').mockReturnValue(selection)
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+    const nonce = 'clear-transition-nonce'
+
+    window.eval(selectionWatchScript(nonce))
+    selectedText = 'kept candidate'
+    document.dispatchEvent(new Event('selectionchange'))
+    vi.advanceTimersByTime(321)
+    selectedText = ''
+    document.dispatchEvent(new Event('selectionchange'))
+    vi.advanceTimersByTime(321)
+
+    expect(info).toHaveBeenNthCalledWith(
+      1,
+      `${SELECTION_CONSOLE_PREFIX}${JSON.stringify({ nonce, text: 'kept candidate' })}`
+    )
+    expect(info).toHaveBeenNthCalledWith(
+      2,
+      `${SELECTION_CONSOLE_PREFIX}${JSON.stringify({ nonce, text: '' })}`
+    )
+
+    info.mockRestore()
+    getSelection.mockRestore()
+    vi.useRealTimers()
+    Reflect.deleteProperty(window, '__coscribeSelectionWatch')
   })
 })

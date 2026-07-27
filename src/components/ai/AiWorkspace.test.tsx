@@ -127,6 +127,12 @@ const conversationMessages: ChatMessage[] = [
 ]
 
 describe('AiWorkspace', () => {
+  it('keeps provider settings out of the AI header', () => {
+    render(<AiWorkspace {...buildProps({ onOpenSettings: vi.fn() })} />)
+
+    expect(screen.queryByRole('button', { name: '编辑系统提示词' })).not.toBeInTheDocument()
+  })
+
   it('sends the question with the controlled scope and referenced files', () => {
     const onSend = vi.fn()
     render(
@@ -458,7 +464,7 @@ describe('AiWorkspace', () => {
     expect(onContextScopeChange).toHaveBeenCalledWith('project')
   })
 
-  it('keeps a captured selection visible beside the composer and exposes locate, insert, and clear actions', () => {
+  it('keeps a captured selection visible when the normal context uses another scope', () => {
     const onLocateSelection = vi.fn()
     const onClearSelection = vi.fn()
     const selectionContext: ContextSnapshot = {
@@ -467,8 +473,9 @@ describe('AiWorkspace', () => {
       selection: '路由把请求映射到处理函数。',
     }
     render(<AiWorkspace {...buildProps({
-      context: selectionContext,
-      contextScope: 'selection',
+      context: { ...context, scope: 'document' },
+      selectionContext,
+      contextScope: 'document',
       onLocateSelection,
       onClearSelection,
     })} />)

@@ -968,7 +968,7 @@ export interface CoScribeAPI {
     clearHistory: () => Promise<BrowserHistoryEntry[]>
     onState: (listener: (state: ResearchBrowserState) => void) => () => void
     onSelection: (listener: (event: ResearchBrowserSelectionEvent) => void) => () => void
-    onSelectionCandidate: (listener: (candidate: WebSelectionCandidate) => void) => () => void
+    onSelectionCandidate: (listener: (candidate: WebSelectionCandidate | null) => void) => () => void
   }
   images: {
     generate: (request: ImageGenerationRequest) => Promise<ImageGenerationResult>

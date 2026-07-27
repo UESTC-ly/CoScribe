@@ -13,7 +13,6 @@ import {
   Gauge,
   Mic,
   MessageSquarePlus,
-  MessageSquareCode,
   Minimize2,
   NotebookPen,
   PanelRightClose,
@@ -89,6 +88,7 @@ export interface AiWorkspaceProps {
   sessions: readonly ChatSession[]
   currentSessionId: string | null
   context: ContextSnapshot | null
+  selectionContext?: ContextSnapshot | null
   contextScope: ContextScope
   contextUsage?: ContextWindowUsage
   manualContextCompression?: boolean
@@ -268,6 +268,7 @@ export function AiWorkspace({
   sessions,
   currentSessionId,
   context,
+  selectionContext,
   contextScope,
   contextUsage,
   manualContextCompression = false,
@@ -347,8 +348,11 @@ export function AiWorkspace({
   useOutsideClose(referenceMenuOpen, referenceMenuRef, () => setReferenceMenuOpen(false))
 
   const contextSummary = activeContextLabel(context, contextScope, projectName)
-  const capturedSelection = context?.scope === 'selection' ? context.selection?.trim() ?? '' : ''
-  const selectionAvailable = Boolean(context?.selection?.trim())
+  const capturedSelectionContext = selectionContext === undefined
+    ? (context?.scope === 'selection' ? context : null)
+    : selectionContext
+  const capturedSelection = capturedSelectionContext?.selection?.trim() ?? ''
+  const selectionAvailable = Boolean(capturedSelection || context?.selection?.trim())
   const documentAvailable = Boolean(context?.documentPath || context?.documentName)
   const sortedSessions = useMemo(
     () => [...sessions].sort((left, right) => right.updatedAt - left.updatedAt),
@@ -644,15 +648,6 @@ export function AiWorkspace({
           >
             <Plus aria-hidden="true" />
           </button>
-          <button
-            className="ai-icon-button"
-            type="button"
-            title="编辑系统提示词"
-            aria-label="编辑系统提示词"
-            onClick={() => onOpenSettings?.()}
-          >
-            <MessageSquareCode aria-hidden="true" />
-          </button>
           {onClose && (
             <button
               className="ai-icon-button"
@@ -938,20 +933,20 @@ export function AiWorkspace({
             <blockquote>“{webSelectionCandidate.text.slice(0, 180)}{webSelectionCandidate.text.length > 180 ? '…' : ''}”</blockquote>
           </section>
         )}
-        {composerMode === 'chat' && context && capturedSelection && (
+        {composerMode === 'chat' && capturedSelectionContext && capturedSelection && (
           <section className="ai-selection-context" role="region" aria-label="已捕获的 AI 选中内容">
             <header>
               <span className="ai-selection-context__icon"><TextQuote aria-hidden="true" /></span>
               <span className="ai-selection-context__identity">
                 <strong>AI 选中内容</strong>
-                <small>{context.documentName || fileName(context.documentPath) || '当前内容'} · {capturedSelection.length} 字</small>
+                <small>{capturedSelectionContext.documentName || fileName(capturedSelectionContext.documentPath) || '当前内容'} · {capturedSelection.length} 字</small>
               </span>
               <span className="ai-selection-context__actions">
                 <button
                   type="button"
                   aria-label="定位选中内容"
                   title="定位到原文"
-                  onClick={() => (onLocateSelection ?? onOpenContext)(context)}
+                  onClick={() => (onLocateSelection ?? onOpenContext)(capturedSelectionContext)}
                 >
                   <LocateFixed aria-hidden="true" />
                 </button>
@@ -968,7 +963,7 @@ export function AiWorkspace({
                     type="button"
                     aria-label="清除选中内容"
                     title="清除此条 AI 上下文"
-                    onClick={() => onClearSelection(context)}
+                    onClick={() => onClearSelection(capturedSelectionContext)}
                   >
                     <X aria-hidden="true" />
                   </button>

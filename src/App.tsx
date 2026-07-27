@@ -484,7 +484,7 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => window.coscribe.browser.onSelectionCandidate((candidate) => {
     setWebSelectionCandidate(candidate)
-    setStore().setAiVisible(true)
+    if (candidate) setStore().setAiVisible(true)
   }), [])
 
   useEffect(() => {
@@ -1876,6 +1876,10 @@ export default function App(): React.JSX.Element {
   )
   const dirtyPaths = new Set(selectDirtyDocuments(state).map((document) => document.path))
   const activeContext = pendingWebContext ?? state.captureActiveContext(contextScope)
+  const capturedSelectionContext = state.captureActiveContext('selection')
+  const selectionContext = capturedSelectionContext?.selection?.trim()
+    ? capturedSelectionContext
+    : null
   const visibleLeftWidth = clampProjectNavigatorWidth(state.workspace.leftWidth)
   const aiMaximumWidth = maximumAiPanelWidth(viewportWidth, visibleLeftWidth, state.workspace.navVisible)
   const visibleAiWidth = clampAiPanelWidth(state.workspace.aiWidth, aiMaximumWidth)
@@ -1909,7 +1913,12 @@ export default function App(): React.JSX.Element {
       onSaveMarkdown: saveMarkdown,
       onPdfState: (path: string, value: typeof state.workspace.pdf[string]) => state.updatePdfState(path, value),
       onMarkdownState: (path: string, value: typeof state.workspace.markdown[string]) => state.updateMarkdownState(path, value),
-      onContext: state.setDocumentContext,
+      onContext: (path: string, patch: Parameters<typeof state.setDocumentContext>[1]) => {
+        state.setDocumentContext(path, patch)
+        if (typeof patch.selection === 'string' && patch.selection.trim()) {
+          state.setAiVisible(true)
+        }
+      },
       onAddAnnotation: state.addAnnotation,
       onDeleteAnnotation: state.deleteAnnotation,
       onRequestComment: requestPdfComment,
@@ -2075,6 +2084,7 @@ export default function App(): React.JSX.Element {
             sessions={state.sessions}
             currentSessionId={currentSession?.id ?? null}
             context={activeContext}
+            selectionContext={selectionContext}
             contextScope={contextScope}
             contextUsage={activeContextUsage}
             manualContextCompression={forceCompactSessionId === currentSession?.id}

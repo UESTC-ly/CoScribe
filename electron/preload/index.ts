@@ -167,7 +167,7 @@ const api: CoScribeAPI = {
     clearHistory: (): Promise<BrowserHistoryEntry[]> => ipcRenderer.invoke(IPC.browserClearHistory),
     onState: (listener: (state: ResearchBrowserState) => void) => subscribe(IPC.browserState, listener),
     onSelection: (listener: (event: ResearchBrowserSelectionEvent) => void) => subscribe(IPC.browserSelection, listener),
-    onSelectionCandidate: (listener: (candidate: WebSelectionCandidate) => void) =>
+    onSelectionCandidate: (listener: (candidate: WebSelectionCandidate | null) => void) =>
       subscribe(IPC.browserSelectionCandidate, listener)
   },
   images: {

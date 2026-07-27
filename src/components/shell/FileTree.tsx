@@ -45,7 +45,7 @@ function TreeItem({ node, depth, expanded, toggle, onContext, ...props }: TreeIt
         onDoubleClick={() => !isFolder && props.onOpen(node)}
         onContextMenu={(event) => onContext(event, node)}
         draggable
-        onDragStart={(event) => { event.dataTransfer.setData('application/x-vibe-path', node.path); event.dataTransfer.effectAllowed = 'move' }}
+        onDragStart={(event) => { event.dataTransfer.setData('application/x-vibe-path', node.path); event.dataTransfer.effectAllowed = 'copyMove' }}
         onDragOver={(event) => { if (isFolder) event.preventDefault() }}
         onDrop={(event) => {
           if (!isFolder) return
