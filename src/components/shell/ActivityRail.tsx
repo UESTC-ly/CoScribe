@@ -1,4 +1,4 @@
-import { Blocks, Bot, BrainCircuit, FileText, Globe2, Highlighter, History, MessageSquareText, Search, Settings } from 'lucide-react'
+import { Blocks, Bot, BrainCircuit, Code2, FileText, Globe2, Highlighter, History, MessageSquareText, Search, Settings } from 'lucide-react'
 import type { WorkspaceState } from '../../shared/types'
 
 type NavSection = WorkspaceState['navSection']
@@ -14,6 +14,7 @@ interface ActivityRailProps {
 
 const actions: { id: NavSection; label: string; icon: typeof FileText }[] = [
   { id: 'files', label: '文件', icon: FileText },
+  { id: 'ide', label: 'IDE', icon: Code2 },
   { id: 'sessions', label: '会话', icon: MessageSquareText },
   { id: 'search', label: '搜索', icon: Search },
   { id: 'annotations', label: '标注', icon: Highlighter },

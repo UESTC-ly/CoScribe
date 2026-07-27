@@ -17,7 +17,7 @@ const CHUNK_CHARACTERS = 6_000
 const MAX_INDEXED_TEXT_PER_FILE = 4 * 1024 * 1024
 const MAX_TOTAL_INDEXED_TEXT = 64 * 1024 * 1024
 const MAX_RESULTS = 300
-const INDEXABLE_KINDS = new Set<FileKind>(['markdown', 'text', 'docx', 'ppt', 'pptx', 'pdf', 'image'])
+const INDEXABLE_KINDS = new Set<FileKind>(['markdown', 'code', 'text', 'docx', 'ppt', 'pptx', 'pdf', 'image'])
 const QUERY_STOP_WORDS = new Set([
   '当前', '项目', '文档', '文件', '资料', '内容', '回答', '一下', '哪些', '这个', '这些',
   'please', 'about', 'current', 'project', 'document', 'files', 'answer', 'find', 'search'

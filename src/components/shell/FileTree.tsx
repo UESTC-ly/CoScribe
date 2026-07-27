@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, File, FileImage, FileText, FileType2, Folder, FolderOpen, Globe2, MoreHorizontal, Presentation } from 'lucide-react'
+import { ChevronRight, Code2, File, FileImage, FileText, FileType2, Folder, FolderOpen, Globe2, MoreHorizontal, Presentation } from 'lucide-react'
 import type { FileNode } from '../../shared/types'
 
 interface FileTreeProps {
   nodes: FileNode[]
   activePath?: string
+  selectedPath?: string
+  openOnSingleClick?: boolean
+  onSelect?: (node: FileNode) => void
   onOpen: (node: FileNode) => void
   onRename: (node: FileNode) => void
   onMove: (node: FileNode) => void
@@ -20,6 +23,7 @@ function FileIcon({ node, expanded }: { node: FileNode; expanded: boolean }): Re
   if (node.kind === 'docx') return <FileType2 size={15} />
   if (node.kind === 'ppt' || node.kind === 'pptx') return <Presentation size={15} />
   if (node.kind === 'webarchive') return <Globe2 size={15} />
+  if (node.kind === 'code') return <Code2 size={15} />
   if (node.kind === 'markdown' || node.kind === 'text') return <FileText size={15} />
   return <File size={15} />
 }
@@ -35,14 +39,24 @@ interface TreeItemProps extends Omit<FileTreeProps, 'nodes'> {
 function TreeItem({ node, depth, expanded, toggle, onContext, ...props }: TreeItemProps): React.JSX.Element {
   const isFolder = node.kind === 'folder'
   const isExpanded = expanded.has(node.path)
-  const open = (): void => isFolder ? toggle(node.path) : props.onOpen(node)
+  const open = (): void => {
+    if (isFolder) {
+      toggle(node.path)
+      props.onSelect?.(node)
+      return
+    }
+    props.onSelect?.(node)
+    if (props.openOnSingleClick !== false) props.onOpen(node)
+  }
   return (
     <li role="treeitem" aria-expanded={isFolder ? isExpanded : undefined}>
       <div
-        className={`tree-row ${props.activePath === node.path ? 'is-active' : ''}`}
+        className={`tree-row ${(props.selectedPath ?? props.activePath) === node.path ? 'is-active' : ''}`}
         style={{ paddingLeft: 7 + depth * 14 }}
         onClick={open}
-        onDoubleClick={() => !isFolder && props.onOpen(node)}
+        onDoubleClick={() => {
+          if (!isFolder) props.onOpen(node)
+        }}
         onContextMenu={(event) => onContext(event, node)}
         draggable
         onDragStart={(event) => { event.dataTransfer.setData('application/x-vibe-path', node.path); event.dataTransfer.effectAllowed = 'copyMove' }}

@@ -23,7 +23,12 @@ import {
   responsesEndpoint,
   responsesResult
 } from './ai'
-import type { ChatImageAttachment, ImageGenerationRequest } from '../../src/shared/types'
+import {
+  DEFAULT_SETTINGS,
+  type AiRequest,
+  type ChatImageAttachment,
+  type ImageGenerationRequest
+} from '../../src/shared/types'
 import type { PdfTextService } from './pdf'
 import type { ProjectService } from './project'
 import type { ProjectSearchService } from './search'
@@ -242,6 +247,171 @@ describe('AI model discovery', () => {
     })).rejects.toThrow('服务地址或接口格式已修改')
     expect(settings.apiKeyForProfile).not.toHaveBeenCalled()
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('IDE AI code completion', () => {
+  it('uses the configured provider with cursor prefix and suffix and returns insertion-only code', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{
+        type: 'message',
+        content: [{ type: 'output_text', text: '```ts\nreturn left + right\n```' }]
+      }]
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const settings = {
+      get: vi.fn().mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiProtocol: 'responses'
+      }),
+      apiKey: vi.fn().mockResolvedValue(null)
+    } as unknown as SettingsStore
+    const project = {
+      guard: { existing: vi.fn().mockResolvedValue('/project/src/sum.ts') }
+    } as unknown as ProjectService
+    const ai = new AiService(settings, project, {} as PdfTextService, {} as ProjectSearchService)
+
+    await expect(ai.completeCode({
+      requestId: 'completion-1',
+      path: '/project/src/sum.ts',
+      language: 'TypeScript',
+      prefix: 'function sum(left: number, right: number) {\n  ',
+      suffix: '\n}\n'
+    })).resolves.toEqual({
+      requestId: 'completion-1',
+      completion: 'return left + right'
+    })
+
+    const body = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body)) as {
+      instructions: string
+      input: Array<{ content: string }>
+    }
+    expect(body.instructions).toContain('只返回应插入光标位置的代码')
+    expect(body.input[0].content).toContain('<prefix>\nfunction sum')
+    expect(body.input[0].content).toContain('<suffix>\n\n}\n')
+  })
+
+  it('does not contact the model when code completion is disabled', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const settings = {
+      get: vi.fn().mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        aiCodeCompletionEnabled: false
+      })
+    } as unknown as SettingsStore
+    const project = {
+      guard: { existing: vi.fn().mockResolvedValue('/project/main.py') }
+    } as unknown as ProjectService
+    const ai = new AiService(settings, project, {} as PdfTextService, {} as ProjectSearchService)
+
+    await expect(ai.completeCode({
+      requestId: 'completion-disabled',
+      path: '/project/main.py',
+      language: 'Python',
+      prefix: 'print(',
+      suffix: ')'
+    })).rejects.toThrow('已在设置中关闭')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('AI Shell model tool boundary', () => {
+  it('exposes the shell tool only after authorization, executes one command, and removes it from follow-up', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output: [{
+          type: 'function_call',
+          name: 'run_terminal_command',
+          arguments: JSON.stringify({ command: 'npm test', timeoutMs: 30_000 })
+        }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: '测试已完成。' }]
+        }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const settings = {
+      get: vi.fn().mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiProtocol: 'responses',
+        projectMemoryEnabled: false
+      }),
+      apiKey: vi.fn().mockResolvedValue(null)
+    } as unknown as SettingsStore
+    const project = {
+      info: { name: 'Project', path: '/project' }
+    } as unknown as ProjectService
+    const terminal = {
+      status: vi.fn().mockResolvedValue({
+        enabled: true,
+        authorized: true,
+        approvalMode: 'per-command',
+        projectPath: '/project'
+      }),
+      runAiCommand: vi.fn().mockResolvedValue({
+        requestId: 'shell-request:shell',
+        sessionId: 'shell-session',
+        command: 'npm test',
+        cwd: '/project',
+        output: '96 tests passed\n',
+        exitCode: 0,
+        timedOut: false,
+        truncated: false
+      })
+    }
+    const send = vi.fn()
+    const sender = { isDestroyed: () => false, send } as unknown as WebContents
+    const ai = new AiService(
+      settings,
+      project,
+      {} as PdfTextService,
+      {} as ProjectSearchService,
+      terminal as never
+    )
+    const request: AiRequest = {
+      requestId: 'shell-request',
+      sessionId: 'session-1',
+      messages: [{ role: 'user', content: '运行测试并说明结果' }],
+      context: {
+        projectName: 'Project',
+        projectPath: '/project',
+        pane: 'primary',
+        scope: 'general',
+        referencedFiles: [],
+        capturedAt: 1
+      }
+    }
+    const exposed = ai as unknown as {
+      run(sender: WebContents, request: AiRequest, controller: AbortController): Promise<void>
+    }
+
+    await exposed.run(sender, request, new AbortController())
+
+    expect(terminal.runAiCommand).toHaveBeenCalledWith(
+      sender,
+      expect.objectContaining({ command: 'npm test', timeoutMs: 30_000 }),
+      expect.any(AbortSignal)
+    )
+    const firstBody = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body)) as {
+      tools: Array<{ name: string }>
+    }
+    const followUpBody = JSON.parse(String((fetchSpy.mock.calls[1]?.[1] as RequestInit).body)) as {
+      tools: Array<{ name: string }>
+      input: Array<{ content: string }>
+    }
+    expect(firstBody.tools.map((tool) => tool.name)).toEqual([
+      'propose_workspace_operation',
+      'run_terminal_command'
+    ])
+    expect(followUpBody.tools.map((tool) => tool.name)).toEqual(['propose_workspace_operation'])
+    expect(followUpBody.input.at(-1)?.content).toContain('96 tests passed')
+    expect(send).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      requestId: 'shell-request',
+      type: 'done'
+    }))
+    expect(send).not.toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ type: 'error' }))
   })
 })
 

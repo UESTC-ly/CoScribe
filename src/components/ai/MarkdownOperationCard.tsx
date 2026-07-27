@@ -1,5 +1,5 @@
 import { AlertCircle, Check, FileDiff, FilePlus2, FileText, FolderTree, Loader2, RotateCcw, X } from 'lucide-react'
-import type { FileOperationProposal, MarkdownFileOperation } from '../../shared/types'
+import type { FileOperationProposal, TextFileOperation } from '../../shared/types'
 
 export interface MarkdownOperationCardProps {
   operation: FileOperationProposal
@@ -120,7 +120,7 @@ function OperationIcon({ kind }: Pick<FileOperationProposal, 'kind'>): React.JSX
   return <FileDiff aria-hidden="true" />
 }
 
-function operationItems(operation: FileOperationProposal): MarkdownFileOperation[] {
+function operationItems(operation: FileOperationProposal): TextFileOperation[] {
   return operation.operations?.length
     ? operation.operations
     : [{
@@ -128,14 +128,20 @@ function operationItems(operation: FileOperationProposal): MarkdownFileOperation
         targetPath: operation.targetPath,
         proposedContent: operation.proposedContent,
         ...(operation.originalContent !== undefined ? { originalContent: operation.originalContent } : {}),
+        ...(operation.diskContent !== undefined ? { diskContent: operation.diskContent } : {}),
+        ...(operation.baseSource ? { baseSource: operation.baseSource } : {}),
         ...(operation.expectedModifiedAt !== undefined ? { expectedModifiedAt: operation.expectedModifiedAt } : {})
       }]
 }
 
 const operationLabels: Record<FileOperationProposal['kind'], string> = {
-  create: '创建 Markdown',
+  create: '创建文件',
   append: '追加内容',
-  replace: '修改 Markdown'
+  replace: '修改文件'
+}
+
+function isMarkdownPath(path: string): boolean {
+  return /\.(?:md|markdown)$/iu.test(path)
 }
 
 export function MarkdownOperationCard({
@@ -152,11 +158,19 @@ export function MarkdownOperationCard({
   const isPending = operation.status === 'pending'
   const items = operationItems(operation)
   const isBatch = items.length > 1
+  const markdownOnly = items.every((item) => isMarkdownPath(item.targetPath))
+  const operationLabel = markdownOnly
+    ? operation.kind === 'create'
+      ? '创建 Markdown'
+      : operation.kind === 'replace'
+        ? '修改 Markdown'
+        : operationLabels[operation.kind]
+    : operationLabels[operation.kind]
 
   return (
     <section
       className={`ai-operation ai-operation--${operation.status}`}
-      aria-label={`${operationLabels[operation.kind]}建议`}
+      aria-label={`${operationLabel}建议`}
     >
       <header className="ai-operation__header">
         <span className="ai-operation__icon">
@@ -164,7 +178,7 @@ export function MarkdownOperationCard({
         </span>
         <span className="ai-operation__heading">
           <span className="ai-operation__eyebrow">文件操作建议</span>
-          <strong>{isBatch ? `创建笔记项目 · ${items.length} 个文件` : operationLabels[operation.kind]}</strong>
+          <strong>{isBatch ? markdownOnly && operation.kind === 'create' ? `创建笔记项目 · ${items.length} 个文件` : `批量文件修改 · ${items.length} 个文件` : operationLabel}</strong>
         </span>
         {operation.status !== 'pending' && (
           <span className={`ai-operation__status ai-operation__status--${operation.status}`}>
@@ -177,7 +191,7 @@ export function MarkdownOperationCard({
       </header>
 
       {isBatch ? (
-        <div className="ai-operation__batch" aria-label="批量 Markdown 文件预览">
+        <div className="ai-operation__batch" aria-label="批量文件预览">
           {items.map((item, index) => (
             <details key={`${item.targetPath}-${index}`} open={index === 0}>
               <summary>
@@ -208,7 +222,7 @@ export function MarkdownOperationCard({
               <i className="ai-operation__legend-add" /> 新增
             </span>
           </div>
-          <div className="ai-diff" role="region" aria-label="Markdown 修改差异" tabIndex={0}>
+          <div className="ai-diff" role="region" aria-label={markdownOnly ? 'Markdown 修改差异' : '文件修改差异'} tabIndex={0}>
             {visibleDiff.map((line, index) => (
               <div className={`ai-diff__line ai-diff__line--${line.kind}`} key={`${line.kind}-${index}`}>
                 <span className="ai-diff__line-number">{line.oldLine ?? ''}</span>
@@ -254,7 +268,7 @@ export function MarkdownOperationCard({
 
       {(isPending || operation.status === 'failed') && (
         <footer className="ai-operation__actions">
-          <span className="ai-operation__safety">{isBatch ? '一次确认后写入整组文件' : '确认前不会修改磁盘文件'}</span>
+          <span className="ai-operation__safety">{operation.baseSource === 'buffer' ? '基于发送时的未保存 IDE 缓冲区；确认前会检查缓冲区未变化' : isBatch ? '一次确认后写入整组文件' : '确认前不会修改磁盘文件'}</span>
           <button
             className="ai-button ai-button--quiet"
             type="button"

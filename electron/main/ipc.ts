@@ -2,6 +2,7 @@ import { app, clipboard, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } f
 
 import type {
   AiRequest,
+  AiCodeCompletionRequest,
   AiModelListRequest,
   AiOcrRequest,
   Annotation,
@@ -15,6 +16,7 @@ import type {
   OcrResult,
   ResearchBrowserBounds,
   ResearchBrowserExtractMode,
+  TerminalCreateRequest,
   WebTrackedSourceInput,
   WorkspaceState
 } from '../../src/shared/types'
@@ -35,6 +37,7 @@ import { ReferenceMetadataService } from './references'
 import { ScreenshotService } from './screenshot'
 import { SettingsStore } from './settings'
 import { SpeechRecognitionService } from './speech'
+import { TerminalService } from './terminal'
 import { WebTrackerService } from './web-tracker'
 
 interface Services {
@@ -53,6 +56,7 @@ interface Services {
   mcp: McpService
   gitSnapshots: GitSnapshotService
   webTracker: WebTrackerService
+  terminal: TerminalService
 }
 
 function assertTrustedSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
@@ -87,7 +91,7 @@ function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1])
 export function registerIpc(services: Services): void {
   const {
     project, pdf, search, settings, ai, screenshot, browser, speech, knowledge, calendar, diagnostics,
-    references, mcp, gitSnapshots, webTracker
+    references, mcp, gitSnapshots, webTracker, terminal
   } = services
   const requirePlugin = async (pluginId: string, permission: PluginPermission): Promise<void> => {
     const manifest = trustedPlugin(pluginId)
@@ -111,6 +115,7 @@ export function registerIpc(services: Services): void {
   handle(IPC.projectOpenPath, (_event, projectPath: string) => project.openPath(projectPath))
   handle(IPC.projectInitial, () => project.initial())
   handle(IPC.projectClose, async () => {
+    terminal.killAll()
     await project.close()
   })
   handle(IPC.projectTree, () => project.tree())
@@ -125,7 +130,11 @@ export function registerIpc(services: Services): void {
   handle(IPC.fileSaveMarkdown, (_event, filePath: string, content: string, expectedModifiedAt?: number) =>
     project.saveMarkdown(filePath, content, expectedModifiedAt)
   )
+  handle(IPC.fileSaveText, (_event, filePath: string, content: string, expectedModifiedAt?: number) =>
+    project.saveText(filePath, content, expectedModifiedAt)
+  )
   handle(IPC.fileCreateMarkdown, (_event, filePath: string, content?: string) => project.createMarkdown(filePath, content))
+  handle(IPC.fileCreateText, (_event, filePath: string, content?: string) => project.createText(filePath, content))
   handle(IPC.fileCreateFolder, (_event, filePath: string) => project.createFolder(filePath))
   handle(IPC.fileRename, (_event, filePath: string, nextName: string) => project.rename(filePath, nextName))
   handle(IPC.fileMove, (_event, filePath: string, targetFolder: string) => project.move(filePath, targetFolder))
@@ -252,9 +261,25 @@ export function registerIpc(services: Services): void {
   handle(IPC.imagesStop, (_event, requestId: string) => ai.stopImage(requestId))
 
   handle(IPC.settingsGet, () => settings.get())
-  handle(IPC.settingsSave, (_event, value: AppSettings) => settings.save(value))
+  handle(IPC.settingsSave, async (_event, value: AppSettings) => {
+    const saved = await settings.save(value)
+    if (!saved.aiShellEnabled) await terminal.revoke()
+    return saved
+  })
 
   handle(IPC.aiListModels, (_event, request: AiModelListRequest) => ai.listModels(request))
+  handle(IPC.aiCompleteCode, (_event, request: AiCodeCompletionRequest) => ai.completeCode(request))
   handle(IPC.aiStart, (event, request: AiRequest) => ai.start(event.sender, request))
   handle(IPC.aiStop, (_event, requestId: string) => ai.stop(requestId))
+
+  handle(IPC.terminalCreate, (event, request?: TerminalCreateRequest) => terminal.create(event.sender, request))
+  handle(IPC.terminalWrite, (event, sessionId: string, data: string) => terminal.write(event.sender, sessionId, data))
+  handle(IPC.terminalResize, (event, sessionId: string, cols: number, rows: number) =>
+    terminal.resize(event.sender, sessionId, cols, rows)
+  )
+  handle(IPC.terminalKill, (event, sessionId: string) => terminal.kill(event.sender, sessionId))
+  handle(IPC.terminalOpenExternal, (_event, cwd?: string) => terminal.openExternal(cwd))
+  handle(IPC.terminalAuthorizeAiShell, (event) => terminal.authorize(event.sender))
+  handle(IPC.terminalRevokeAiShell, () => terminal.revoke())
+  handle(IPC.terminalAiShellStatus, () => terminal.status())
 }

@@ -20,6 +20,14 @@ describe('project file tree', () => {
     expect(fileKind('/project/资料剪藏/Research.mht')).toBe('webarchive')
   })
 
+  it('classifies common source files and build files as editable code', () => {
+    expect(fileKind('/project/main.py')).toBe('code')
+    expect(fileKind('/project/src/app.tsx')).toBe('code')
+    expect(fileKind('/project/native/main.cpp')).toBe('code')
+    expect(fileKind('/project/Dockerfile')).toBe('code')
+    expect(fileKind('/project/config.json')).toBe('text')
+  })
+
   it('recursively includes user content and skips dependency or metadata directories', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'coscribe-tree-'))
     temporaryRoots.push(root)

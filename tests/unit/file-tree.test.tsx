@@ -51,4 +51,40 @@ describe('FileTree drag data', () => {
     expect(dataTransfer.setData).toHaveBeenCalledWith('application/x-vibe-path', node.path)
     expect(dataTransfer.effectAllowed).toBe('copyMove')
   })
+
+  it('selects on one click and opens on double click in IDE mode', () => {
+    const code: FileNode = {
+      name: 'main.py',
+      path: '/projects/demo/main.py',
+      kind: 'code',
+      size: 24,
+      modifiedAt: 1
+    }
+    const onSelect = vi.fn()
+    const onOpen = vi.fn()
+    render(
+      <FileTree
+        nodes={[code]}
+        openOnSingleClick={false}
+        selectedPath={code.path}
+        onSelect={onSelect}
+        onOpen={onOpen}
+        onRename={vi.fn()}
+        onMove={vi.fn()}
+        onTrash={vi.fn()}
+        onReveal={vi.fn()}
+        onImport={vi.fn()}
+        onMovePath={vi.fn()}
+      />
+    )
+    const row = screen.getByLabelText(code.path).closest('.tree-row')
+    expect(row).toHaveClass('is-active')
+
+    fireEvent.click(row!)
+    expect(onSelect).toHaveBeenCalledWith(code)
+    expect(onOpen).not.toHaveBeenCalled()
+
+    fireEvent.doubleClick(row!)
+    expect(onOpen).toHaveBeenCalledWith(code)
+  })
 })

@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  ShieldAlert,
   Trash2
 } from 'lucide-react'
 import {
@@ -602,6 +603,27 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
                   <label className="check-row span-2">
                     <input type="checkbox" checked={draft.projectMemoryEnabled} onChange={(event) => patch('projectMemoryEnabled', event.target.checked)} />
                     <span><strong>启用项目级长期记忆</strong><small>只读取当前项目的 COSCRIBE.md。</small></span>
+                  </label>
+                  <label className="check-row span-2">
+                    <input type="checkbox" checked={draft.aiCodeCompletionEnabled} onChange={(event) => patch('aiCodeCompletionEnabled', event.target.checked)} />
+                    <span><strong>启用 AI 代码补全</strong><small>IDE 始终可用；关闭后只停用编辑器中的 AI 补全请求。</small></span>
+                  </label>
+                </div>
+              </section>
+              <section className="settings-section">
+                <header><ShieldAlert size={16} /><div><h3>AI Shell 权限</h3><p>这是高风险能力，与普通内置终端相互独立。</p></div></header>
+                <div className="settings-grid">
+                  <label className="check-row span-2">
+                    <input type="checkbox" checked={draft.aiShellEnabled} onChange={(event) => patch('aiShellEnabled', event.target.checked)} />
+                    <span><strong>允许请求开启 AI Shell</strong><small>默认关闭。即使启用，每次打开仍必须经过风险警告和第二次确认；授权不会跨项目或应用重启保留。</small></span>
+                  </label>
+                  <label className="field-label span-2">
+                    命令确认方式
+                    <select className="field" value={draft.aiShellApprovalMode} disabled={!draft.aiShellEnabled} onChange={(event) => patch('aiShellApprovalMode', event.target.value as AppSettings['aiShellApprovalMode'])}>
+                      <option value="per-command">每条命令单独确认（推荐）</option>
+                      <option value="session">当前项目会话内授权</option>
+                    </select>
+                    <small className="field-caption">命令以当前登录用户权限运行，工作目录在项目内并不等于文件系统沙箱。</small>
                   </label>
                 </div>
               </section>

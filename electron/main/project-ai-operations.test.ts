@@ -166,6 +166,62 @@ describe('transparent project memory', () => {
   })
 })
 
+describe('v4 code file operations', () => {
+  it('creates and undoes code files through the confirmed AI operation boundary', async () => {
+    const { root, service } = await projectService()
+    const proposal = await service.prepareAiOperation({
+      kind: 'create',
+      targetPath: 'src/main.py',
+      proposedContent: 'print("hello")\n',
+      summary: '创建 Python 入口'
+    })
+
+    expect(proposal.targetPath).toBe(path.join(root, 'src', 'main.py'))
+    await expect(lstat(proposal.targetPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    const result = await service.applyAiOperation({ ...proposal, status: 'accepted' })
+    expect(result).toMatchObject({ kind: 'code', content: 'print("hello")\n' })
+    await expect(readFile(proposal.targetPath, 'utf8')).resolves.toBe('print("hello")\n')
+
+    await service.undoOperation(result.historyId)
+    await expect(lstat(proposal.targetPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('uses a frozen unsaved IDE buffer as the proposal base without skipping disk conflict checks', async () => {
+    const { root, service } = await projectService()
+    const codePath = path.join(root, 'main.ts')
+    await writeFile(codePath, 'const version = 1\n')
+    const proposal = await service.prepareAiOperation({
+      kind: 'replace',
+      targetPath: codePath,
+      proposedContent: 'const version = 3\n',
+      summary: '更新版本'
+    }, {
+      path: codePath,
+      content: 'const version = 2\n'
+    })
+
+    expect(proposal).toMatchObject({
+      kind: 'replace',
+      baseSource: 'buffer',
+      originalContent: 'const version = 2\n',
+      diskContent: 'const version = 1\n'
+    })
+    const result = await service.applyAiOperation({ ...proposal, status: 'accepted' })
+    await expect(readFile(codePath, 'utf8')).resolves.toBe('const version = 3\n')
+
+    await service.undoOperation(result.historyId)
+    await expect(readFile(codePath, 'utf8')).resolves.toBe('const version = 2\n')
+  })
+
+  it('rejects binary targets at the generic text save boundary', async () => {
+    const { root, service } = await projectService()
+    const binary = path.join(root, 'manual.pdf')
+    await writeFile(binary, '%PDF-')
+    await expect(service.saveText(binary, 'not a pdf')).rejects.toThrow('可编辑')
+    await expect(service.createText('archive.zip', 'not a zip')).rejects.toThrow('可编辑')
+  })
+})
+
 describe('generated image persistence', () => {
   const attachment: ChatImageAttachment = {
     id: 'generated-1',

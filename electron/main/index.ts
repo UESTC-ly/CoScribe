@@ -20,6 +20,7 @@ import { ReferenceMetadataService } from './references'
 import { ScreenshotService } from './screenshot'
 import { SettingsStore } from './settings'
 import { SpeechRecognitionService } from './speech'
+import { TerminalService } from './terminal'
 import { WebTrackerService } from './web-tracker'
 
 protocol.registerSchemesAsPrivileged([
@@ -91,7 +92,8 @@ let knowledge: KnowledgeIndexService
 const projectLifecycle = {
   ai: null as AiService | null,
   browser: null as ResearchBrowserService | null,
-  speech: null as SpeechRecognitionService | null
+  speech: null as SpeechRecognitionService | null,
+  terminal: null as TerminalService | null
 }
 const project = new ProjectService(
   settings,
@@ -106,13 +108,16 @@ const project = new ProjectService(
     projectLifecycle.ai?.stopAll()
     projectLifecycle.browser?.close()
     projectLifecycle.speech?.stopAll()
+    projectLifecycle.terminal?.killAll()
     knowledge?.reset()
   }
 )
+const terminal = new TerminalService(settings, project)
+projectLifecycle.terminal = terminal
 pdf = new PdfTextService(() => project.guard)
 knowledge = new KnowledgeIndexService(project, pdf)
 const search = new ProjectSearchService(project, knowledge)
-const ai = new AiService(settings, project, pdf, search)
+const ai = new AiService(settings, project, pdf, search, terminal)
 projectLifecycle.ai = ai
 const screenshot = new ScreenshotService(() => mainWindow)
 const speech = new SpeechRecognitionService()
@@ -268,7 +273,7 @@ void app.whenReady().then(() => {
   })
   registerIpc({
     project, pdf, search, settings, ai, screenshot, browser, speech, knowledge, calendar, diagnostics,
-    references, mcp, gitSnapshots, webTracker
+    references, mcp, gitSnapshots, webTracker, terminal
   })
   webTracker.start()
   protocol.handle('coscribe-app', async (request) => {
@@ -329,6 +334,7 @@ void app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   ai.stopAll()
+  terminal.killAll()
   speech.stopAll()
   browser.destroy()
   webTracker.stop()

@@ -190,6 +190,62 @@ describe('AI context scope boundaries', () => {
     expect(result.sources).toEqual([expect.objectContaining({ path: slidesPath, kind: 'pptx' })])
   })
 
+  it('uses the frozen unsaved IDE buffer and code language for current-document context', async () => {
+    const codePath = path.join(projectPath, 'src', 'main.py')
+    const { exposed } = service()
+    const result = await exposed.validatedContext(snapshot('document', {
+      documentPath: codePath,
+      documentName: 'main.py',
+      kind: 'code',
+      codeLanguage: 'Python',
+      selection: '',
+      visibleText: 'print("visible")',
+      sectionText: '',
+      documentText: 'print("UNSAVED_IDE_BUFFER")\n'
+    }), '检查当前代码')
+
+    expect(result.text).toContain('当前代码语言：Python')
+    expect(result.text).toContain('尚未保存到磁盘')
+    expect(result.text).toContain('UNSAVED_IDE_BUFFER')
+    expect(result.sources).toEqual([expect.objectContaining({ path: codePath, kind: 'code' })])
+  })
+
+  it('keeps code source identity when current-project retrieval finds source files', async () => {
+    const codePath = path.join(projectPath, 'src', 'router.ts')
+    const { exposed } = service([{
+      id: 'code-result',
+      type: 'content',
+      path: codePath,
+      title: 'router.ts',
+      excerpt: 'export const route = "/health"',
+      kind: 'code',
+      line: 7,
+      score: 95
+    }])
+    const result = await exposed.validatedContext(snapshot('project'), 'health route')
+
+    expect(result.text).toContain('export const route')
+    expect(result.sources).toEqual([expect.objectContaining({
+      path: codePath,
+      kind: 'code',
+      line: 7
+    })])
+  })
+
+  it('includes explicitly referenced code content for multi-file IDE questions', async () => {
+    const referencedCodePath = path.join(projectPath, 'src', 'helper.ts')
+    const { exposed } = service()
+    const result = await exposed.validatedContext(snapshot('document', {
+      referencedFiles: [referencedCodePath]
+    }), '比较当前文件和 helper')
+
+    expect(result.text).toContain('明确引用文件 helper.ts')
+    expect(result.text).toContain('REFERENCED_FILE')
+    expect(result.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: referencedCodePath, kind: 'code' })
+    ]))
+  })
+
   it('keeps isolated browser text and the verified web source without treating it as a project file', async () => {
     const { exposed } = service()
     const result = await exposed.validatedContext(snapshot('selection', {

@@ -18,7 +18,9 @@ export const IPC = {
   projectFilesChanged: 'project:files-changed',
   fileRead: 'file:read',
   fileSaveMarkdown: 'file:save-markdown',
+  fileSaveText: 'file:save-text',
   fileCreateMarkdown: 'file:create-markdown',
+  fileCreateText: 'file:create-text',
   fileCreateFolder: 'file:create-folder',
   fileRename: 'file:rename',
   fileMove: 'file:move',
@@ -98,9 +100,19 @@ export const IPC = {
   settingsGet: 'settings:get',
   settingsSave: 'settings:save',
   aiListModels: 'ai:list-models',
+  aiCompleteCode: 'ai:complete-code',
   aiStart: 'ai:start',
   aiStop: 'ai:stop',
-  aiStream: 'ai:stream'
+  aiStream: 'ai:stream',
+  terminalCreate: 'terminal:create',
+  terminalWrite: 'terminal:write',
+  terminalResize: 'terminal:resize',
+  terminalKill: 'terminal:kill',
+  terminalOpenExternal: 'terminal:open-external',
+  terminalAuthorizeAiShell: 'terminal:authorize-ai-shell',
+  terminalRevokeAiShell: 'terminal:revoke-ai-shell',
+  terminalAiShellStatus: 'terminal:ai-shell-status',
+  terminalEvent: 'terminal:event'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

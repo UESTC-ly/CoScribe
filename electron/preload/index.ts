@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import type {
   AiRequest,
+  AiCodeCompletionRequest,
   AiModelListRequest,
   AiOcrRequest,
   AiStreamEvent,
@@ -11,6 +12,8 @@ import type {
   ChatSession,
   FileChangeEvent,
   FileOperationProposal,
+  TerminalCreateRequest,
+  TerminalEvent,
   ScreenshotCaptureEvent,
   SpeechRecognitionEvent,
   ResearchBrowserBounds,
@@ -60,7 +63,10 @@ const api: CoScribeAPI = {
     read: (filePath: string) => ipcRenderer.invoke(IPC.fileRead, filePath),
     saveMarkdown: (filePath: string, content: string, expectedModifiedAt?: number) =>
       ipcRenderer.invoke(IPC.fileSaveMarkdown, filePath, content, expectedModifiedAt),
+    saveText: (filePath: string, content: string, expectedModifiedAt?: number) =>
+      ipcRenderer.invoke(IPC.fileSaveText, filePath, content, expectedModifiedAt),
     createMarkdown: (filePath: string, content?: string) => ipcRenderer.invoke(IPC.fileCreateMarkdown, filePath, content),
+    createText: (filePath: string, content?: string) => ipcRenderer.invoke(IPC.fileCreateText, filePath, content),
     createFolder: (filePath: string) => ipcRenderer.invoke(IPC.fileCreateFolder, filePath),
     rename: (filePath: string, nextName: string) => ipcRenderer.invoke(IPC.fileRename, filePath, nextName),
     move: (filePath: string, targetFolder: string) => ipcRenderer.invoke(IPC.fileMove, filePath, targetFolder),
@@ -180,9 +186,21 @@ const api: CoScribeAPI = {
   },
   ai: {
     listModels: (request: AiModelListRequest) => ipcRenderer.invoke(IPC.aiListModels, request),
+    completeCode: (request: AiCodeCompletionRequest) => ipcRenderer.invoke(IPC.aiCompleteCode, request),
     start: (request: AiRequest) => ipcRenderer.invoke(IPC.aiStart, request),
     stop: (requestId: string) => ipcRenderer.invoke(IPC.aiStop, requestId),
     onStream: (listener: (event: AiStreamEvent) => void) => subscribe(IPC.aiStream, listener)
+  },
+  terminal: {
+    create: (request: TerminalCreateRequest = {}) => ipcRenderer.invoke(IPC.terminalCreate, request),
+    write: (sessionId: string, data: string) => ipcRenderer.invoke(IPC.terminalWrite, sessionId, data),
+    resize: (sessionId: string, cols: number, rows: number) => ipcRenderer.invoke(IPC.terminalResize, sessionId, cols, rows),
+    kill: (sessionId: string) => ipcRenderer.invoke(IPC.terminalKill, sessionId),
+    openExternal: (cwd?: string) => ipcRenderer.invoke(IPC.terminalOpenExternal, cwd),
+    authorizeAiShell: () => ipcRenderer.invoke(IPC.terminalAuthorizeAiShell),
+    revokeAiShell: () => ipcRenderer.invoke(IPC.terminalRevokeAiShell),
+    aiShellStatus: () => ipcRenderer.invoke(IPC.terminalAiShellStatus),
+    onEvent: (listener: (event: TerminalEvent) => void) => subscribe(IPC.terminalEvent, listener)
   }
 }
 

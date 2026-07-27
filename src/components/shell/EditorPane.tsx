@@ -19,6 +19,7 @@ import type {
 import { TabStrip } from './TabStrip'
 
 const ImageViewer = lazy(() => import('../viewers/ImageViewer').then((module) => ({ default: module.ImageViewer })))
+const CodeViewer = lazy(() => import('../viewers/CodeViewer').then((module) => ({ default: module.CodeViewer })))
 const DocxViewer = lazy(() => import('../viewers/DocxViewer').then((module) => ({ default: module.DocxViewer })))
 const MarkdownViewer = lazy(() => import('../viewers/MarkdownViewer').then((module) => ({ default: module.MarkdownViewer })))
 const PdfViewer = lazy(() => import('../viewers/PdfViewer').then((module) => ({ default: module.PdfViewer })))
@@ -44,6 +45,7 @@ interface EditorPaneProps {
   onEnsureDocument: (tab: OpenTab) => Promise<void>
   onUpdateDocument: (path: string, content: string) => void
   onSaveMarkdown: (tab: OpenTab, request: MarkdownSaveRequest) => Promise<FileReadResult>
+  onSaveText: (tab: OpenTab, content: string, expectedModifiedAt: number) => Promise<FileReadResult>
   onPdfState: (path: string, state: WorkspaceState['pdf'][string]) => void
   onMarkdownState: (path: string, state: WorkspaceState['markdown'][string]) => void
   onContext: (path: string, patch: Partial<Omit<DocumentContextState, 'updatedAt'>>) => void
@@ -167,6 +169,24 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
           aiSelectionText={props.aiSelectionText}
           aiSelectionRevealToken={props.aiSelectionRevealToken}
           aiSelectionClearToken={props.aiSelectionClearToken}
+        />
+      )
+    }
+
+    if (activeTab.kind === 'code') {
+      return (
+        <CodeViewer
+          path={activeTab.path}
+          value={document.content}
+          modifiedAt={document.modifiedAt}
+          dirty={document.dirty}
+          aiCompletionEnabled={props.settings.aiCodeCompletionEnabled}
+          onChange={(content) => props.onUpdateDocument(activeTab.path, content)}
+          onSave={(content, expectedModifiedAt) =>
+            props.onSaveText(activeTab, content, expectedModifiedAt).then(() => undefined)
+          }
+          onContextChange={(context) => props.onContext(activeTab.path, context)}
+          onError={props.onError}
         />
       )
     }

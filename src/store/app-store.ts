@@ -34,6 +34,7 @@ import {
   type WorkspaceRestoreOptions
 } from '../lib/workspace-state'
 import { normalizePortablePath, samePortablePath } from '../lib/path-utils'
+import { codeLanguageForPath } from '../shared/code-files'
 
 export interface ExternalDocumentVersion {
   content: string
@@ -107,6 +108,8 @@ export interface RendererStoreActions {
   setNavSection: (section: WorkspaceState['navSection']) => void
   setNavVisible: (visible: boolean) => void
   setAiVisible: (visible: boolean) => void
+  setTerminalVisible: (visible: boolean) => void
+  setTerminalHeight: (height: number) => void
   setPanelWidths: (widths: { leftWidth?: number; aiWidth?: number }) => void
   restoreWorkspace: (persisted: unknown, options?: WorkspaceRestoreOptions) => void
   serializeWorkspace: () => WorkspaceState
@@ -459,6 +462,13 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
   setNavSection: (navSection) => set((state) => ({ workspace: { ...state.workspace, navSection } })),
   setNavVisible: (navVisible) => set((state) => ({ workspace: { ...state.workspace, navVisible } })),
   setAiVisible: (aiVisible) => set((state) => ({ workspace: { ...state.workspace, aiVisible } })),
+  setTerminalVisible: (terminalVisible) => set((state) => ({ workspace: { ...state.workspace, terminalVisible } })),
+  setTerminalHeight: (terminalHeight) => set((state) => ({
+    workspace: {
+      ...state.workspace,
+      terminalHeight: Math.max(120, Math.min(600, Math.round(terminalHeight)))
+    }
+  })),
   setPanelWidths: ({ leftWidth, aiWidth }) => set((state) => ({
     workspace: {
       ...state.workspace,
@@ -660,6 +670,7 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
       documentPath: tab?.path,
       documentName: tab?.name,
       kind: tab?.kind,
+      codeLanguage: tab?.kind === 'code' ? codeLanguageForPath(tab.path) : undefined,
       pdfPage: context?.pdfPage ?? pdfState?.page,
       visiblePages: context?.visiblePages ? [...context.visiblePages] : undefined,
       markdownHeading: context?.markdownHeading,

@@ -87,5 +87,26 @@ features. Copyright remains with the respective authors.
 - License: MIT
 - Project: https://github.com/honojs/node-server
 
+## CodeMirror and React CodeMirror
+
+- Components: `@uiw/react-codemirror` 4.25.11 and
+  `@uiw/codemirror-extensions-langs` 4.25.11
+- License: MIT
+- Project: https://github.com/uiwjs/react-codemirror
+
+## xterm.js
+
+- Components: `@xterm/xterm` 6.0.0 and `@xterm/addon-fit` 0.11.0
+- Copyright: xterm.js contributors
+- License: MIT
+- Project: https://github.com/xtermjs/xterm.js
+
+## node-pty
+
+- Component: `node-pty` 1.1.0
+- Copyright: Microsoft Corporation and contributors
+- License: MIT
+- Project: https://github.com/microsoft/node-pty
+
 Electron's own license and Chromium third-party notices are included separately
 by electron-builder in each packaged application.

@@ -34,6 +34,30 @@ describe('v2 settings boundaries', () => {
     expect(settings.activeAiProfileId).toBe('openai-default')
     expect(settings.aiProfiles.map((profile) => profile.id)).toEqual(['openai-default', 'anthropic-default'])
     expect(settings.contextAutoCompact).toBe(true)
+    expect(settings.aiCodeCompletionEnabled).toBe(true)
+    expect(settings.aiShellEnabled).toBe(false)
+    expect(settings.aiShellApprovalMode).toBe('per-command')
+  })
+
+  it('sanitizes IDE AI capability settings without enabling AI Shell implicitly', () => {
+    expect(sanitizeSettings({
+      ...DEFAULT_SETTINGS,
+      aiCodeCompletionEnabled: false,
+      aiShellEnabled: true,
+      aiShellApprovalMode: 'session'
+    })).toMatchObject({
+      aiCodeCompletionEnabled: false,
+      aiShellEnabled: true,
+      aiShellApprovalMode: 'session'
+    })
+    expect(sanitizeSettings({
+      ...DEFAULT_SETTINGS,
+      aiShellEnabled: undefined,
+      aiShellApprovalMode: 'invalid' as never
+    })).toMatchObject({
+      aiShellEnabled: false,
+      aiShellApprovalMode: 'per-command'
+    })
   })
 
   it('sanitizes Anthropic and context-window preferences', () => {

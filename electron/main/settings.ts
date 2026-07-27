@@ -261,6 +261,16 @@ export function sanitizeSettings(input: Partial<AppSettings>): SanitizedSettings
     customSystemPrompt,
     projectMemoryEnabled:
       typeof input.projectMemoryEnabled === 'boolean' ? input.projectMemoryEnabled : DEFAULT_SETTINGS.projectMemoryEnabled,
+    aiCodeCompletionEnabled:
+      typeof input.aiCodeCompletionEnabled === 'boolean'
+        ? input.aiCodeCompletionEnabled
+        : DEFAULT_SETTINGS.aiCodeCompletionEnabled,
+    aiShellEnabled:
+      typeof input.aiShellEnabled === 'boolean' ? input.aiShellEnabled : DEFAULT_SETTINGS.aiShellEnabled,
+    aiShellApprovalMode:
+      input.aiShellApprovalMode === 'session' || input.aiShellApprovalMode === 'per-command'
+        ? input.aiShellApprovalMode
+        : DEFAULT_SETTINGS.aiShellApprovalMode,
     enabledPlugins,
     pluginGrants,
     contextWindowTokens: input.contextWindowTokens === 0

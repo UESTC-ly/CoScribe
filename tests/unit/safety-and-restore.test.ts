@@ -174,6 +174,8 @@ describe('workspace serialization and recovery', () => {
     navSection: 'sessions',
     navVisible: false,
     aiVisible: false,
+    terminalVisible: true,
+    terminalHeight: 260,
     leftWidth: 5000,
     aiWidth: 10,
     currentSessionId: 'session-1'

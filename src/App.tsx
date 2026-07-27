@@ -65,6 +65,7 @@ import type {
   WebSelectionCandidate
 } from './shared/types'
 import { DEFAULT_SETTINGS } from './shared/types'
+import { isCodeFilePath } from './shared/code-files'
 import { planContextWindow } from './lib/context-window'
 import { mergeAiProgress } from './lib/ai-progress'
 import {
@@ -77,6 +78,7 @@ import './styles/shell.css'
 const AiWorkspace = lazy(() => import('./components/ai/AiWorkspace').then((module) => ({ default: module.AiWorkspace })))
 const BrowserWorkspace = lazy(() => import('./components/browser/BrowserWorkspace').then((module) => ({ default: module.BrowserWorkspace })))
 const EditorPane = lazy(() => import('./components/shell/EditorPane').then((module) => ({ default: module.EditorPane })))
+const IdeWorkspace = lazy(() => import('./components/ide/IdeWorkspace').then((module) => ({ default: module.IdeWorkspace })))
 const PlannerWorkspace = lazy(() => import('./plugins/planner/PlannerWorkspace'))
 const DailyNotesWorkspace = lazy(() => import('./plugins/daily-notes/DailyNotesWorkspace'))
 const FlashcardsWorkspace = lazy(() => import('./plugins/flashcards/FlashcardsWorkspace'))
@@ -146,6 +148,7 @@ function fileName(path: string): string {
 function inferKind(path: string): Exclude<FileKind, 'folder'> {
   const ext = path.split('.').pop()?.toLowerCase()
   if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'markdown'
+  if (isCodeFilePath(path)) return 'code'
   if (ext === 'pdf') return 'pdf'
   if (ext === 'docx') return 'docx'
   if (ext === 'pptx') return 'pptx'
@@ -233,6 +236,7 @@ export default function App(): React.JSX.Element {
   const [contextScope, setContextScope] = useState<ContextScope>(DEFAULT_SETTINGS.defaultContextScope)
   const [browserActive, setBrowserActive] = useState(false)
   const [activePluginId, setActivePluginId] = useState<string | null>(null)
+  const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null)
   const [operationHistory, setOperationHistory] = useState<AiOperationHistoryEntry[]>([])
   const [undoingOperationId, setUndoingOperationId] = useState<string | null>(null)
   const [pendingWebContext, setPendingWebContext] = useState<ContextSnapshot | null>(null)
@@ -847,6 +851,7 @@ export default function App(): React.JSX.Element {
       setStore().closeProject()
       setBrowserActive(false)
       setActivePluginId(null)
+      setSelectedTreePath(null)
       setOperationHistory([])
       setPendingWebContext(null)
       hydratedProjectPath.current = null
@@ -867,22 +872,41 @@ export default function App(): React.JSX.Element {
     }
   }, [])
 
+  const saveText = useCallback(async (tab: OpenTab, content: string, expectedModifiedAt: number) => {
+    try {
+      const result = await window.coscribe.file.saveText(tab.path, content, expectedModifiedAt)
+      setStore().markDocumentSaved(result)
+      return result
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : '保存失败，当前修改仍保留在编辑器中。'
+      setError(message)
+      throw reason
+    }
+  }, [])
+
+  const saveDirtyDocument = useCallback(async (document: ReturnType<typeof selectDirtyDocuments>[number]): Promise<void> => {
+    const result = document.kind === 'markdown'
+      ? await window.coscribe.file.saveMarkdown(document.path, document.content, document.modifiedAt)
+      : await window.coscribe.file.saveText(document.path, document.content, document.modifiedAt)
+    setStore().markDocumentSaved(result)
+  }, [])
+
   const requestCloseProject = useCallback((): void => {
     const dirty = selectDirtyDocuments(appStore.getState())
     if (!dirty.length) { void closeProjectNow(); return }
     setConfirm({
       title: '保存修改并返回首页？',
-      description: `${dirty.length} 个 Markdown 文件尚未保存。应用不会丢弃这些修改。`,
+      description: `${dirty.length} 个文档尚未保存。应用不会丢弃这些修改。`,
       confirmLabel: '保存并返回',
       onConfirm: async () => {
         for (const document of dirty) {
-          await window.coscribe.file.saveMarkdown(document.path, document.content, document.modifiedAt).then((result) => setStore().markDocumentSaved(result))
+          await saveDirtyDocument(document)
         }
         setConfirm(null)
         await closeProjectNow()
       }
     })
-  }, [closeProjectNow])
+  }, [closeProjectNow, saveDirtyDocument])
 
   const requestCloseTab = useCallback((tabId: string): void => {
     const store = appStore.getState()
@@ -894,12 +918,12 @@ export default function App(): React.JSX.Element {
       description: '关闭前会先保存到磁盘；如果磁盘文件已被外部修改，操作会被阻止。',
       confirmLabel: '保存并关闭',
       onConfirm: async () => {
-        await window.coscribe.file.saveMarkdown(tab.path, document.content, document.modifiedAt).then((result) => setStore().markDocumentSaved(result))
+        await saveDirtyDocument(document)
         setStore().closeTab(tabId)
         setConfirm(null)
       }
     })
-  }, [])
+  }, [saveDirtyDocument])
 
   const submitPrompt = async (): Promise<void> => {
     const active = prompt
@@ -916,6 +940,20 @@ export default function App(): React.JSX.Element {
       const result = await window.coscribe.file.createMarkdown(path)
       await refreshTree()
       openPath(result.path, 'markdown')
+    }
+  })
+
+  const createCodeFile = (): void => runPrompt({
+    title: '新建代码文件',
+    description: '输入项目内相对路径并包含代码扩展名，例如 src/main.py、app.ts 或 main.cpp。',
+    label: '代码文件路径',
+    placeholder: 'src/main.py',
+    confirmLabel: '创建并打开',
+    onSubmit: async (value) => {
+      const result = await window.coscribe.file.createText(value)
+      await refreshTree()
+      setSelectedTreePath(result.path)
+      openPath(result.path, result.kind === 'folder' ? inferKind(result.path) : result.kind)
     }
   })
 
@@ -1592,13 +1630,27 @@ export default function App(): React.JSX.Element {
   const acceptOperation = useCallback(async (operation: FileOperationProposal): Promise<void> => {
     setApplyingOperationId(operation.id)
     try {
+      const operations = operation.operations?.length ? operation.operations : [operation]
+      for (const item of operations) {
+        if (item.baseSource !== 'buffer') continue
+        const buffer = appStore.getState().documents[item.targetPath]
+        if (!buffer || buffer.content !== item.originalContent) {
+          throw new Error(`${fileName(item.targetPath)} 的 IDE 缓冲区在预览后已变化，请重新生成修改建议。`)
+        }
+      }
       const result = await window.coscribe.file.applyAiOperation({ ...operation, status: 'accepted' })
       updateOperation(operation.id, { status: 'accepted' })
       const files = result.files.length ? result.files : [result]
-      for (const file of files) setStore().markDocumentSaved(file)
+      const bufferPaths = new Set(operations.filter((item) => item.baseSource === 'buffer').map((item) => item.targetPath))
+      for (const file of files) {
+        if (bufferPaths.has(file.path)) setStore().loadDocument(file, true)
+        else setStore().markDocumentSaved(file)
+      }
       await refreshTree()
       await refreshOperationHistory()
-      openPath(files[0]?.path ?? result.path, 'markdown')
+      const firstPath = files[0]?.path ?? result.path
+      const firstKind = files[0]?.kind ?? result.kind
+      openPath(firstPath, firstKind === 'folder' ? inferKind(firstPath) : firstKind)
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '无法应用文件修改'
       updateOperation(operation.id, { status: 'failed', error: message })
@@ -1720,6 +1772,10 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const toggleNavigatorSection = useCallback((section: typeof state.workspace.navSection): void => {
+    if (section === 'ide') {
+      setBrowserActive(false)
+      setActivePluginId(null)
+    }
     const store = setStore()
     const next = nextNavigatorState(store.workspace, section)
     store.setNavSection(next.navSection)
@@ -1911,6 +1967,7 @@ export default function App(): React.JSX.Element {
       onEnsureDocument: ensureDocument,
       onUpdateDocument: state.updateDocument,
       onSaveMarkdown: saveMarkdown,
+      onSaveText: saveText,
       onPdfState: (path: string, value: typeof state.workspace.pdf[string]) => state.updatePdfState(path, value),
       onMarkdownState: (path: string, value: typeof state.workspace.markdown[string]) => state.updateMarkdownState(path, value),
       onContext: (path: string, patch: Parameters<typeof state.setDocumentContext>[1]) => {
@@ -1961,6 +2018,7 @@ export default function App(): React.JSX.Element {
           projectPath={state.project.path}
           tree={state.fileTree}
           activePath={activeTab?.path}
+          selectedPath={selectedTreePath ?? undefined}
           sessions={state.sessions}
           currentSessionId={state.workspace.currentSessionId}
           annotations={state.annotations}
@@ -1970,8 +2028,10 @@ export default function App(): React.JSX.Element {
           onCloseProject={requestCloseProject}
           onRefresh={() => void refreshTree()}
           onCreateMarkdown={createMarkdown}
+          onCreateCodeFile={createCodeFile}
           onCreateFolder={createFolder}
           onOpenNode={openNode}
+          onSelectNode={(node) => setSelectedTreePath(node.path)}
           onRenameNode={renameNode}
           onMoveNode={moveNode}
           onTrashNode={trashNode}
@@ -2015,6 +2075,21 @@ export default function App(): React.JSX.Element {
                 onSaved={browserFileSaved}
                 onError={setError}
               />
+            ) : state.workspace.navSection === 'ide' ? (
+              <IdeWorkspace
+                projectPath={state.project.path}
+                aiShellEnabled={state.settings.aiShellEnabled}
+                terminalVisible={state.workspace.terminalVisible}
+                terminalHeight={state.workspace.terminalHeight}
+                onTerminalVisibleChange={state.setTerminalVisible}
+                onTerminalHeightChange={state.setTerminalHeight}
+                onCreateCodeFile={createCodeFile}
+                onOpenSettings={() => openSettings('ai-behavior')}
+                onError={setError}
+              >
+                <EditorPane {...paneProps('primary', primaryTabs)} />
+                {state.workspace.split && <EditorPane {...paneProps('secondary', secondaryTabs)} />}
+              </IdeWorkspace>
             ) : activePluginId === 'planner' ? (
               <PlannerWorkspace
                 projectName={state.project.name}

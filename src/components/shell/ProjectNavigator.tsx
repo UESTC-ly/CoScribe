@@ -15,6 +15,7 @@ interface ProjectNavigatorProps {
   projectPath: string
   tree: FileNode[]
   activePath?: string
+  selectedPath?: string
   sessions: ChatSession[]
   currentSessionId: string | null
   annotations: Annotation[]
@@ -24,8 +25,10 @@ interface ProjectNavigatorProps {
   onCloseProject: () => void
   onRefresh: () => void
   onCreateMarkdown: () => void
+  onCreateCodeFile: () => void
   onCreateFolder: () => void
   onOpenNode: (node: FileNode) => void
+  onSelectNode: (node: FileNode) => void
   onRenameNode: (node: FileNode) => void
   onMoveNode: (node: FileNode) => void
   onTrashNode: (node: FileNode) => void
@@ -56,6 +59,7 @@ interface ProjectNavigatorProps {
 
 const sectionLabels: Record<NavSection, string> = {
   files: '文件',
+  ide: 'IDE 项目',
   sessions: '会话',
   search: '项目搜索',
   annotations: '标注',
@@ -141,11 +145,13 @@ export function ProjectNavigator(props: ProjectNavigatorProps): React.JSX.Elemen
         <h2>{sectionLabels[props.section]}</h2>
         <div>
           {props.section === 'files' && <><button className="icon-button" onClick={props.onCreateMarkdown} aria-label="新建 Markdown" title="新建 Markdown"><FilePlus2 size={15} /></button><button className="icon-button" onClick={props.onCreateFolder} aria-label="新建文件夹" title="新建文件夹"><FolderPlus size={15} /></button><button className="icon-button" onClick={props.onRefresh} aria-label="刷新文件树" title="刷新"><RefreshCw size={15} /></button></>}
+          {props.section === 'ide' && <><button className="icon-button" onClick={props.onCreateCodeFile} aria-label="新建代码文件" title="新建代码文件"><FilePlus2 size={15} /></button><button className="icon-button" onClick={props.onCreateFolder} aria-label="新建文件夹" title="新建文件夹"><FolderPlus size={15} /></button><button className="icon-button" onClick={props.onRefresh} aria-label="刷新文件树" title="刷新"><RefreshCw size={15} /></button></>}
           <button className="icon-button" onClick={props.onClose} aria-label="收起左侧栏" title="收起左侧栏"><PanelLeftClose size={15} /></button>
         </div>
       </div>
       <div className="navigator-content">
         {props.section === 'files' && (props.tree.length ? <FileTree nodes={props.tree} activePath={props.activePath} onOpen={props.onOpenNode} onRename={props.onRenameNode} onMove={props.onMoveNode} onTrash={props.onTrashNode} onReveal={props.onRevealNode} onImport={props.onImportFiles} onMovePath={props.onMovePath} /> : <div className="empty-state"><FilePlus2 size={23} /><strong>这个项目文件夹没有文件</strong><span>新建项目会创建空目录；已有 Markdown 请从首页使用“打开已有文件夹”。</span><button className="secondary-button" onClick={props.onCreateMarkdown}>新建 Markdown</button></div>)}
+        {props.section === 'ide' && (props.tree.length ? <FileTree nodes={props.tree} activePath={props.activePath} selectedPath={props.selectedPath} openOnSingleClick={false} onSelect={props.onSelectNode} onOpen={props.onOpenNode} onRename={props.onRenameNode} onMove={props.onMoveNode} onTrash={props.onTrashNode} onReveal={props.onRevealNode} onImport={props.onImportFiles} onMovePath={props.onMovePath} /> : <div className="empty-state"><FilePlus2 size={23} /><strong>这个项目文件夹没有文件</strong><span>新建代码文件后，单击选择、双击在 IDE 中打开。</span><button className="secondary-button" onClick={props.onCreateCodeFile}>新建代码文件</button></div>)}
         {props.section === 'sessions' && <SessionsView sessions={props.sessions} currentId={props.currentSessionId} onNew={props.onNewSession} onSelect={props.onSelectSession} onRename={props.onRenameSession} onDelete={props.onDeleteSession} />}
         {props.section === 'search' && <SearchView query={props.searchQuery} results={props.searchResults} progress={props.searchProgress} onSearch={props.onSearch} onOpen={props.onOpenSearchResult} />}
         {props.section === 'annotations' && <AnnotationsView annotations={props.annotations} onOpen={props.onOpenAnnotation} onDelete={props.onDeleteAnnotation} />}

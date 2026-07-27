@@ -29,6 +29,7 @@ export interface ContextSnapshotDraft extends ContextPriorityInput {
   pane: PaneId
   documentPath?: string
   documentName?: string
+  codeLanguage?: string
   webUrl?: string
   kind?: FileKind
   pdfPage?: number
@@ -98,6 +99,7 @@ export function captureContextSnapshot(
     pane: draft.pane,
     documentPath: draft.documentPath === undefined ? undefined : `${draft.documentPath}`,
     documentName: draft.documentName === undefined ? undefined : `${draft.documentName}`,
+    codeLanguage: draft.codeLanguage === undefined ? undefined : `${draft.codeLanguage}`,
     webUrl: draft.webUrl === undefined ? undefined : `${draft.webUrl}`,
     kind: draft.kind,
     pdfPage: draft.pdfPage,

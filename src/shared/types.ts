@@ -1,4 +1,4 @@
-export type FileKind = 'folder' | 'markdown' | 'pdf' | 'docx' | 'ppt' | 'pptx' | 'webarchive' | 'image' | 'text' | 'unsupported'
+export type FileKind = 'folder' | 'markdown' | 'code' | 'pdf' | 'docx' | 'ppt' | 'pptx' | 'webarchive' | 'image' | 'text' | 'unsupported'
 
 export interface FileNode {
   name: string
@@ -57,9 +57,11 @@ export interface WorkspaceState {
   split: boolean
   pdf: Record<string, PdfReadingState>
   markdown: Record<string, MarkdownReadingState>
-  navSection: 'files' | 'sessions' | 'search' | 'annotations' | 'memory' | 'operations' | 'plugins'
+  navSection: 'files' | 'ide' | 'sessions' | 'search' | 'annotations' | 'memory' | 'operations' | 'plugins'
   navVisible: boolean
   aiVisible: boolean
+  terminalVisible: boolean
+  terminalHeight: number
   leftWidth: number
   aiWidth: number
   currentSessionId: string | null
@@ -88,6 +90,7 @@ export interface ContextSnapshot {
   pane: PaneId
   documentPath?: string
   documentName?: string
+  codeLanguage?: string
   /** Verified http(s) URL captured by the isolated research browser. */
   webUrl?: string
   kind?: FileKind
@@ -106,7 +109,7 @@ export interface ContextSnapshot {
 export interface SourceRef {
   path: string
   label: string
-  kind: 'pdf' | 'markdown' | 'docx' | 'ppt' | 'pptx' | 'image' | 'text' | 'session' | 'web' | 'general'
+  kind: 'pdf' | 'markdown' | 'code' | 'docx' | 'ppt' | 'pptx' | 'image' | 'text' | 'session' | 'web' | 'general'
   page?: number
   heading?: string
   line?: number
@@ -115,18 +118,24 @@ export interface SourceRef {
 
 export type FileOperationKind = 'create' | 'append' | 'replace'
 
-export interface MarkdownFileOperation {
+export interface TextFileOperation {
   kind: FileOperationKind
   targetPath: string
   proposedContent: string
   originalContent?: string
+  /** Disk text captured when the proposal was based on a newer unsaved IDE buffer. */
+  diskContent?: string
+  baseSource?: 'disk' | 'buffer'
   expectedModifiedAt?: number
 }
 
-export interface FileOperationProposal extends MarkdownFileOperation {
+/** Backward-compatible alias retained for persisted v3 operation history. */
+export type MarkdownFileOperation = TextFileOperation
+
+export interface FileOperationProposal extends TextFileOperation {
   id: string
   /** Present for a multi-file proposal; legacy single-file fields above mirror the first item. */
-  operations?: MarkdownFileOperation[]
+  operations?: TextFileOperation[]
   summary: string
   status: 'pending' | 'accepted' | 'rejected' | 'failed'
   error?: string
@@ -138,6 +147,8 @@ export interface AppliedMarkdownOperation {
   beforeContent: string | null
   afterContent: string
 }
+
+export type AppliedTextOperation = AppliedMarkdownOperation
 
 export interface AiOperationHistoryEntry {
   id: string
@@ -696,6 +707,7 @@ export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'ultra', 'ma
 export type SelectableAiModel = (typeof SELECTABLE_AI_MODELS)[number]
 export type SelectableAnthropicModel = (typeof SELECTABLE_ANTHROPIC_MODELS)[number]
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
+export type AiShellApprovalMode = 'per-command' | 'session'
 
 // Native first-party hosts. Only these seed the built-in preset model lists;
 // third-party OpenAI-/Anthropic-compatible endpoints start with just their own
@@ -751,6 +763,12 @@ export interface AppSettings extends AiSettings {
   customSystemPrompt: string
   /** Whether the current project's COSCRIBE.md memory is included in AI requests. */
   projectMemoryEnabled: boolean
+  /** Inline code completions in the built-in IDE. The IDE itself is always available. */
+  aiCodeCompletionEnabled: boolean
+  /** Makes AI Shell available; every shell session still requires two fresh confirmations. */
+  aiShellEnabled: boolean
+  /** Per-command confirmation is the safest default; session grants are kept in memory only. */
+  aiShellApprovalMode: AiShellApprovalMode
   /** IDs of explicitly enabled, trusted plugins. */
   enabledPlugins: string[]
   /** Permissions accepted by the user for each enabled built-in plugin. */
@@ -787,6 +805,66 @@ export interface AiRequest {
     forceCompact?: boolean
   }
   settings?: Partial<Pick<AppSettings, 'allowGeneralKnowledge'>>
+}
+
+export interface AiCodeCompletionRequest {
+  requestId: string
+  path: string
+  language: string
+  prefix: string
+  suffix: string
+}
+
+export interface AiCodeCompletionResult {
+  requestId: string
+  completion: string
+}
+
+export type TerminalSessionKind = 'user' | 'ai'
+
+export interface TerminalSessionInfo {
+  id: string
+  kind: TerminalSessionKind
+  cwd: string
+  shell: string
+  createdAt: number
+}
+
+export interface TerminalCreateRequest {
+  cwd?: string
+  cols?: number
+  rows?: number
+}
+
+export type TerminalEvent =
+  | { sessionId: string; type: 'started'; session: TerminalSessionInfo }
+  | { sessionId: string; type: 'data'; data: string }
+  | { sessionId: string; type: 'exit'; exitCode: number; signal?: number }
+  | { sessionId: string; type: 'error'; message: string }
+
+export interface AiShellStatus {
+  enabled: boolean
+  authorized: boolean
+  approvalMode: AiShellApprovalMode
+  projectPath?: string
+}
+
+export interface AiShellCommandRequest {
+  requestId: string
+  command: string
+  cwd?: string
+  timeoutMs?: number
+}
+
+export interface AiShellCommandResult {
+  requestId: string
+  sessionId: string
+  command: string
+  cwd: string
+  output: string
+  exitCode: number
+  timedOut: boolean
+  truncated: boolean
 }
 
 export type AiRequestActivityStage =
@@ -861,7 +939,9 @@ export interface CoScribeAPI {
   file: {
     read: (path: string) => Promise<FileReadResult>
     saveMarkdown: (path: string, content: string, expectedModifiedAt?: number) => Promise<FileReadResult>
+    saveText: (path: string, content: string, expectedModifiedAt?: number) => Promise<FileReadResult>
     createMarkdown: (path: string, content?: string) => Promise<FileReadResult>
+    createText: (path: string, content?: string) => Promise<FileReadResult>
     createFolder: (path: string) => Promise<void>
     rename: (path: string, nextName: string) => Promise<string>
     move: (path: string, targetFolder: string) => Promise<string>
@@ -980,9 +1060,21 @@ export interface CoScribeAPI {
   }
   ai: {
     listModels: (request: AiModelListRequest) => Promise<AiModelListResult>
+    completeCode: (request: AiCodeCompletionRequest) => Promise<AiCodeCompletionResult>
     start: (request: AiRequest) => Promise<void>
     stop: (requestId: string) => Promise<void>
     onStream: (listener: (event: AiStreamEvent) => void) => () => void
+  }
+  terminal: {
+    create: (request?: TerminalCreateRequest) => Promise<TerminalSessionInfo>
+    write: (sessionId: string, data: string) => Promise<void>
+    resize: (sessionId: string, cols: number, rows: number) => Promise<void>
+    kill: (sessionId: string) => Promise<void>
+    openExternal: (cwd?: string) => Promise<void>
+    authorizeAiShell: () => Promise<AiShellStatus>
+    revokeAiShell: () => Promise<AiShellStatus>
+    aiShellStatus: () => Promise<AiShellStatus>
+    onEvent: (listener: (event: TerminalEvent) => void) => () => void
   }
 }
 
@@ -1000,6 +1092,8 @@ export const DEFAULT_WORKSPACE_STATE: WorkspaceState = {
   navSection: 'files',
   navVisible: true,
   aiVisible: true,
+  terminalVisible: false,
+  terminalHeight: 230,
   leftWidth: 260,
   aiWidth: 360,
   currentSessionId: null
@@ -1050,6 +1144,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoTitle: true,
   customSystemPrompt: '',
   projectMemoryEnabled: true,
+  aiCodeCompletionEnabled: true,
+  aiShellEnabled: false,
+  aiShellApprovalMode: 'per-command',
   enabledPlugins: ['planner'],
   pluginGrants: {
     planner: ['project:read', 'project:write', 'ai:request']

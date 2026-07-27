@@ -49,6 +49,7 @@ import {
   type WorkspaceState
 } from '../../src/shared/types'
 import { normalizeChatImageAttachments } from '../../src/shared/chat-images'
+import { isCodeFilePath } from '../../src/shared/code-files'
 import { DocxService } from './docx'
 import { extractPptxText } from './pptx'
 import { assertNotMetadataPath, assertSafeName, canonicalDirectory, isInside, ProjectPathGuard } from './security'
@@ -138,6 +139,7 @@ export function fileKind(filePath: string, directory = false): FileKind {
   if (directory) return 'folder'
   const extension = path.extname(filePath).toLocaleLowerCase()
   if (extension === '.md' || extension === '.markdown') return 'markdown'
+  if (isCodeFilePath(filePath)) return 'code'
   if (extension === '.pdf') return 'pdf'
   if (extension === '.docx') return 'docx'
   if (extension === '.ppt') return 'ppt'
@@ -265,11 +267,15 @@ function normalizedWorkspace(input: unknown, root: string): WorkspaceState {
     markdown: candidate.markdown && typeof candidate.markdown === 'object' ? candidate.markdown : {},
     navSection:
       candidate.navSection === 'sessions' || candidate.navSection === 'search' || candidate.navSection === 'annotations' ||
-      candidate.navSection === 'memory' || candidate.navSection === 'plugins'
+      candidate.navSection === 'memory' || candidate.navSection === 'plugins' || candidate.navSection === 'ide'
       || candidate.navSection === 'operations'
         ? candidate.navSection
         : 'files',
     aiVisible: candidate.aiVisible !== false,
+    terminalVisible: candidate.terminalVisible === true,
+    terminalHeight: typeof candidate.terminalHeight === 'number'
+      ? Math.max(120, Math.min(600, candidate.terminalHeight))
+      : fallback.terminalHeight,
     leftWidth: typeof candidate.leftWidth === 'number' ? candidate.leftWidth : fallback.leftWidth,
     aiWidth: typeof candidate.aiWidth === 'number' ? candidate.aiWidth : fallback.aiWidth,
     currentSessionId: typeof candidate.currentSessionId === 'string' ? candidate.currentSessionId : null
@@ -309,7 +315,7 @@ function metadataWebUrl(value: unknown): string | undefined {
 function normalizedContext(value: unknown, root: string): ContextSnapshot | undefined {
   if (!isRecord(value)) return undefined
   const scopes = new Set(['selection', 'visible', 'document', 'project', 'general'])
-  const kinds = new Set(['folder', 'markdown', 'pdf', 'docx', 'ppt', 'pptx', 'webarchive', 'image', 'text', 'unsupported'])
+  const kinds = new Set(['folder', 'markdown', 'code', 'pdf', 'docx', 'ppt', 'pptx', 'webarchive', 'image', 'text', 'unsupported'])
   const scope = typeof value.scope === 'string' && scopes.has(value.scope) ? value.scope as ContextSnapshot['scope'] : undefined
   if (!scope) return undefined
   const documentPath = metadataProjectPath(value.documentPath, root)
@@ -322,6 +328,7 @@ function normalizedContext(value: unknown, root: string): ContextSnapshot | unde
     pane: value.pane === 'secondary' ? 'secondary' : 'primary',
     ...(documentPath ? { documentPath } : {}),
     ...(text(value.documentName, 1_000) ? { documentName: text(value.documentName, 1_000) } : {}),
+    ...(text(value.codeLanguage, 200) ? { codeLanguage: text(value.codeLanguage, 200) } : {}),
     ...(metadataWebUrl(value.webUrl) ? { webUrl: metadataWebUrl(value.webUrl) } : {}),
     ...(typeof value.kind === 'string' && kinds.has(value.kind) ? { kind: value.kind as ContextSnapshot['kind'] } : {}),
     ...(typeof value.pdfPage === 'number' && Number.isInteger(value.pdfPage) && value.pdfPage > 0 ? { pdfPage: value.pdfPage } : {}),
@@ -339,7 +346,7 @@ function normalizedContext(value: unknown, root: string): ContextSnapshot | unde
 
 function normalizedSource(value: unknown, root: string): SourceRef | undefined {
   if (!isRecord(value)) return undefined
-  const kinds = new Set(['pdf', 'markdown', 'docx', 'ppt', 'pptx', 'image', 'text', 'session', 'web', 'general'])
+  const kinds = new Set(['pdf', 'markdown', 'code', 'docx', 'ppt', 'pptx', 'image', 'text', 'session', 'web', 'general'])
   if (typeof value.kind !== 'string' || !kinds.has(value.kind)) return undefined
   const kind = value.kind as SourceRef['kind']
   const sourcePath = kind === 'web'
@@ -363,7 +370,7 @@ function normalizedMarkdownOperation(value: unknown, root: string): MarkdownFile
   if (!isRecord(value) || (value.kind !== 'create' && value.kind !== 'append' && value.kind !== 'replace')) return undefined
   const targetPath = metadataProjectPath(value.targetPath, root)
   const proposedContent = text(value.proposedContent, MAX_AI_OPERATION_CONTENT)
-  if (!targetPath || !/\.(?:md|markdown)$/iu.test(targetPath) || proposedContent === undefined) return undefined
+  if (!targetPath || !['markdown', 'code', 'text'].includes(fileKind(targetPath)) || proposedContent === undefined) return undefined
   return {
     kind: value.kind,
     targetPath,
@@ -371,6 +378,10 @@ function normalizedMarkdownOperation(value: unknown, root: string): MarkdownFile
     ...(text(value.originalContent, MAX_AI_OPERATION_CONTENT) !== undefined
       ? { originalContent: text(value.originalContent, MAX_AI_OPERATION_CONTENT) }
       : {}),
+    ...(text(value.diskContent, MAX_AI_OPERATION_CONTENT) !== undefined
+      ? { diskContent: text(value.diskContent, MAX_AI_OPERATION_CONTENT) }
+      : {}),
+    ...(value.baseSource === 'buffer' || value.baseSource === 'disk' ? { baseSource: value.baseSource } : {}),
     ...(typeof value.expectedModifiedAt === 'number' && Number.isFinite(value.expectedModifiedAt)
       ? { expectedModifiedAt: value.expectedModifiedAt }
       : {})
@@ -590,6 +601,8 @@ function proposalOperations(proposal: FileOperationProposal): MarkdownFileOperat
         targetPath: proposal.targetPath,
         proposedContent: proposal.proposedContent,
         ...(proposal.originalContent !== undefined ? { originalContent: proposal.originalContent } : {}),
+        ...(proposal.diskContent !== undefined ? { diskContent: proposal.diskContent } : {}),
+        ...(proposal.baseSource ? { baseSource: proposal.baseSource } : {}),
         ...(proposal.expectedModifiedAt !== undefined ? { expectedModifiedAt: proposal.expectedModifiedAt } : {})
       }]
 }
@@ -599,6 +612,8 @@ function sameMarkdownOperation(left: MarkdownFileOperation, right: MarkdownFileO
     left.targetPath === right.targetPath &&
     left.proposedContent === right.proposedContent &&
     left.originalContent === right.originalContent &&
+    left.diskContent === right.diskContent &&
+    left.baseSource === right.baseSource &&
     left.expectedModifiedAt === right.expectedModifiedAt
 }
 
@@ -645,7 +660,12 @@ function normalizedOperationHistory(value: unknown, root: string): AiOperationHi
       const targetPath = metadataProjectPath(raw.targetPath, root)
       const beforeContent = raw.beforeContent === null ? null : text(raw.beforeContent, MAX_AI_OPERATION_CONTENT)
       const afterContent = text(raw.afterContent, MAX_AI_OPERATION_CONTENT)
-      if (!targetPath || !/\.(?:md|markdown)$/iu.test(targetPath) || beforeContent === undefined || afterContent === undefined) return []
+      if (
+        !targetPath ||
+        !['markdown', 'code', 'text'].includes(fileKind(targetPath)) ||
+        beforeContent === undefined ||
+        afterContent === undefined
+      ) return []
       return [{ kind: raw.kind, targetPath, beforeContent, afterContent }]
     })
     if (operations.length !== candidate.operations.length) return []
@@ -1095,7 +1115,11 @@ export class ProjectService {
           await unlink(await this.guard.existing(operation.targetPath, 'file'))
           deletedPaths.push(operation.targetPath)
         } else {
-          restoredFiles.push(await this.saveMarkdown(operation.targetPath, operation.beforeContent ?? '', current.modifiedAt))
+          restoredFiles.push(
+            fileKind(operation.targetPath) === 'markdown'
+              ? await this.saveMarkdown(operation.targetPath, operation.beforeContent ?? '', current.modifiedAt)
+              : await this.saveText(operation.targetPath, operation.beforeContent ?? '', current.modifiedAt)
+          )
         }
         completed.push(operation)
       }
@@ -1108,10 +1132,18 @@ export class ProjectService {
       for (const operation of [...completed].reverse()) {
         try {
           if (operation.kind === 'create') {
-            await this.createMarkdown(operation.targetPath, operation.afterContent)
+            if (fileKind(operation.targetPath) === 'markdown') {
+              await this.createMarkdown(operation.targetPath, operation.afterContent)
+            } else {
+              await this.createText(operation.targetPath, operation.afterContent)
+            }
           } else {
             const current = await this.read(operation.targetPath)
-            await this.saveMarkdown(operation.targetPath, operation.afterContent, current.modifiedAt)
+            if (fileKind(operation.targetPath) === 'markdown') {
+              await this.saveMarkdown(operation.targetPath, operation.afterContent, current.modifiedAt)
+            } else {
+              await this.saveText(operation.targetPath, operation.afterContent, current.modifiedAt)
+            }
           }
         } catch (rollbackError) {
           rollbackFailures.push(`${path.basename(operation.targetPath)}：${rollbackError instanceof Error ? rollbackError.message : '未知错误'}`)
@@ -1334,7 +1366,7 @@ export class ProjectService {
     let content = ''
     let html: string | undefined
     let warnings: string[] | undefined
-    if (kind === 'markdown' || kind === 'text') {
+    if (kind === 'markdown' || kind === 'code' || kind === 'text') {
       if (info.size > MAX_TEXT_FILE_SIZE) throw new Error('文本文件超过 32 MB，无法直接打开。')
       const descriptor = await this.guard.openReadOnly(canonical)
       try {
@@ -1391,7 +1423,17 @@ export class ProjectService {
 
   async saveMarkdown(inputPath: string, content: string, expectedModifiedAt?: number): Promise<FileReadResult> {
     if (typeof content !== 'string') throw new Error('Markdown 内容格式无效。')
-    const canonical = await this.guard.assertMarkdown(inputPath, true)
+    await this.guard.assertMarkdown(inputPath, true)
+    return this.saveText(inputPath, content, expectedModifiedAt)
+  }
+
+  async saveText(inputPath: string, content: string, expectedModifiedAt?: number): Promise<FileReadResult> {
+    if (typeof content !== 'string') throw new Error('文本内容格式无效。')
+    if (Buffer.byteLength(content, 'utf8') > MAX_TEXT_FILE_SIZE) throw new Error('文本文件超过 32 MB，无法保存。')
+    const canonical = await this.guard.existing(inputPath, 'file')
+    if (!['markdown', 'code', 'text'].includes(fileKind(canonical))) {
+      throw new Error('只能保存项目内可编辑的 Markdown、代码或文本文件。')
+    }
     assertNotMetadataPath(this.guard.root, canonical)
     const { mode, modifiedAt } = await this.assertUnchanged(canonical, expectedModifiedAt)
     const parentIdentity = await this.guard.identity(path.dirname(canonical), 'directory')
@@ -1400,7 +1442,7 @@ export class ProjectService {
       await this.guard.verifyIdentity(parentIdentity)
       await this.guard.verifyIdentity(targetIdentity)
       await this.assertUnchanged(canonical, modifiedAt)
-      const checked = await this.guard.assertMarkdown(canonical, true)
+      const checked = await this.guard.existing(canonical, 'file')
       if (checked !== canonical) throw new Error('写入目标在校验后发生变化。')
     }
     await atomicWrite(canonical, content, mode, verify)
@@ -1414,15 +1456,28 @@ export class ProjectService {
     scope: ProjectWriteScope = this.captureWriteScope()
   ): Promise<FileReadResult> {
     if (typeof content !== 'string') throw new Error('Markdown 内容格式无效。')
+    if (!/\.(?:md|markdown)$/iu.test(inputPath)) throw new Error('只能创建 .md 或 .markdown 文件。')
+    return this.createText(inputPath, content, scope)
+  }
+
+  async createText(
+    inputPath: string,
+    content = '',
+    scope: ProjectWriteScope = this.captureWriteScope()
+  ): Promise<FileReadResult> {
+    if (typeof content !== 'string') throw new Error('文本内容格式无效。')
+    if (Buffer.byteLength(content, 'utf8') > MAX_TEXT_FILE_SIZE) throw new Error('文本文件超过 32 MB，无法创建。')
     const guard = this.guardForWriteScope(scope)
     const verifyScope = (): void => { this.guardForWriteScope(scope) }
     const unchecked = await projectTargetAllowMissing(guard.root, inputPath)
     verifyScope()
-    if (!/\.(?:md|markdown)$/iu.test(unchecked)) throw new Error('只能创建 .md 或 .markdown 文件。')
+    if (!['markdown', 'code', 'text'].includes(fileKind(unchecked))) {
+      throw new Error('只能创建项目内可编辑的 Markdown、代码或文本文件。')
+    }
     await assertAbsent(unchecked)
     verifyScope()
     await this.ensureProjectDirectories(path.dirname(unchecked), guard, verifyScope)
-    const canonical = await guard.assertMarkdown(unchecked, false)
+    const canonical = await guard.target(unchecked)
     verifyScope()
     assertNotMetadataPath(guard.root, canonical)
     await assertAbsent(canonical)
@@ -1431,7 +1486,7 @@ export class ProjectService {
     const verify = async () => {
       verifyScope()
       await guard.verifyIdentity(parentIdentity)
-      const checked = await guard.assertMarkdown(canonical, false)
+      const checked = await guard.target(canonical)
       if (checked !== canonical) throw new Error('写入目标在校验后发生变化。')
       await assertAbsent(canonical)
       verifyScope()
@@ -1698,10 +1753,13 @@ export class ProjectService {
     }
   }
 
-  async prepareAiOperation(input: OperationInput): Promise<FileOperationProposal> {
+  async prepareAiOperation(
+    input: OperationInput,
+    bufferOverride?: { path: string; content: string }
+  ): Promise<FileOperationProposal> {
     const rawOperations = Array.isArray(input.operations) ? input.operations : [input]
     if (!rawOperations.length || rawOperations.length > MAX_AI_FILE_OPERATIONS) {
-      throw new Error(`AI 每次只能建议 1-${MAX_AI_FILE_OPERATIONS} 个 Markdown 文件操作。`)
+      throw new Error(`AI 每次只能建议 1-${MAX_AI_FILE_OPERATIONS} 个文本文件操作。`)
     }
     const prepared: MarkdownFileOperation[] = []
     let totalContent = 0
@@ -1718,9 +1776,11 @@ export class ProjectService {
 
       const mustExist = raw.kind !== 'create'
       const target = mustExist
-        ? await this.guard.assertMarkdown(raw.targetPath, true)
+        ? await this.guard.existing(raw.targetPath, 'file')
         : await projectTargetAllowMissing(this.guard.root, raw.targetPath)
-      if (!/\.(?:md|markdown)$/iu.test(target)) throw new Error('AI 只能写入 .md 或 .markdown 文件。')
+      if (!['markdown', 'code', 'text'].includes(fileKind(target))) {
+        throw new Error('AI 只能写入项目内可编辑的 Markdown、代码或文本文件。')
+      }
       assertNotMetadataPath(this.guard.root, target)
       let originalContent: string | undefined
       let expectedModifiedAt: number | undefined
@@ -1728,8 +1788,27 @@ export class ProjectService {
         const current = await this.read(target)
         totalContent += current.content.length
         if (totalContent > MAX_AI_OPERATION_TOTAL_CONTENT) throw new Error('AI 批量建议的预览内容过大，已拒绝。')
-        originalContent = current.content
+        const canonicalBufferPath = bufferOverride
+          ? await this.guard.existing(bufferOverride.path, 'file')
+          : undefined
+        const useBuffer = Boolean(
+          canonicalBufferPath === target &&
+          typeof bufferOverride?.content === 'string' &&
+          bufferOverride.content !== current.content
+        )
+        originalContent = useBuffer ? bufferOverride!.content : current.content
         expectedModifiedAt = current.modifiedAt
+        if (useBuffer) totalContent += bufferOverride!.content.length
+        if (totalContent > MAX_AI_OPERATION_TOTAL_CONTENT) throw new Error('AI 批量建议的 IDE 缓冲区内容过大，已拒绝。')
+        prepared.push({
+          kind: raw.kind,
+          targetPath: target,
+          proposedContent: raw.proposedContent,
+          originalContent,
+          ...(useBuffer ? { diskContent: current.content, baseSource: 'buffer' as const } : { baseSource: 'disk' as const }),
+          expectedModifiedAt
+        })
+        continue
       } else {
         await assertAbsent(target)
       }
@@ -1746,7 +1825,7 @@ export class ProjectService {
     if (uniqueTargets.size !== prepared.length) throw new Error('AI 批量建议包含重复的目标文件。')
     for (const operation of prepared) {
       if (prepared.some((other) => other !== operation && isInside(operation.targetPath, other.targetPath))) {
-        throw new Error('AI 批量建议把一个 Markdown 文件同时作为另一个文件的父目录。')
+        throw new Error('AI 批量建议把一个文本文件同时作为另一个文件的父目录。')
       }
     }
     const first = prepared[0]
@@ -1758,7 +1837,7 @@ export class ProjectService {
         typeof input.summary === 'string' && input.summary.trim()
           ? input.summary.trim().slice(0, 500)
           : prepared.length > 1
-            ? `写入 ${prepared.length} 个 Markdown 文件`
+            ? `写入 ${prepared.length} 个文本文件`
             : first.kind === 'create'
               ? `创建 ${path.basename(first.targetPath)}`
               : first.kind === 'append'
@@ -1798,7 +1877,7 @@ export class ProjectService {
       const current = await this.read(operation.targetPath)
       if (
         current.modifiedAt !== operation.expectedModifiedAt ||
-        current.content !== operation.originalContent
+        current.content !== (operation.diskContent ?? operation.originalContent)
       ) {
         throw new Error('文件在预览后已被修改。请重新加载并生成新的修改建议。')
       }
@@ -1810,17 +1889,25 @@ export class ProjectService {
       for (const operation of expectedOperations) {
         let result: FileReadResult
         if (operation.kind === 'create') {
-          result = await this.createMarkdown(operation.targetPath, operation.proposedContent)
+          result = fileKind(operation.targetPath) === 'markdown'
+            ? await this.createMarkdown(operation.targetPath, operation.proposedContent)
+            : await this.createText(operation.targetPath, operation.proposedContent)
         } else {
           const current = await this.read(operation.targetPath)
-          if (current.modifiedAt !== operation.expectedModifiedAt || current.content !== operation.originalContent) {
+          if (
+            current.modifiedAt !== operation.expectedModifiedAt ||
+            current.content !== (operation.diskContent ?? operation.originalContent)
+          ) {
             throw new Error('文件在批量写入期间发生变化，剩余操作已停止。')
           }
+          const baseContent = operation.originalContent ?? current.content
           const nextContent =
             operation.kind === 'append'
-              ? `${current.content}${current.content && !current.content.endsWith('\n') ? '\n' : ''}${operation.proposedContent}`
+              ? `${baseContent}${baseContent && !baseContent.endsWith('\n') ? '\n' : ''}${operation.proposedContent}`
               : operation.proposedContent
-          result = await this.saveMarkdown(operation.targetPath, nextContent, operation.expectedModifiedAt)
+          result = fileKind(operation.targetPath) === 'markdown'
+            ? await this.saveMarkdown(operation.targetPath, nextContent, operation.expectedModifiedAt)
+            : await this.saveText(operation.targetPath, nextContent, operation.expectedModifiedAt)
         }
         files.push(result)
         applied.push({ operation, result })
@@ -1842,11 +1929,12 @@ export class ProjectService {
           if (completed.operation.kind === 'create') {
             await unlink(await this.guard.existing(completed.result.path, 'file'))
           } else {
-            await this.saveMarkdown(
-              completed.result.path,
-              completed.operation.originalContent ?? '',
-              completed.result.modifiedAt
-            )
+            const rollbackContent = completed.operation.diskContent ?? completed.operation.originalContent ?? ''
+            if (fileKind(completed.result.path) === 'markdown') {
+              await this.saveMarkdown(completed.result.path, rollbackContent, completed.result.modifiedAt)
+            } else {
+              await this.saveText(completed.result.path, rollbackContent, completed.result.modifiedAt)
+            }
           }
         } catch (rollbackError) {
           rollbackFailures.push(`${path.basename(completed.result.path)}：${rollbackError instanceof Error ? rollbackError.message : '未知错误'}`)

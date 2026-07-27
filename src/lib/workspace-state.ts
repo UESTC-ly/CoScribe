@@ -11,8 +11,8 @@ import { normalizePortablePath, samePortablePath } from './path-utils'
 import { clampMarkdownOutlineWidth, PANEL_LAYOUT } from './panel-layout'
 
 const PANE_IDS: PaneId[] = ['primary', 'secondary']
-const TAB_KINDS = new Set(['markdown', 'pdf', 'docx', 'ppt', 'pptx', 'webarchive', 'image', 'text', 'unsupported'])
-const NAV_SECTIONS = new Set(['files', 'sessions', 'search', 'annotations', 'memory', 'plugins'])
+const TAB_KINDS = new Set(['markdown', 'code', 'pdf', 'docx', 'ppt', 'pptx', 'webarchive', 'image', 'text', 'unsupported'])
+const NAV_SECTIONS = new Set(['files', 'ide', 'sessions', 'search', 'annotations', 'memory', 'operations', 'plugins'])
 
 export interface WorkspaceRestoreOptions {
   /** If supplied, tabs not present in this list are retained and marked missing. */
@@ -206,6 +206,8 @@ export function restoreWorkspaceState(
     navSection,
     navVisible: value.navVisible !== false,
     aiVisible: value.aiVisible !== false,
+    terminalVisible: value.terminalVisible === true,
+    terminalHeight: finite(value.terminalHeight, DEFAULT_WORKSPACE_STATE.terminalHeight, 120, 600),
     leftWidth: finite(
       value.leftWidth,
       DEFAULT_WORKSPACE_STATE.leftWidth,

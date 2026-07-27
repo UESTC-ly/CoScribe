@@ -203,6 +203,37 @@ describe('renderer store documents and context', () => {
     expect(snapshot?.referencedFiles).toEqual(['/study/notes.md'])
     expect(store.getState().documentContexts['/study/book.pdf'].visiblePages).toEqual([16, 17])
   })
+
+  it('freezes the unsaved code buffer and language in the IDE context snapshot', () => {
+    const store = createAppStore()
+    store.getState().setProject(project)
+    store.getState().openTab(tab('code', '/study/main.py', 'code'))
+    store.getState().loadDocument(documentResult({
+      path: '/study/main.py',
+      kind: 'code',
+      content: 'print("saved")\n',
+      modifiedAt: 2,
+      size: 15
+    }))
+    store.getState().updateDocument('/study/main.py', 'print("unsaved")\n')
+    store.getState().setDocumentContext('/study/main.py', {
+      selection: 'unsaved',
+      visibleText: 'print("unsaved")',
+      documentText: 'print("unsaved")\n'
+    }, 100)
+
+    const snapshot = store.getState().captureActiveContext('document', 200)
+    store.getState().updateDocument('/study/main.py', 'print("changed later")\n')
+
+    expect(snapshot).toMatchObject({
+      documentPath: '/study/main.py',
+      kind: 'code',
+      codeLanguage: 'Python',
+      documentText: 'print("unsaved")\n',
+      scope: 'document',
+      capturedAt: 200
+    })
+  })
 })
 
 describe('renderer store session isolation', () => {

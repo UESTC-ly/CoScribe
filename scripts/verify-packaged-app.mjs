@@ -22,6 +22,7 @@ const entrySet = new Set(entries)
 const requiredEntries = [
   '/node_modules/chokidar/package.json',
   '/node_modules/mammoth/package.json',
+  '/node_modules/node-pty/package.json',
   '/node_modules/pdfjs-dist/legacy/build/pdf.mjs',
   '/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
   '/out/renderer/assets/ocr/models/PP-OCRv6_small_det_onnx_infer.tar',
@@ -86,6 +87,14 @@ for (const duplicate of ['libsherpa-onnx-cxx-api.dylib', 'libonnxruntime.dylib']
   if (existsSync(path.join(speechRuntimeRoot, duplicate))) throw new Error(`成品仍包含重复本地语音运行库：${duplicate}`)
 }
 
+const nodePtyRoot = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', 'node-pty', 'prebuilds', 'darwin-arm64')
+for (const name of ['pty.node', 'spawn-helper']) {
+  if (!existsSync(path.join(nodePtyRoot, name))) throw new Error(`成品缺少 node-pty 运行文件：${name}`)
+}
+if ((statSync(path.join(nodePtyRoot, 'spawn-helper')).mode & 0o111) === 0) {
+  throw new Error('成品中的 node-pty spawn-helper 没有可执行权限。')
+}
+
 const executablePath = path.join(appPath, 'Contents', 'MacOS', path.basename(appPath, '.app'))
 const runtimeProbe = [
   'const { createRequire } = require("node:module")',
@@ -96,9 +105,16 @@ const runtimeProbe = [
   '  import(pathToFileURL(root + "/node_modules/chokidar/index.js").href),',
   '  Promise.resolve(require(root + "/node_modules/mammoth/lib/index.js")),',
   '  import(pathToFileURL(root + "/node_modules/pdfjs-dist/legacy/build/pdf.mjs").href),',
-  '  Promise.resolve(appRequire("sherpa-onnx-node"))',
-  ']).then(([chokidar, mammoth, pdfjs, sherpa]) => {',
-  '  if (typeof chokidar.watch !== "function" || typeof mammoth.extractRawText !== "function" || typeof pdfjs.getDocument !== "function" || typeof sherpa.OnlineRecognizer !== "function") process.exit(2)',
+  '  Promise.resolve(appRequire("sherpa-onnx-node")),',
+  '  new Promise((resolve, reject) => {',
+  '    const nodePty = appRequire("node-pty")',
+  '    let output = ""',
+  '    const child = nodePty.spawn("/bin/sh", ["-lc", "printf PACKAGE_PTY_OK"], { cwd: "/tmp", cols: 80, rows: 24, env: process.env })',
+  '    child.onData((data) => { output += data })',
+  '    child.onExit(({ exitCode }) => exitCode === 0 && output.includes("PACKAGE_PTY_OK") ? resolve(nodePty) : reject(new Error(`node-pty probe failed: ${exitCode} ${output}`)))',
+  '  })',
+  ']).then(([chokidar, mammoth, pdfjs, sherpa, nodePty]) => {',
+  '  if (typeof chokidar.watch !== "function" || typeof mammoth.extractRawText !== "function" || typeof pdfjs.getDocument !== "function" || typeof sherpa.OnlineRecognizer !== "function" || typeof nodePty.spawn !== "function") process.exit(2)',
   '}).catch((error) => { console.error(error); process.exit(1) })'
 ].join('\n')
 execFileSync(executablePath, ['-e', runtimeProbe, asarPath], {

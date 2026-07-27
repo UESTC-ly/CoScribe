@@ -103,6 +103,7 @@ test.beforeEach(async () => {
     '大纲宽度应该可以按需调整。'
   ].join('\n'))
   await writeFile(path.join(projectPath, '资料.txt'), '本地项目中的普通文本文件。\n')
+  await writeFile(path.join(projectPath, 'main.py'), 'def greet(name: str) -> str:\n    return f"Hello, {name}"\n')
   await copyFile(
     path.join(appRoot, 'node_modules', 'mammoth', 'test', 'test-data', 'single-paragraph.docx'),
     path.join(projectPath, '示例文档.docx')
@@ -183,6 +184,38 @@ test('opens a real local project, searches content, and creates a standard Markd
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect.poll(async () => readFile(notePath, 'utf8')).toContain('标准 Markdown')
   await page.screenshot({ path: testInfo.outputPath('workspace.png') })
+})
+
+test('uses the project folder as an IDE while keeping AI visible and runs the built-in terminal', async ({}, testInfo) => {
+  const aiSidebar = page.locator('.ai-workspace')
+  await expect(aiSidebar).toBeVisible()
+  await page.getByRole('button', { name: 'IDE', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'IDE 工作区' })).toBeVisible()
+  await expect(aiSidebar).toBeVisible()
+
+  const codeRow = page.locator('.tree-row').filter({ hasText: 'main.py' })
+  await codeRow.click()
+  await expect(codeRow).toHaveClass(/is-active/u)
+  await expect(page.getByRole('region', { name: 'Python 代码编辑器' })).toHaveCount(0)
+  await codeRow.dblclick()
+  await expect(page.getByRole('region', { name: 'Python 代码编辑器' })).toBeVisible()
+  await expect(aiSidebar).toBeVisible()
+
+  const editor = page.locator('.code-viewer .cm-content')
+  await editor.click()
+  await editor.fill('def greet(name: str) -> str:\n    return f"Welcome, {name}"\n')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect.poll(async () => readFile(path.join(projectPath, 'main.py'), 'utf8'))
+    .toContain('Welcome')
+
+  await page.getByRole('button', { name: '打开终端', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'IDE 终端' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '启用 AI Shell', exact: true })).toBeVisible()
+  await page.locator('.terminal-panel .xterm-screen').click()
+  await page.keyboard.type("printf '%s\\n' \"$((21 * 2))\"")
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.terminal-panel .xterm-rows')).toContainText('42', { timeout: 15_000 })
+  await page.screenshot({ path: testInfo.outputPath('ide-terminal.png') })
 })
 
 test('collapses each sidebar from the control that visually belongs to it', async () => {
@@ -1414,7 +1447,7 @@ test('keeps an AI-created note on preview until the user accepts it', async () =
         },
         {
           type: 'function_call',
-          name: 'propose_markdown_operation',
+          name: 'propose_workspace_operation',
           arguments: JSON.stringify({
             kind: 'create',
             targetPath: 'AI 生成笔记.md',
@@ -1459,7 +1492,7 @@ test('keeps an AI-created note on preview until the user accepts it', async () =
     expect(requestPath).toBe('/responses')
     expect(capturedRequest?.['messages']).toBeUndefined()
     expect(capturedRequest?.['reasoning']).toEqual({ effort: 'medium' })
-    expect(JSON.stringify(capturedRequest?.['tools'])).toContain('propose_markdown_operation')
+    expect(JSON.stringify(capturedRequest?.['tools'])).toContain('propose_workspace_operation')
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
