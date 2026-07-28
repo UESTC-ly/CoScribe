@@ -1,8 +1,12 @@
+import { AI_CODE_COMPLETION_LIMITS } from '../shared/types'
+
 export const AUTO_COMPLETION_DELAY_MS = 160
 export const MAX_AI_COMPLETION_PREFIX_CHARS = 12_000
 export const MAX_AI_COMPLETION_SUFFIX_CHARS = 4_000
 export const MAX_AI_COMPLETION_CONTEXT_CHARS = 8_000
-export const MAX_INLINE_COMPLETION_CHARS = 2_048
+export const MAX_INLINE_COMPLETION_CHARS = Math.max(
+  ...Object.values(AI_CODE_COMPLETION_LIMITS).map((limits) => limits.maxChars)
+)
 
 export interface AiCompletionContext {
   prefix: string
@@ -138,8 +142,16 @@ export function buildAiCompletionContext(documentText: string, cursor: number): 
 
 export function canRequestAutoCompletion(documentText: string, cursor: number, selectionEmpty: boolean): boolean {
   if (!selectionEmpty || cursor < 0 || cursor > documentText.length) return false
-  const line = documentText.slice(0, cursor).split(/\r?\n/u).at(-1)?.trim() ?? ''
-  return Boolean(line) && /[\p{L}\p{N}_$)\]}"'`.,:=>+\-*/]/u.test(line)
+  const beforeCursor = documentText.slice(0, cursor)
+  const lines = beforeCursor.split(/\r?\n/u)
+  const line = lines.at(-1)?.trim() ?? ''
+  if (line) return /[\p{L}\p{N}_$)\]}"'`.,:=>+\-*/]/u.test(line)
+
+  // Pressing Enter creates an empty current line. The preceding non-empty line
+  // is enough context to suggest the next statement, but multiple blank lines
+  // still avoid unnecessary model requests.
+  const previousLine = lines.at(-2)?.trim() ?? ''
+  return Boolean(previousLine) && /[\p{L}\p{N}_$)\]}"'`.,:=>+\-*/]/u.test(previousLine)
 }
 
 export function localCodeCompletionOptions(documentText: string, language: string): LocalCodeCompletionOption[] {
@@ -183,10 +195,42 @@ export function normalizeInlineCompletion(value: string): string | null {
   return completion.trim() ? completion : null
 }
 
-export function normalizeInlineCompletionFragment(value: string): string | null {
+function stripEchoedPrefix(value: string, prefix: string): string {
+  const currentLine = prefix.slice(prefix.lastIndexOf('\n') + 1)
+  const candidates = [prefix, currentLine]
+    .filter((candidate, index, values) => candidate.trim().length >= 4 && values.indexOf(candidate) === index)
+
+  for (const candidate of candidates) {
+    if (value.startsWith(candidate)) return value.slice(candidate.length)
+    if (value.length < candidate.length && candidate.startsWith(value)) return ''
+  }
+  return value
+}
+
+function stripSuffixOverlap(value: string, suffix: string): string {
+  const maximum = Math.min(value.length, suffix.length)
+  for (let length = maximum; length > 0; length -= 1) {
+    if (value.endsWith(suffix.slice(0, length))) return value.slice(0, -length)
+  }
+  return value
+}
+
+/**
+ * Keeps AI output insertion-only even when a provider repeats the prompt
+ * context around the cursor. This is applied to both streamed and final text.
+ */
+export function normalizeInlineCompletionForInsertion(value: string, prefix: string, suffix: string): string | null {
+  const normalized = normalizeInlineCompletion(value)
+  if (!normalized) return null
+  const withoutPrefix = stripEchoedPrefix(normalized, prefix)
+  const withoutSuffix = stripSuffixOverlap(withoutPrefix, suffix)
+  return withoutSuffix.trim() ? withoutSuffix : null
+}
+
+export function normalizeInlineCompletionFragment(value: string, prefix = '', suffix = ''): string | null {
   const normalized = value.replace(/\r\n?/gu, '\n').slice(0, MAX_INLINE_COMPLETION_CHARS)
   if (/^```[^\n]*$/u.test(normalized)) return null
-  return normalizeInlineCompletion(normalized)
+  return normalizeInlineCompletionForInsertion(normalized, prefix, suffix)
 }
 
 export function completionSnapshotMatches(

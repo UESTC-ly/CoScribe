@@ -181,6 +181,8 @@ export function EditorPane(props: EditorPaneProps): React.JSX.Element {
           modifiedAt={document.modifiedAt}
           dirty={document.dirty}
           aiCompletionEnabled={props.settings.aiCodeCompletionEnabled}
+          autoSave={props.settings.codeAutoSave}
+          autoSaveDelayMs={props.settings.codeAutoSaveDelay}
           onChange={(content) => props.onUpdateDocument(activeTab.path, content)}
           onSave={(content, expectedModifiedAt) =>
             props.onSaveText(activeTab, content, expectedModifiedAt).then(() => undefined)

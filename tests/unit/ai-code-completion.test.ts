@@ -9,6 +9,7 @@ import {
   completionSnapshotMatches,
   localCodeCompletionOptions,
   normalizeInlineCompletion,
+  normalizeInlineCompletionForInsertion,
   normalizeInlineCompletionFragment
 } from '../../src/lib/ai-code-completion'
 
@@ -18,6 +19,8 @@ describe('automatic AI code completion', () => {
     expect(AUTO_COMPLETION_DELAY_MS).toBeLessThanOrEqual(200)
     expect(canRequestAutoCompletion('x', 1, true)).toBe(true)
     expect(canRequestAutoCompletion('\n', 1, true)).toBe(false)
+    expect(canRequestAutoCompletion('result = value\n', 15, true)).toBe(true)
+    expect(canRequestAutoCompletion('result = value\n  ', 17, true)).toBe(true)
     expect(canRequestAutoCompletion('result = ', 9, true)).toBe(true)
     expect(canRequestAutoCompletion('result = ', 9, false)).toBe(false)
     expect(canRequestAutoCompletion('result = ', 99, true)).toBe(false)
@@ -29,6 +32,16 @@ describe('automatic AI code completion', () => {
     expect(normalizeInlineCompletionFragment('```python')).toBeNull()
     expect(normalizeInlineCompletionFragment('```python\nreturn value')).toBe('return value')
     expect(normalizeInlineCompletion(' \n\t')).toBeNull()
+  })
+
+  it('keeps the ghost text insertion-only when a model echoes cursor context', () => {
+    const prefix = 'function total() {\n  '
+    const suffix = '\n}\n'
+    const echoed = `${prefix}return items.length${suffix}`
+
+    expect(normalizeInlineCompletionForInsertion(echoed, prefix, suffix)).toBe('return items.length')
+    expect(normalizeInlineCompletionFragment('function total', prefix, suffix)).toBeNull()
+    expect(normalizeInlineCompletionForInsertion('return items.length\n}\n', prefix, suffix)).toBe('return items.length')
   })
 
   it('builds a bounded fill-in-the-middle context with imports and symbols', () => {

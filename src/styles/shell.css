@@ -265,13 +265,30 @@
 .code-viewer__completion-status { min-height: 27px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 2px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
 .code-viewer__completion-status.is-requesting { color: var(--accent); }
 .code-viewer__completion-status.is-ready { color: var(--accent); font-weight: 650; }
-.code-viewer .cm-ai-inline-completion { color: color-mix(in srgb, var(--text-muted) 68%, transparent); font-style: italic; pointer-events: none; white-space: pre; }
+.code-viewer .cm-ai-inline-completion { color: var(--code-inline); font-style: italic; pointer-events: none; white-space: pre; }
 .code-viewer > .cm-theme { min-height: 0; height: 100%; overflow: hidden; }
-.code-viewer .cm-editor { height: 100%; background: var(--bg-content); color: var(--text); font: 12px/1.55 var(--font-mono); }
+.code-viewer .cm-editor { height: 100%; background: var(--bg-content) !important; color: var(--text); font: 12px/1.55 var(--font-mono); }
 .code-viewer .cm-scroller { overflow: auto; font-family: var(--font-mono); }
-.code-viewer .cm-gutters { color: var(--text-muted); background: var(--bg-panel); border-right-color: var(--border); }
+.code-viewer .cm-content { caret-color: var(--code-caret); }
+.code-viewer .cm-cursor,
+.code-viewer.cm-focused .cm-cursor,
+.code-viewer .cm-dropCursor { border-left-color: var(--code-caret) !important; border-left-width: 2px; }
+.code-viewer .cm-selectionBackground,
+.code-viewer .cm-content ::selection { background: var(--code-selection) !important; }
+.code-viewer .cm-gutters { color: var(--text-muted); background: var(--bg-panel) !important; border-right-color: var(--border); }
 .code-viewer .cm-activeLine,
-.code-viewer .cm-activeLineGutter { background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
+.code-viewer .cm-activeLineGutter { background: color-mix(in srgb, var(--accent-soft) 40%, transparent) !important; }
+.code-viewer .cm-tooltip-autocomplete {
+  overflow: hidden;
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-panel);
+}
+.code-viewer .cm-tooltip-autocomplete > ul > li { color: var(--text-secondary); }
+.code-viewer .cm-tooltip-autocomplete > ul > li[aria-selected] { color: var(--text); background: var(--accent-soft); }
+.code-viewer .cm-completionDetail { color: var(--text-muted); }
 .missing-file { height: 100%; display: grid; place-content: center; justify-items: center; gap: 8px; text-align: center; color: var(--text-muted); }
 .missing-file strong { color: var(--warning); }
 

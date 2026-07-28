@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { langs } from '@uiw/codemirror-extensions-langs'
 import {
@@ -19,7 +19,7 @@ import {
   canRequestAutoCompletion,
   completionSnapshotMatches,
   localCodeCompletionOptions,
-  normalizeInlineCompletion,
+  normalizeInlineCompletionForInsertion,
   normalizeInlineCompletionFragment
 } from '../../lib/ai-code-completion'
 
@@ -35,6 +35,8 @@ interface CodeViewerProps {
   modifiedAt: number
   dirty: boolean
   aiCompletionEnabled: boolean
+  autoSave: boolean
+  autoSaveDelayMs: number
   onChange: (content: string) => void
   onSave: (content: string, expectedModifiedAt: number) => Promise<void>
   onContextChange: (context: CodeViewerContext) => void
@@ -52,6 +54,8 @@ interface ActiveCompletionRequest {
   cursor: number
   generation: number
   streamedCompletion: string
+  prefix: string
+  suffix: string
 }
 
 const setInlineCompletion = StateEffect.define<InlineCompletion | null>()
@@ -155,12 +159,31 @@ function languageExtension(path: string): ReturnType<(typeof langs)[keyof typeof
   return factory ? [factory()] : []
 }
 
+function currentCodeMirrorTheme(): 'light' | 'dark' {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
+}
+
+function useCodeMirrorTheme(): 'light' | 'dark' {
+  const [theme, setTheme] = useState(currentCodeMirrorTheme)
+
+  useEffect(() => {
+    const root = document.documentElement
+    const observer = new MutationObserver(() => setTheme(currentCodeMirrorTheme()))
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => observer.disconnect()
+  }, [])
+
+  return theme
+}
+
 export function CodeViewer({
   path,
   value,
   modifiedAt,
   dirty,
   aiCompletionEnabled,
+  autoSave,
+  autoSaveDelayMs,
   onChange,
   onSave,
   onContextChange,
@@ -173,6 +196,7 @@ export function CodeViewer({
   const [saving, setSaving] = useState(false)
   const [completionStatus, setCompletionStatus] = useState<'idle' | 'waiting' | 'requesting' | 'ready'>('idle')
   const language = codeLanguageForPath(path)
+  const codeMirrorTheme = useCodeMirrorTheme()
   const extensions = useMemo<Extension[]>(
     () => [...languageExtension(path), inlineCompletionExtension, localCompletionExtension(language)],
     [language, path]
@@ -212,7 +236,11 @@ export function CodeViewer({
     }
     if (event.type === 'delta') {
       active.streamedCompletion += event.text
-      const completion = normalizeInlineCompletionFragment(active.streamedCompletion)
+      const completion = normalizeInlineCompletionFragment(
+        active.streamedCompletion,
+        active.prefix,
+        active.suffix
+      )
       if (!completion) return
       closeCompletion(view)
       view.dispatch({ effects: setInlineCompletion.of({ anchor: active.cursor, text: completion }) })
@@ -226,7 +254,7 @@ export function CodeViewer({
     }
   }), [onError])
 
-  const save = async (): Promise<void> => {
+  const save = useCallback(async (): Promise<void> => {
     if (saving || !dirty) return
     setSaving(true)
     try {
@@ -236,7 +264,15 @@ export function CodeViewer({
     } finally {
       setSaving(false)
     }
-  }
+  }, [dirty, modifiedAt, onError, onSave, saving, value])
+
+  useEffect(() => {
+    if (!autoSave || !dirty || saving) return
+    const timeout = window.setTimeout(() => {
+      void save()
+    }, Math.max(250, autoSaveDelayMs))
+    return () => window.clearTimeout(timeout)
+  }, [autoSave, autoSaveDelayMs, dirty, save, saving, value])
 
   const scheduleAutoCompletion = (view: EditorView): void => {
     invalidateAutoCompletion(view)
@@ -270,7 +306,9 @@ export function CodeViewer({
         documentText,
         cursor,
         generation,
-        streamedCompletion: ''
+        streamedCompletion: '',
+        prefix: context.prefix,
+        suffix: context.suffix
       }
       void window.coscribe.ai.completeCode({
         requestId,
@@ -287,13 +325,23 @@ export function CodeViewer({
           documentText,
           cursor
         )) return
-        const completion = normalizeInlineCompletion(result.completion)
+        const completion = normalizeInlineCompletionForInsertion(
+          result.completion,
+          active.prefix,
+          active.suffix
+        )
         if (!completion) {
           activeCompletionRef.current = null
           setCompletionStatus('idle')
           return
         }
-        if (normalizeInlineCompletion(active.streamedCompletion) !== completion) {
+        if (
+          normalizeInlineCompletionForInsertion(
+            active.streamedCompletion,
+            active.prefix,
+            active.suffix
+          ) !== completion
+        ) {
           closeCompletion(latestView)
           latestView.dispatch({
             effects: setInlineCompletion.of({ anchor: cursor, text: completion })
@@ -334,7 +382,9 @@ export function CodeViewer({
               ? 'AI 代码补全已在设置中关闭'
               : completionStatus === 'ready'
                 ? '按 Tab 接受建议；继续输入会刷新建议'
-                : '本地补全即时显示；输入停顿后自动生成 AI 内联建议'}
+                : autoSave && dirty
+                  ? `本地补全即时显示；代码将在停止输入后约 ${autoSaveDelayMs} ms 自动保存`
+                  : '本地补全即时显示；输入停顿后自动生成 AI 内联建议'}
           >
             <Sparkles size={13} />
             {!aiCompletionEnabled
@@ -343,7 +393,9 @@ export function CodeViewer({
                 ? '正在生成建议…'
                 : completionStatus === 'ready'
                   ? '按 Tab 接受'
-                  : '本地补全 + AI'}
+                  : autoSave && dirty
+                    ? '等待自动保存'
+                    : '本地补全 + AI'}
           </span>
           <button type="button" className="primary-button" disabled={!dirty || saving} onClick={() => void save()}>
             {dirty ? <Save size={13} /> : <Check size={13} />}{saving ? '保存中…' : dirty ? '保存' : '已保存'}
@@ -366,6 +418,7 @@ export function CodeViewer({
           bracketMatching: true,
           closeBrackets: true
         }}
+        theme={codeMirrorTheme}
         onChange={onChange}
         onUpdate={(update) => {
           viewRef.current = update.view

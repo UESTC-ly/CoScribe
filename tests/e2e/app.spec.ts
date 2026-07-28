@@ -205,8 +205,24 @@ test('uses the project folder as an IDE while keeping AI visible and runs the bu
   await editor.click()
   await editor.fill('def greet(name: str) -> str:\n    return f"Welcome, {name}"\n')
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect.poll(async () => readFile(path.join(projectPath, 'main.py'), 'utf8'))
+  const codePath = path.join(projectPath, 'main.py')
+  await expect.poll(async () => readFile(codePath, 'utf8'))
     .toContain('Welcome')
+  const manuallySaved = await readFile(codePath, 'utf8')
+
+  await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+  await page.getByLabel('代码保存间隔').fill('300')
+  await page.getByLabel('自动保存代码文件').uncheck()
+  await page.getByRole('button', { name: '保存设置' }).click()
+  await editor.fill('def stays_in_buffer() -> str:\n    return "not saved yet"\n')
+  await page.waitForTimeout(650)
+  expect(await readFile(codePath, 'utf8')).toBe(manuallySaved)
+
+  await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+  await page.getByLabel('自动保存代码文件').check()
+  await page.getByRole('button', { name: '保存设置' }).click()
+  await expect.poll(async () => readFile(codePath, 'utf8'))
+    .toContain('def stays_in_buffer')
 
   await page.getByRole('button', { name: '打开终端', exact: true }).click()
   await expect(page.getByRole('region', { name: 'IDE 终端' })).toBeVisible()
@@ -216,6 +232,40 @@ test('uses the project folder as an IDE while keeping AI visible and runs the bu
   await page.keyboard.press('Enter')
   await expect(page.locator('.terminal-panel .xterm-rows')).toContainText('42', { timeout: 15_000 })
   await page.screenshot({ path: testInfo.outputPath('ide-terminal.png') })
+
+  await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+  await page.getByLabel('主题').selectOption('dark')
+  await page.getByRole('button', { name: '保存设置' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await editor.click()
+  await expect.poll(async () => page.locator('.code-viewer .cm-editor').evaluate((element) => {
+    const cursor = element.querySelector('.cm-cursor')
+    return {
+      background: getComputedStyle(element).backgroundColor,
+      color: getComputedStyle(element).color,
+      cursor: cursor ? getComputedStyle(cursor).borderLeftColor : ''
+    }
+  })).toEqual({
+    background: 'rgb(32, 35, 43)',
+    color: 'rgb(239, 240, 244)',
+    cursor: 'rgb(242, 198, 109)'
+  })
+  await page.screenshot({ path: testInfo.outputPath('ide-dark-theme.png') })
+
+  await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: /AI 行为/u }).click()
+  await expect(page.getByLabel('代码补全服务商')).toBeVisible()
+  await expect(page.getByLabel('代码补全模型')).toBeVisible()
+  await expect(page.getByLabel('单次补全长度')).toBeVisible()
+  await expect.poll(async () => page.getByLabel('代码补全模型').evaluate((element) => ({
+    background: getComputedStyle(element).backgroundColor,
+    color: getComputedStyle(element).color
+  }))).toEqual({
+    background: 'rgb(32, 35, 43)',
+    color: 'rgb(194, 197, 207)'
+  })
+  await page.screenshot({ path: testInfo.outputPath('code-completion-settings-dark.png') })
+  await page.getByRole('button', { name: '取消' }).click()
 })
 
 test('offers inline AI code completions automatically, accepts Tab, and refreshes after further typing', async ({}, testInfo) => {
@@ -225,7 +275,11 @@ test('offers inline AI code completions automatically, accepts Tab, and refreshe
     for await (const chunk of request) chunks.push(Buffer.from(chunk))
     const body = Buffer.concat(chunks).toString('utf8')
     completionRequests.push(body)
-    const completion = body.includes('message = f') ? '"updated"' : '"draft"'
+    const completion = body.includes('const source = 1')
+      ? 'const generated = source\n'
+      : body.includes('message = f')
+        ? '"updated"'
+        : '"draft"'
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' })
     setTimeout(() => {
       if (response.destroyed || response.writableEnded) return
@@ -251,6 +305,8 @@ test('offers inline AI code completions automatically, accepts Tab, and refreshe
       await window.coscribe.settings.save({
         ...settings,
         aiCodeCompletionEnabled: true,
+        codeAutoSave: true,
+        codeAutoSaveDelay: 300,
         aiProfiles: settings.aiProfiles.map((profile) => profile.id === activeProfile.id
           ? {
               ...profile,
@@ -285,6 +341,12 @@ test('offers inline AI code completions automatically, accepts Tab, and refreshe
     await page.keyboard.type('\nmessage = f')
     await expect(ghost).toHaveText('"updated"', { timeout: 10_000 })
     expect(completionRequests.filter((body) => body.includes('message =')).length).toBeGreaterThanOrEqual(2)
+
+    await editor.fill('const source = 1\n')
+    await expect(ghost).toHaveText('const generated = source\n', { timeout: 10_000 })
+    await page.keyboard.press('Tab')
+    await expect.poll(async () => readFile(path.join(projectPath, 'main.py'), 'utf8'))
+      .toBe('const source = 1\nconst generated = source\n')
     await page.screenshot({ path: testInfo.outputPath('inline-ai-completion.png') })
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))

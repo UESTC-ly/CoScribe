@@ -90,7 +90,8 @@ flowchart LR
 
 ### IDE、终端与 AI Shell
 
-- IDE 直接使用当前项目文件夹，不创建另一份工程数据。代码编辑器支持 `Cmd/Ctrl + S` 保存和双通道补全：本地关键字与当前文件符号立即显示为列表；AI 在输入短暂停顿后以流式内联建议显示。AI 建议可见时按 `Tab` 接受，否则 `Tab` 接受本地候选或执行缩进；继续输入或移动光标会取消旧 AI 请求并刷新建议。
+- IDE 直接使用当前项目文件夹，不创建另一份工程数据。代码编辑器支持 `Cmd/Ctrl + S` 保存，以及独立的代码自动保存开关和间隔。
+- 双通道补全会保留本地关键字与当前文件符号列表；AI 在有效代码或其后的新行短暂停顿后显示流式内联建议。AI 补全可以单独选择服务商、模型和生成长度；建议可见时按 `Tab` 接受，否则 `Tab` 接受本地候选或执行缩进，继续输入或移动光标会取消旧请求并刷新建议。
 - 底部终端可在项目路径中运行命令；工具栏也可以唤起系统终端。
 - 普通终端不会自动授权 AI。AI Shell 默认关闭，需要先在“设置 → AI 行为”启用 AI Shell 功能；此开关只显示开启入口，不会授权 AI 或执行命令。
 - 每次点击“开启 AI Shell”都会先显示风险警告，再显示第二次确认。授权只绑定当前项目和当前应用会话；关闭终端、项目或应用会撤销。
@@ -159,7 +160,7 @@ const note: LearningNote = {
 4. Use **Organize notes** when you want AI to choose an appropriate project location and create durable Markdown notes.
 5. Use the copy button on code blocks, paste images into chat, or press `Cmd/Ctrl + Shift + D` for a manual region screenshot.
 
-The **IDE** rail entry switches only the center workspace and keeps the AI sidebar intact. Code files are selected with one click and opened with a double click. The editor provides immediate local keyword/symbol candidates plus optional streamed AI inline completion; a visible AI suggestion owns `Tab`, otherwise `Tab` accepts a local candidate or indents. The bottom terminal is independent from AI Shell. AI Shell is off by default, requires a risk warning plus a second confirmation every time it is opened, and defaults to per-command approval.
+The **IDE** rail entry switches only the center workspace and keeps the AI sidebar intact. Code files are selected with one click and opened with a double click. Code autosave has its own toggle and delay. The editor keeps immediate local keyword/symbol candidates while optional AI inline completion can use a separate provider, model, and output length; valid code and the following new line can trigger a suggestion. A visible AI suggestion owns `Tab`, otherwise `Tab` accepts a local candidate or indents. The bottom terminal is independent from AI Shell. AI Shell is off by default, requires a risk warning plus a second confirmation every time it is opened, and defaults to per-command approval.
 
 The OpenAI-compatible and Anthropic Messages profiles are stored separately. The lower-right switcher only shows models already fetched and enabled for the selected provider. The research browser keeps up to 10 tabs plus local history and persistent login cookies; selecting webpage text creates a removable chat candidate. The context meter shows estimated input usage and output reserve; request-only compaction never deletes the visible chat history. Re-click any active left rail icon to collapse its panel.
 

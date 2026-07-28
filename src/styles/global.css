@@ -22,6 +22,9 @@
   --success: #2f826d;
   --diff-add-bg: #e3f0ec;
   --diff-remove-bg: #f7e3e8;
+  --code-caret: #4d42bd;
+  --code-inline: #66758d;
+  --code-selection: #d8d3fb;
   --shadow-panel: 0 1px 2px rgb(31 36 48 / 5%), 0 8px 24px rgb(31 36 48 / 4%);
   --font-ui: "Avenir Next", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
   --font-display: "SF Pro Display", "Avenir Next", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
@@ -61,6 +64,9 @@
   --success: #76c8a7;
   --diff-add-bg: #203a32;
   --diff-remove-bg: #422d34;
+  --code-caret: #f2c66d;
+  --code-inline: #c0c8da;
+  --code-selection: #554d82;
   --shadow-panel: 0 1px 2px rgb(0 0 0 / 22%), 0 12px 28px rgb(0 0 0 / 18%);
   color-scheme: dark;
 }
@@ -69,6 +75,7 @@
 html, body, #root { width: 100%; height: 100%; margin: 0; }
 body { overflow: hidden; background: var(--bg-app); }
 button, input, textarea, select { font: inherit; color: inherit; }
+select option { color: var(--text); background: var(--bg-elevated); }
 h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); letter-spacing: 0; }
 :where(
   button:not(:disabled),

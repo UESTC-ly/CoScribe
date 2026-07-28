@@ -2,9 +2,11 @@ import { app, safeStorage } from 'electron'
 import path from 'node:path'
 
 import {
+  AI_CODE_COMPLETION_LENGTHS,
   DEFAULT_SETTINGS,
   REASONING_EFFORTS,
   defaultEnabledModels,
+  type AiCodeCompletionLength,
   type AiProtocol,
   type AiProvider,
   type AiProviderProfile,
@@ -221,6 +223,18 @@ export function sanitizeSettings(input: Partial<AppSettings>): SanitizedSettings
   const customSystemPrompt = typeof input.customSystemPrompt === 'string'
     ? input.customSystemPrompt.trim().slice(0, MAX_CUSTOM_SYSTEM_PROMPT_CHARS)
     : DEFAULT_SETTINGS.customSystemPrompt
+  const completionProfileId = typeof input.aiCodeCompletionProfileId === 'string' &&
+    profiles.some((profile) => profile.id === input.aiCodeCompletionProfileId)
+    ? input.aiCodeCompletionProfileId
+    : ''
+  const completionModel = typeof input.aiCodeCompletionModel === 'string'
+    ? input.aiCodeCompletionModel.trim().slice(0, 200)
+    : DEFAULT_SETTINGS.aiCodeCompletionModel
+  const completionLength: AiCodeCompletionLength = AI_CODE_COMPLETION_LENGTHS.includes(
+    input.aiCodeCompletionLength as AiCodeCompletionLength
+  )
+    ? input.aiCodeCompletionLength as AiCodeCompletionLength
+    : DEFAULT_SETTINGS.aiCodeCompletionLength
   const enabledPlugins = Array.isArray(input.enabledPlugins)
     ? [...new Set(input.enabledPlugins.filter((id): id is string => typeof id === 'string' && TRUSTED_PLUGIN_IDS.has(id)))]
     : [...DEFAULT_SETTINGS.enabledPlugins]
@@ -254,6 +268,13 @@ export function sanitizeSettings(input: Partial<AppSettings>): SanitizedSettings
     defaultProjectPath: typeof input.defaultProjectPath === 'string' ? input.defaultProjectPath.trim() : '',
     autoSave: typeof input.autoSave === 'boolean' ? input.autoSave : DEFAULT_SETTINGS.autoSave,
     autoSaveDelay: clampedInteger(input.autoSaveDelay, DEFAULT_SETTINGS.autoSaveDelay, 250, 60_000),
+    codeAutoSave: typeof input.codeAutoSave === 'boolean' ? input.codeAutoSave : DEFAULT_SETTINGS.codeAutoSave,
+    codeAutoSaveDelay: clampedInteger(
+      input.codeAutoSaveDelay,
+      DEFAULT_SETTINGS.codeAutoSaveDelay,
+      250,
+      60_000
+    ),
     defaultContextScope: context,
     allowGeneralKnowledge:
       typeof input.allowGeneralKnowledge === 'boolean' ? input.allowGeneralKnowledge : DEFAULT_SETTINGS.allowGeneralKnowledge,
@@ -265,6 +286,9 @@ export function sanitizeSettings(input: Partial<AppSettings>): SanitizedSettings
       typeof input.aiCodeCompletionEnabled === 'boolean'
         ? input.aiCodeCompletionEnabled
         : DEFAULT_SETTINGS.aiCodeCompletionEnabled,
+    aiCodeCompletionProfileId: completionProfileId,
+    aiCodeCompletionModel: completionModel,
+    aiCodeCompletionLength: completionLength,
     aiShellEnabled:
       typeof input.aiShellEnabled === 'boolean' ? input.aiShellEnabled : DEFAULT_SETTINGS.aiShellEnabled,
     aiShellApprovalMode:

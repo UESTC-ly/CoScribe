@@ -115,6 +115,16 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
     () => draft.aiProfiles.find((profile) => profile.id === draft.activeAiProfileId) ?? draft.aiProfiles[0],
     [draft.activeAiProfileId, draft.aiProfiles]
   )
+  const completionProfile = useMemo(
+    () => draft.aiProfiles.find((profile) => profile.id === draft.aiCodeCompletionProfileId) ?? activeProfile,
+    [activeProfile, draft.aiCodeCompletionProfileId, draft.aiProfiles]
+  )
+  const completionModelOptions = useMemo(
+    () => completionProfile
+      ? [...new Set([completionProfile.model, ...completionProfile.enabledModels].filter(Boolean))]
+      : [],
+    [completionProfile]
+  )
   const patch = <K extends keyof AppSettings>(key: K, value: AppSettings[K]): void => {
     setDraft((current) => ({ ...current, [key]: value }))
   }
@@ -231,13 +241,17 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
       if (current.aiProfiles.length <= 1) return current
       const index = current.aiProfiles.findIndex((profile) => profile.id === id)
       const aiProfiles = current.aiProfiles.filter((profile) => profile.id !== id)
-      if (id !== current.activeAiProfileId) return { ...current, aiProfiles }
+      const completionSettings = current.aiCodeCompletionProfileId === id
+        ? { aiCodeCompletionProfileId: '' }
+        : {}
+      if (id !== current.activeAiProfileId) return { ...current, aiProfiles, ...completionSettings }
       const next = aiProfiles[Math.min(Math.max(index, 0), aiProfiles.length - 1)]
       return {
         ...current,
         aiProvider: next.provider,
         activeAiProfileId: next.id,
         aiProfiles,
+        ...completionSettings,
         ...(next.provider === 'anthropic' && current.reasoningEffort === 'ultra'
           ? { reasoningEffort: 'max' as const }
           : {})
@@ -395,11 +409,19 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
                 </label>
                 <label className="check-row">
                   <input type="checkbox" checked={draft.autoSave} onChange={(event) => patch('autoSave', event.target.checked)} />
-                  <span><strong>自动保存 Markdown</strong><small>停止输入后约 {draft.autoSaveDelay} ms 保存</small></span>
+                  <span><strong>自动保存 Markdown 文档</strong><small>停止输入后约 {draft.autoSaveDelay} ms 保存</small></span>
                 </label>
                 <label className="field-label">
-                  自动保存延迟
+                  Markdown 保存间隔
                   <input className="field" type="number" min="300" max="10000" step="100" value={draft.autoSaveDelay} disabled={!draft.autoSave} onChange={(event) => patch('autoSaveDelay', Number(event.target.value))} />
+                </label>
+                <label className="check-row">
+                  <input type="checkbox" aria-label="自动保存代码文件" checked={draft.codeAutoSave} onChange={(event) => patch('codeAutoSave', event.target.checked)} />
+                  <span><strong>自动保存代码文件</strong><small>停止输入后约 {draft.codeAutoSaveDelay} ms 保存</small></span>
+                </label>
+                <label className="field-label">
+                  代码保存间隔
+                  <input className="field" type="number" min="300" max="10000" step="100" value={draft.codeAutoSaveDelay} disabled={!draft.codeAutoSave} onChange={(event) => patch('codeAutoSaveDelay', Number(event.target.value))} />
                 </label>
               </div>
             </section>
@@ -607,6 +629,44 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
                   <label className="check-row span-2">
                     <input type="checkbox" checked={draft.aiCodeCompletionEnabled} onChange={(event) => patch('aiCodeCompletionEnabled', event.target.checked)} />
                     <span><strong>启用 AI 代码补全</strong><small>IDE 始终可用；开启后会在输入停顿时自动提供内联建议，关闭后只停用这些补全请求。</small></span>
+                  </label>
+                  <label className="field-label">
+                    代码补全服务商
+                    <select className="field" aria-label="代码补全服务商" value={draft.aiCodeCompletionProfileId} onChange={(event) => patch('aiCodeCompletionProfileId', event.target.value)}>
+                      <option value="">跟随对话服务商（{activeProfile?.name ?? '未配置'}）</option>
+                      {draft.aiProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name} · {profile.provider === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible'}
+                        </option>
+                      ))}
+                    </select>
+                    <small className="field-caption">可为低延迟补全单独选择已配置的服务商，密钥仍由该服务商配置安全保存。</small>
+                  </label>
+                  <label className="field-label">
+                    单次补全长度
+                    <select className="field" aria-label="单次补全长度" value={draft.aiCodeCompletionLength} onChange={(event) => patch('aiCodeCompletionLength', event.target.value as AppSettings['aiCodeCompletionLength'])}>
+                      <option value="short">简短（最多约 256 tokens）</option>
+                      <option value="standard">标准（最多约 512 tokens）</option>
+                      <option value="long">长（最多约 1,024 tokens）</option>
+                    </select>
+                    <small className="field-caption">流式建议会先显示已生成内容；更长档位可能增加响应时间和调用成本。</small>
+                  </label>
+                  <label className="field-label span-2">
+                    代码补全模型
+                    <input
+                      className="field"
+                      aria-label="代码补全模型"
+                      list="code-completion-model-options"
+                      value={draft.aiCodeCompletionModel}
+                      placeholder={completionProfile?.model || '使用所选服务商的默认模型'}
+                      onChange={(event) => patch('aiCodeCompletionModel', event.target.value)}
+                    />
+                    <datalist id="code-completion-model-options">
+                      {completionModelOptions.map((model) => <option key={model} value={model} />)}
+                    </datalist>
+                    <small className="field-caption">
+                      留空使用“{completionProfile?.name ?? '当前服务商'}”的默认模型（{completionProfile?.model || '未配置'}）；也可输入专门的编码模型 ID。
+                    </small>
                   </label>
                 </div>
               </section>

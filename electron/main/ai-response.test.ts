@@ -62,6 +62,21 @@ function completionSender(): WebContents {
   } as unknown as WebContents
 }
 
+function localCompletionPreferences(protocol: 'responses' | 'chat-completions') {
+  return {
+    ...DEFAULT_SETTINGS,
+    aiProfiles: DEFAULT_SETTINGS.aiProfiles.map((profile) => profile.id === 'openai-default'
+      ? {
+          ...profile,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          model: 'local-completion-test',
+          enabledModels: ['local-completion-test'],
+          apiProtocol: protocol
+        }
+      : profile)
+  }
+}
+
 describe('AI endpoint resolution', () => {
   it('adds the OpenAI v1 chat path to a bare host', () => {
     expect(chatEndpoint('https://example.com')).toBe('https://example.com/v1/chat/completions')
@@ -268,12 +283,8 @@ describe('IDE AI code completion', () => {
       }]
     }), { status: 200, headers: { 'content-type': 'application/json' } }))
     const settings = {
-      get: vi.fn().mockResolvedValue({
-        ...DEFAULT_SETTINGS,
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        apiProtocol: 'responses'
-      }),
-      apiKey: vi.fn().mockResolvedValue(null)
+      get: vi.fn().mockResolvedValue(localCompletionPreferences('responses')),
+      apiKeyForProfile: vi.fn().mockResolvedValue(null)
     } as unknown as SettingsStore
     const project = {
       guard: { existing: vi.fn().mockResolvedValue('/project/src/sum.ts') }
@@ -302,8 +313,61 @@ describe('IDE AI code completion', () => {
     expect(body.input[0].content).toContain('<prefix>\nfunction sum')
     expect(body.input[0].content).toContain('<suffix>\n\n}\n')
     expect(body.stream).toBe(true)
-    expect(body.max_output_tokens).toBe(128)
+    expect(body.max_output_tokens).toBe(512)
     expect(body.reasoning.effort).toBe('low')
+  })
+
+  it('uses the independently configured completion profile, model, and long output limit', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { role: 'assistant', content: 'return result' } }]
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const preferences = {
+      ...localCompletionPreferences('chat-completions'),
+      aiCodeCompletionProfileId: 'code-only',
+      aiCodeCompletionModel: 'coder-large',
+      aiCodeCompletionLength: 'long' as const,
+      aiProfiles: [
+        ...DEFAULT_SETTINGS.aiProfiles,
+        {
+          id: 'code-only',
+          name: 'Code only',
+          provider: 'openai' as const,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          model: 'profile-default',
+          enabledModels: ['profile-default', 'coder-large'],
+          apiProtocol: 'chat-completions' as const,
+          hasApiKey: false
+        }
+      ]
+    }
+    const apiKeyForProfile = vi.fn().mockResolvedValue(null)
+    const settings = {
+      get: vi.fn().mockResolvedValue(preferences),
+      apiKeyForProfile
+    } as unknown as SettingsStore
+    const project = {
+      guard: { existing: vi.fn().mockResolvedValue('/project/src/sum.ts') }
+    } as unknown as ProjectService
+    const ai = new AiService(settings, project, {} as PdfTextService, {} as ProjectSearchService)
+
+    await expect(ai.completeCode(completionSender(), {
+      requestId: 'completion-independent-model',
+      path: '/project/src/sum.ts',
+      language: 'TypeScript',
+      prefix: 'const result = ',
+      suffix: '\n'
+    })).resolves.toEqual({
+      requestId: 'completion-independent-model',
+      completion: 'return result'
+    })
+
+    const body = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body)) as {
+      model: string
+      max_tokens: number
+    }
+    expect(body.model).toBe('coder-large')
+    expect(body.max_tokens).toBe(1_024)
+    expect(apiKeyForProfile).toHaveBeenCalledWith('code-only')
   })
 
   it('streams a short completion before the request resolves', async () => {
@@ -313,12 +377,8 @@ describe('IDE AI code completion', () => {
       'data: [DONE]\n\n'
     ].join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } }))
     const settings = {
-      get: vi.fn().mockResolvedValue({
-        ...DEFAULT_SETTINGS,
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        apiProtocol: 'chat-completions'
-      }),
-      apiKey: vi.fn().mockResolvedValue(null)
+      get: vi.fn().mockResolvedValue(localCompletionPreferences('chat-completions')),
+      apiKeyForProfile: vi.fn().mockResolvedValue(null)
     } as unknown as SettingsStore
     const project = {
       guard: { existing: vi.fn().mockResolvedValue('/project/src/sum.ts') }
@@ -360,12 +420,8 @@ describe('IDE AI code completion', () => {
       choices: [{ message: { role: 'assistant', content: '    return value\n' } }]
     }), { status: 200, headers: { 'content-type': 'application/json' } }))
     const settings = {
-      get: vi.fn().mockResolvedValue({
-        ...DEFAULT_SETTINGS,
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        apiProtocol: 'chat-completions'
-      }),
-      apiKey: vi.fn().mockResolvedValue(null)
+      get: vi.fn().mockResolvedValue(localCompletionPreferences('chat-completions')),
+      apiKeyForProfile: vi.fn().mockResolvedValue(null)
     } as unknown as SettingsStore
     const project = {
       guard: { existing: vi.fn().mockResolvedValue('/project/src/sum.ts') }
@@ -395,12 +451,8 @@ describe('IDE AI code completion', () => {
       signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
     }))
     const settings = {
-      get: vi.fn().mockResolvedValue({
-        ...DEFAULT_SETTINGS,
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        apiProtocol: 'chat-completions'
-      }),
-      apiKey: vi.fn().mockResolvedValue(null)
+      get: vi.fn().mockResolvedValue(localCompletionPreferences('chat-completions')),
+      apiKeyForProfile: vi.fn().mockResolvedValue(null)
     } as unknown as SettingsStore
     const project = {
       guard: { existing: vi.fn().mockResolvedValue('/project/src/sum.ts') }
