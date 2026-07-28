@@ -1994,7 +1994,7 @@ export default function App(): React.JSX.Element {
   return (
     <div
       ref={appShellRef}
-      className={`app-shell ${resizing ? 'is-panel-resizing' : ''}`}
+      className={`app-shell ${!browserActive && state.workspace.navSection === 'ide' ? 'is-ide-workspace' : ''} ${resizing ? 'is-panel-resizing' : ''}`}
       style={{
         '--left-width': `${visibleLeftWidth}px`,
         '--ai-width': `${visibleAiWidth}px`,

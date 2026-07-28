@@ -382,6 +382,14 @@
 @media (max-width: 1099px) {
   .project-navigator { position: absolute; left: 46px; top: 42px; bottom: 23px; z-index: 100; box-shadow: 12px 0 30px rgb(0 0 0 / 14%); }
   .ai-workspace { position: absolute !important; right: 0; top: 42px; bottom: 23px; z-index: 110; width: min(var(--ai-width, 400px), 88vw) !important; box-shadow: -12px 0 30px rgb(0 0 0 / 14%); }
+  .app-shell.is-ide-workspace .app-body > .ai-workspace {
+    position: static !important;
+    z-index: auto;
+    flex: 0 0 min(var(--ai-width, 360px), var(--ai-max-width, 800px));
+    width: min(var(--ai-width, 360px), var(--ai-max-width, 800px)) !important;
+    height: 100%;
+    box-shadow: -1px 0 0 var(--border), -12px 0 24px rgb(31 36 48 / 4%);
+  }
 }
 
 @media (max-width: 820px) {
