@@ -36,7 +36,7 @@ test('launches the packaged application and opens a project', async () => {
     await page.locator('.tree-row').filter({ hasText: 'main.py' }).dblclick()
     await expect(page.getByRole('region', { name: 'Python 代码编辑器' })).toBeVisible()
     await page.getByRole('button', { name: '打开终端', exact: true }).click()
-    await expect(page.getByRole('button', { name: '启用 AI Shell', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '配置 AI Shell', exact: true })).toBeVisible()
     await page.locator('.terminal-panel .xterm-screen').click()
     await page.keyboard.type("printf '%s\\n' \"$((20 + 22))\"")
     await page.keyboard.press('Enter')

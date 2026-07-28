@@ -210,12 +210,70 @@ test('uses the project folder as an IDE while keeping AI visible and runs the bu
 
   await page.getByRole('button', { name: '打开终端', exact: true }).click()
   await expect(page.getByRole('region', { name: 'IDE 终端' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '启用 AI Shell', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '配置 AI Shell', exact: true })).toBeVisible()
   await page.locator('.terminal-panel .xterm-screen').click()
   await page.keyboard.type("printf '%s\\n' \"$((21 * 2))\"")
   await page.keyboard.press('Enter')
   await expect(page.locator('.terminal-panel .xterm-rows')).toContainText('42', { timeout: 15_000 })
   await page.screenshot({ path: testInfo.outputPath('ide-terminal.png') })
+})
+
+test('offers inline AI code completions automatically, accepts Tab, and refreshes after further typing', async ({}, testInfo) => {
+  const completionRequests: string[] = []
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = []
+    for await (const chunk of request) chunks.push(Buffer.from(chunk))
+    const body = Buffer.concat(chunks).toString('utf8')
+    completionRequests.push(body)
+    const completion = body.includes('message = f') ? '"updated"' : '"draft"'
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({
+      id: 'cmpl_e2e',
+      choices: [{ message: { role: 'assistant', content: completion } }]
+    }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const port = (server.address() as AddressInfo).port
+    await page.evaluate(async (baseUrl) => {
+      const settings = await window.coscribe.settings.get()
+      const activeProfile = settings.aiProfiles.find((profile) => profile.id === settings.activeAiProfileId)
+      if (!activeProfile) throw new Error('No active AI profile')
+      await window.coscribe.settings.save({
+        ...settings,
+        aiCodeCompletionEnabled: true,
+        aiProfiles: settings.aiProfiles.map((profile) => profile.id === activeProfile.id
+          ? {
+              ...profile,
+              baseUrl,
+              model: 'local-completion-e2e',
+              enabledModels: ['local-completion-e2e'],
+              apiProtocol: 'chat-completions'
+            }
+          : profile)
+      })
+    }, `http://127.0.0.1:${port}/v1`)
+
+    await page.getByRole('button', { name: 'IDE', exact: true }).click()
+    await page.locator('.tree-row').filter({ hasText: 'main.py' }).dblclick()
+    const editor = page.locator('.code-viewer .cm-content')
+    await editor.click()
+    await editor.fill('message = ')
+
+    const ghost = page.locator('.cm-ai-inline-completion')
+    await expect(ghost).toHaveText('"draft"', { timeout: 10_000 })
+    await page.keyboard.press('Tab')
+    await expect(editor).toContainText('message = "draft"')
+
+    await page.keyboard.press('End')
+    await page.keyboard.type('\nmessage = f')
+    await expect(ghost).toHaveText('"updated"', { timeout: 10_000 })
+    expect(completionRequests).toHaveLength(2)
+    await page.screenshot({ path: testInfo.outputPath('inline-ai-completion.png') })
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
 })
 
 test('collapses each sidebar from the control that visually belongs to it', async () => {

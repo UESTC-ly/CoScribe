@@ -155,7 +155,7 @@ export function TerminalPanel({
             </button>
           ) : (
             <button type="button" className="secondary-button" onClick={onOpenSettings}>
-              <ShieldAlert size={13} />启用 AI Shell
+              <ShieldAlert size={13} />配置 AI Shell
             </button>
           )}
           {status?.authorized && <button type="button" className="text-button" onClick={() => void revoke()}>撤销授权</button>}

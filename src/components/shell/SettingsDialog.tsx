@@ -606,7 +606,7 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
                   </label>
                   <label className="check-row span-2">
                     <input type="checkbox" checked={draft.aiCodeCompletionEnabled} onChange={(event) => patch('aiCodeCompletionEnabled', event.target.checked)} />
-                    <span><strong>启用 AI 代码补全</strong><small>IDE 始终可用；关闭后只停用编辑器中的 AI 补全请求。</small></span>
+                    <span><strong>启用 AI 代码补全</strong><small>IDE 始终可用；开启后会在输入停顿时自动提供内联建议，关闭后只停用这些补全请求。</small></span>
                   </label>
                 </div>
               </section>
@@ -615,7 +615,7 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
                 <div className="settings-grid">
                   <label className="check-row span-2">
                     <input type="checkbox" checked={draft.aiShellEnabled} onChange={(event) => patch('aiShellEnabled', event.target.checked)} />
-                    <span><strong>允许请求开启 AI Shell</strong><small>默认关闭。即使启用，每次打开仍必须经过风险警告和第二次确认；授权不会跨项目或应用重启保留。</small></span>
+                    <span><strong>启用 AI Shell 功能</strong><small>默认关闭。此开关只显示“开启 AI Shell”入口，不会授权 AI 或执行命令；每次开启仍必须经过风险警告和第二次确认，授权不会跨项目或应用重启保留。</small></span>
                   </label>
                   <label className="field-label span-2">
                     命令确认方式

@@ -262,6 +262,10 @@
 .code-viewer__toolbar > span small { min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .code-viewer__toolbar > div { flex: none; display: flex; gap: 6px; }
 .code-viewer__toolbar button { min-height: 27px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; font-size: 10px; }
+.code-viewer__completion-status { min-height: 27px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 2px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.code-viewer__completion-status.is-requesting { color: var(--accent); }
+.code-viewer__completion-status.is-ready { color: var(--accent); font-weight: 650; }
+.code-viewer .cm-ai-inline-completion { color: color-mix(in srgb, var(--text-muted) 68%, transparent); font-style: italic; pointer-events: none; white-space: pre; }
 .code-viewer > .cm-theme { min-height: 0; height: 100%; overflow: hidden; }
 .code-viewer .cm-editor { height: 100%; background: var(--bg-content); color: var(--text); font: 12px/1.55 var(--font-mono); }
 .code-viewer .cm-scroller { overflow: auto; font-family: var(--font-mono); }
