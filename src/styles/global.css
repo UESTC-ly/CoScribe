@@ -75,6 +75,7 @@ body { overflow: hidden; background: var(--bg-app); }
 button, input, textarea, select { font: inherit; color: inherit; }
 select option { color: var(--text); background: var(--bg-elevated); }
 h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); letter-spacing: 0; }
+/* Chromium selects a cursor from the deepest hit-tested child, including icons and labels. */
 :where(
   button:not(:disabled),
   a[href],
@@ -91,9 +92,7 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); letter-spacing: 0; }
   [role='button']:not([aria-disabled='true']),
   [role='tab']:not([aria-disabled='true']),
   [role='option']:not([aria-disabled='true'])
-) {
-  cursor: pointer;
-}
+),
 :where(
   button:not(:disabled),
   a[href],
@@ -102,7 +101,7 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); letter-spacing: 0; }
   [role='tab']:not([aria-disabled='true']),
   [role='option']:not([aria-disabled='true'])
 ) :where(*) {
-  cursor: inherit;
+  cursor: pointer !important;
 }
 :where(
   input:not([type]),
@@ -116,11 +115,18 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); letter-spacing: 0; }
   textarea,
   [contenteditable='true']
 ) {
-  cursor: text;
+  cursor: text !important;
+}
+[contenteditable='true'] :where(*) {
+  cursor: text !important;
 }
 :where(button, input, select, textarea):disabled,
 :where([aria-disabled='true']) {
   cursor: not-allowed;
+}
+:where(button, input, select, textarea):disabled :where(*),
+:where([aria-disabled='true']) :where(*) {
+  cursor: inherit !important;
 }
 button, input, textarea, select { outline: none; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:focus-visible {

@@ -286,14 +286,12 @@ export class ScreenshotService {
 
     let selectionSession: ScreenshotSelectionSession | null = null
     try {
+      // Capture before showing the selector so confirming a region only crops
+      // an already available image instead of waiting on desktop capture.
+      const displayImage = await captureVisibleDisplay()
       selectionSession = await this.selectRegion(display)
       if (!selectionSession) return null
       const { selection } = selectionSession
-      // Keep the now-empty transparent selector alive while the first native
-      // screen capture initializes. Destroying its focused window beforehand
-      // lets macOS promote an unrelated application during that slower call.
-      await delay(70)
-      const displayImage = await captureVisibleDisplay()
       const crop = screenshotCropBounds(
         selection,
         { width: selection.viewportWidth, height: selection.viewportHeight },
