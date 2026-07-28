@@ -26,7 +26,7 @@ Renderer 不直接使用 Electron API。它只能访问 preload 通过 `contextB
 | `browser` | 隔离资料浏览器的标签、导航、提取、保存和事件 |
 | `images` | 显式图片生成和停止 |
 | `settings` | 获取和保存经过主进程归一化的设置 |
-| `ai` | 模型发现、代码补全、流式对话和停止 |
+| `ai` | 模型发现、流式对话和停止 |
 | `terminal` | 用户 PTY、外部终端、AI Shell 授权状态与事件 |
 
 ## 文件 API
@@ -52,17 +52,14 @@ applyAiOperation(proposal)
 
 ```text
 listModels(request) -> AiModelListResult
-completeCode(request) -> AiCodeCompletionResult
-cancelCodeCompletion(requestId) -> void
-onCodeCompletionStream(listener) -> unsubscribe
 start(request) -> void
 stop(requestId) -> void
 onStream(listener) -> unsubscribe
 ```
 
-`completeCode` 只适用于当前项目内的代码文件。参数是语言、文件路径、轻量光标前后缀和可选文件符号上下文；返回值必须是可直接插入光标位置的代码。主进程以独立补全流发送 `delta`、`done` 或 `error`，并只允许创建它的 Renderer 取消该请求。Renderer 会以文档内容和光标位置二次核对异步响应，避免旧建议覆盖用户的后续输入。
-
 `ai.start` 的输出走 `onStream`，事件包括 `start`、`activity`、`context-usage`、`progress`、`delta`、`done`、`stopped` 和 `error`。
+
+编辑器的本地关键字和当前文件符号候选不属于桌面 API；它们完全在 Renderer 中生成。右侧 AI 创建或修改代码文件仍通过 `ai.start` 返回文件操作提议，再由 `file.applyAiOperation` 在用户确认后执行。
 
 ## 终端 API
 

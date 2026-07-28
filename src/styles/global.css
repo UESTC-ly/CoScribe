@@ -23,7 +23,6 @@
   --diff-add-bg: #e3f0ec;
   --diff-remove-bg: #f7e3e8;
   --code-caret: #4d42bd;
-  --code-inline: #66758d;
   --code-selection: #d8d3fb;
   --shadow-panel: 0 1px 2px rgb(31 36 48 / 5%), 0 8px 24px rgb(31 36 48 / 4%);
   --font-ui: "Avenir Next", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
@@ -65,7 +64,6 @@
   --diff-add-bg: #203a32;
   --diff-remove-bg: #422d34;
   --code-caret: #f2c66d;
-  --code-inline: #c0c8da;
   --code-selection: #554d82;
   --shadow-panel: 0 1px 2px rgb(0 0 0 / 22%), 0 12px 28px rgb(0 0 0 / 18%);
   color-scheme: dark;

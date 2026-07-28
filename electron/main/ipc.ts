@@ -2,7 +2,6 @@ import { app, clipboard, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } f
 
 import type {
   AiRequest,
-  AiCodeCompletionRequest,
   AiModelListRequest,
   AiOcrRequest,
   Annotation,
@@ -268,8 +267,6 @@ export function registerIpc(services: Services): void {
   })
 
   handle(IPC.aiListModels, (_event, request: AiModelListRequest) => ai.listModels(request))
-  handle(IPC.aiCompleteCode, (event, request: AiCodeCompletionRequest) => ai.completeCode(event.sender, request))
-  handle(IPC.aiCancelCodeCompletion, (event, requestId: string) => ai.cancelCodeCompletion(event.sender, requestId))
   handle(IPC.aiStart, (event, request: AiRequest) => ai.start(event.sender, request))
   handle(IPC.aiStop, (_event, requestId: string) => ai.stop(requestId))
 

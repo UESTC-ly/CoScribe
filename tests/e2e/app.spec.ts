@@ -254,103 +254,35 @@ test('uses the project folder as an IDE while keeping AI visible and runs the bu
 
   await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
   await page.getByRole('button', { name: /AI 行为/u }).click()
-  await expect(page.getByLabel('代码补全服务商')).toBeVisible()
-  await expect(page.getByLabel('代码补全模型')).toBeVisible()
-  await expect(page.getByLabel('单次补全长度')).toBeVisible()
-  await expect.poll(async () => page.getByLabel('代码补全模型').evaluate((element) => ({
-    background: getComputedStyle(element).backgroundColor,
-    color: getComputedStyle(element).color
-  }))).toEqual({
-    background: 'rgb(32, 35, 43)',
-    color: 'rgb(194, 197, 207)'
-  })
-  await page.screenshot({ path: testInfo.outputPath('code-completion-settings-dark.png') })
+  await expect(page.getByText('启用 AI 代码补全')).toHaveCount(0)
+  await expect(page.getByLabel('代码补全服务商')).toHaveCount(0)
+  await expect(page.getByLabel('代码补全模型')).toHaveCount(0)
+  await expect(page.getByLabel('单次补全长度')).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('ai-behavior-settings-dark.png') })
   await page.getByRole('button', { name: '取消' }).click()
 })
 
-test('offers inline AI code completions automatically, accepts Tab, and refreshes after further typing', async ({}, testInfo) => {
-  const completionRequests: string[] = []
-  const server = createServer(async (request, response) => {
-    const chunks: Buffer[] = []
-    for await (const chunk of request) chunks.push(Buffer.from(chunk))
-    const body = Buffer.concat(chunks).toString('utf8')
-    completionRequests.push(body)
-    const completion = body.includes('const source = 1')
-      ? 'const generated = source\n'
-      : body.includes('message = f')
-        ? '"updated"'
-        : '"draft"'
-    response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' })
-    setTimeout(() => {
-      if (response.destroyed || response.writableEnded) return
-      response.write(`data: ${JSON.stringify({
-        id: 'cmpl_e2e',
-        choices: [{ delta: { content: completion.slice(0, 1) } }]
-      })}\n\n`)
-      response.write(`data: ${JSON.stringify({
-        id: 'cmpl_e2e',
-        choices: [{ delta: { content: completion.slice(1) } }]
-      })}\n\n`)
-      response.end('data: [DONE]\n\n')
-    }, body.includes('message =') ? 40 : 350)
+test('keeps local code suggestions without exposing model-driven completion', async () => {
+  await expect(page.evaluate(() => ({
+    completeCode: 'completeCode' in window.coscribe.ai,
+    cancelCodeCompletion: 'cancelCodeCompletion' in window.coscribe.ai,
+    onCodeCompletionStream: 'onCodeCompletionStream' in window.coscribe.ai
+  }))).resolves.toEqual({
+    completeCode: false,
+    cancelCodeCompletion: false,
+    onCodeCompletionStream: false
   })
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
 
-  try {
-    const port = (server.address() as AddressInfo).port
-    await page.evaluate(async (baseUrl) => {
-      const settings = await window.coscribe.settings.get()
-      const activeProfile = settings.aiProfiles.find((profile) => profile.id === settings.activeAiProfileId)
-      if (!activeProfile) throw new Error('No active AI profile')
-      await window.coscribe.settings.save({
-        ...settings,
-        aiCodeCompletionEnabled: true,
-        codeAutoSave: true,
-        codeAutoSaveDelay: 300,
-        aiProfiles: settings.aiProfiles.map((profile) => profile.id === activeProfile.id
-          ? {
-              ...profile,
-              baseUrl,
-              model: 'local-completion-e2e',
-              enabledModels: ['local-completion-e2e'],
-              apiProtocol: 'chat-completions'
-            }
-          : profile)
-      })
-    }, `http://127.0.0.1:${port}/v1`)
+  await page.getByRole('button', { name: 'IDE', exact: true }).click()
+  await page.locator('.tree-row').filter({ hasText: 'main.py' }).dblclick()
+  const editor = page.locator('.code-viewer .cm-content')
+  await editor.click()
+  await editor.fill('def calculate_total(items):\n  calculated = 0\n  return cal')
 
-    await page.getByRole('button', { name: 'IDE', exact: true }).click()
-    await page.locator('.tree-row').filter({ hasText: 'main.py' }).dblclick()
-    const editor = page.locator('.code-viewer .cm-content')
-    await editor.click()
-
-    await editor.fill('def calculate_total(items):\n  calculated = 0\n  return cal')
-    const localCompletions = page.locator('.cm-tooltip-autocomplete')
-    await expect(localCompletions).toBeVisible({ timeout: 5_000 })
-    await expect(localCompletions).toContainText('calculate_total')
-    await page.keyboard.press('Escape')
-
-    await editor.fill('message = ')
-
-    const ghost = page.locator('.cm-ai-inline-completion')
-    await expect(ghost).toHaveText('"draft"', { timeout: 10_000 })
-    await page.keyboard.press('Tab')
-    await expect(editor).toContainText('message = "draft"')
-
-    await page.keyboard.press('End')
-    await page.keyboard.type('\nmessage = f')
-    await expect(ghost).toHaveText('"updated"', { timeout: 10_000 })
-    expect(completionRequests.filter((body) => body.includes('message =')).length).toBeGreaterThanOrEqual(2)
-
-    await editor.fill('const source = 1\n')
-    await expect(ghost).toHaveText('const generated = source\n', { timeout: 10_000 })
-    await page.keyboard.press('Tab')
-    await expect.poll(async () => readFile(path.join(projectPath, 'main.py'), 'utf8'))
-      .toBe('const source = 1\nconst generated = source\n')
-    await page.screenshot({ path: testInfo.outputPath('inline-ai-completion.png') })
-  } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()))
-  }
+  const localCompletions = page.locator('.cm-tooltip-autocomplete')
+  await expect(localCompletions).toBeVisible({ timeout: 5_000 })
+  await expect(localCompletions).toContainText('calculate_total')
+  await expect(page.locator('.cm-ai-inline-completion')).toHaveCount(0)
 })
 
 test('collapses each sidebar from the control that visually belongs to it', async () => {

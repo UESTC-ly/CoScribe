@@ -34,24 +34,18 @@ describe('v2 settings boundaries', () => {
     expect(settings.activeAiProfileId).toBe('openai-default')
     expect(settings.aiProfiles.map((profile) => profile.id)).toEqual(['openai-default', 'anthropic-default'])
     expect(settings.contextAutoCompact).toBe(true)
-    expect(settings.aiCodeCompletionEnabled).toBe(true)
-    expect(settings.aiCodeCompletionProfileId).toBe('')
-    expect(settings.aiCodeCompletionModel).toBe('')
-    expect(settings.aiCodeCompletionLength).toBe('standard')
     expect(settings.codeAutoSave).toBe(true)
     expect(settings.codeAutoSaveDelay).toBe(900)
     expect(settings.aiShellEnabled).toBe(false)
     expect(settings.aiShellApprovalMode).toBe('per-command')
   })
 
-  it('sanitizes IDE AI capability settings without enabling AI Shell implicitly', () => {
+  it('sanitizes AI Shell settings without enabling the capability implicitly', () => {
     expect(sanitizeSettings({
       ...DEFAULT_SETTINGS,
-      aiCodeCompletionEnabled: false,
       aiShellEnabled: true,
       aiShellApprovalMode: 'session'
     })).toMatchObject({
-      aiCodeCompletionEnabled: false,
       aiShellEnabled: true,
       aiShellApprovalMode: 'session'
     })
@@ -65,30 +59,14 @@ describe('v2 settings boundaries', () => {
     })
   })
 
-  it('keeps independent code-completion and code-autosave settings within safe bounds', () => {
+  it('keeps code autosave settings within safe bounds', () => {
     const settings = sanitizeSettings({
       ...DEFAULT_SETTINGS,
-      aiCodeCompletionProfileId: 'anthropic-default',
-      aiCodeCompletionModel: `  coder-${'x'.repeat(220)} `,
-      aiCodeCompletionLength: 'long',
       codeAutoSave: false,
       codeAutoSaveDelay: 999_999
     })
-
-    expect(settings.aiCodeCompletionProfileId).toBe('anthropic-default')
-    expect(settings.aiCodeCompletionModel).toHaveLength(200)
-    expect(settings.aiCodeCompletionLength).toBe('long')
     expect(settings.codeAutoSave).toBe(false)
     expect(settings.codeAutoSaveDelay).toBe(60_000)
-
-    expect(sanitizeSettings({
-      ...DEFAULT_SETTINGS,
-      aiCodeCompletionProfileId: 'missing-profile',
-      aiCodeCompletionLength: 'unexpected' as never
-    })).toMatchObject({
-      aiCodeCompletionProfileId: '',
-      aiCodeCompletionLength: 'standard'
-    })
   })
 
   it('sanitizes Anthropic and context-window preferences', () => {

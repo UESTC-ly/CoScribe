@@ -708,13 +708,6 @@ export type SelectableAiModel = (typeof SELECTABLE_AI_MODELS)[number]
 export type SelectableAnthropicModel = (typeof SELECTABLE_ANTHROPIC_MODELS)[number]
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
 export type AiShellApprovalMode = 'per-command' | 'session'
-export const AI_CODE_COMPLETION_LENGTHS = ['short', 'standard', 'long'] as const
-export type AiCodeCompletionLength = (typeof AI_CODE_COMPLETION_LENGTHS)[number]
-export const AI_CODE_COMPLETION_LIMITS: Record<AiCodeCompletionLength, { maxTokens: number; maxChars: number }> = {
-  short: { maxTokens: 256, maxChars: 2_048 },
-  standard: { maxTokens: 512, maxChars: 4_096 },
-  long: { maxTokens: 1_024, maxChars: 8_192 }
-}
 
 // Native first-party hosts. Only these seed the built-in preset model lists;
 // third-party OpenAI-/Anthropic-compatible endpoints start with just their own
@@ -773,13 +766,6 @@ export interface AppSettings extends AiSettings {
   customSystemPrompt: string
   /** Whether the current project's COSCRIBE.md memory is included in AI requests. */
   projectMemoryEnabled: boolean
-  /** Inline code completions in the built-in IDE. The IDE itself is always available. */
-  aiCodeCompletionEnabled: boolean
-  /** Empty follows the active chat profile. */
-  aiCodeCompletionProfileId: string
-  /** Empty uses the selected completion profile's default model. */
-  aiCodeCompletionModel: string
-  aiCodeCompletionLength: AiCodeCompletionLength
   /** Makes AI Shell available; every shell session still requires two fresh confirmations. */
   aiShellEnabled: boolean
   /** Per-command confirmation is the safest default; session grants are kept in memory only. */
@@ -821,25 +807,6 @@ export interface AiRequest {
   }
   settings?: Partial<Pick<AppSettings, 'allowGeneralKnowledge'>>
 }
-
-export interface AiCodeCompletionRequest {
-  requestId: string
-  path: string
-  language: string
-  prefix: string
-  suffix: string
-  context?: string
-}
-
-export interface AiCodeCompletionResult {
-  requestId: string
-  completion: string
-}
-
-export type AiCodeCompletionStreamEvent =
-  | { requestId: string; type: 'delta'; text: string }
-  | { requestId: string; type: 'done' }
-  | { requestId: string; type: 'error'; message: string }
 
 export type TerminalSessionKind = 'user' | 'ai'
 
@@ -1081,9 +1048,6 @@ export interface CoScribeAPI {
   }
   ai: {
     listModels: (request: AiModelListRequest) => Promise<AiModelListResult>
-    completeCode: (request: AiCodeCompletionRequest) => Promise<AiCodeCompletionResult>
-    cancelCodeCompletion: (requestId: string) => Promise<void>
-    onCodeCompletionStream: (listener: (event: AiCodeCompletionStreamEvent) => void) => () => void
     start: (request: AiRequest) => Promise<void>
     stop: (requestId: string) => Promise<void>
     onStream: (listener: (event: AiStreamEvent) => void) => () => void
@@ -1169,10 +1133,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoTitle: true,
   customSystemPrompt: '',
   projectMemoryEnabled: true,
-  aiCodeCompletionEnabled: true,
-  aiCodeCompletionProfileId: '',
-  aiCodeCompletionModel: '',
-  aiCodeCompletionLength: 'standard',
   aiShellEnabled: false,
   aiShellApprovalMode: 'per-command',
   enabledPlugins: ['planner'],

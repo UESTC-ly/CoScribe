@@ -81,25 +81,23 @@ describe('SettingsDialog', () => {
     expect(profile.enabledModels).not.toContain('gpt-5.6-sol')
   })
 
-  it('keeps code autosave and code-completion model settings separate from chat defaults', async () => {
+  it('keeps code autosave settings and exposes no AI completion controls', async () => {
     const onSave = vi.fn()
     render(<SettingsDialog open settings={DEFAULT_SETTINGS} onSave={onSave} onClose={vi.fn()} />)
 
     fireEvent.click(screen.getByLabelText('自动保存代码文件'))
     fireEvent.change(screen.getByLabelText('代码保存间隔'), { target: { value: '1800' } })
     fireEvent.click(screen.getByRole('button', { name: /AI 行为/u }))
-    fireEvent.change(screen.getByLabelText('代码补全服务商'), { target: { value: 'anthropic-default' } })
-    fireEvent.change(screen.getByLabelText('代码补全模型'), { target: { value: 'claude-code-fast' } })
-    fireEvent.change(screen.getByLabelText('单次补全长度'), { target: { value: 'long' } })
+    expect(screen.queryByText('启用 AI 代码补全')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('代码补全服务商')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('代码补全模型')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('单次补全长度')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
     expect(onSave).toHaveBeenCalledOnce()
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({
       codeAutoSave: false,
-      codeAutoSaveDelay: 1800,
-      aiCodeCompletionProfileId: 'anthropic-default',
-      aiCodeCompletionModel: 'claude-code-fast',
-      aiCodeCompletionLength: 'long'
+      codeAutoSaveDelay: 1800
     })
   })
 })

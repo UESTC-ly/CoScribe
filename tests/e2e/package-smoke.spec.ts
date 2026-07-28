@@ -30,6 +30,20 @@ test('launches the packaged application and opens a project', async () => {
     await page.waitForFunction(() => Boolean(window.coscribe))
     await expect(page).toHaveTitle('CoScribe')
     await expect(page.locator('.app-titlebar__project strong')).toHaveText(path.basename(projectPath))
+    expect(await page.evaluate(() => ({
+      completeCode: 'completeCode' in window.coscribe.ai,
+      cancelCodeCompletion: 'cancelCodeCompletion' in window.coscribe.ai,
+      onCodeCompletionStream: 'onCodeCompletionStream' in window.coscribe.ai
+    }))).toEqual({
+      completeCode: false,
+      cancelCodeCompletion: false,
+      onCodeCompletionStream: false
+    })
+    await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
+    await page.getByRole('button', { name: /AI 行为/u }).click()
+    await expect(page.getByText('启用 AI 代码补全')).toHaveCount(0)
+    await expect(page.getByLabel('代码补全模型')).toHaveCount(0)
+    await page.getByRole('button', { name: '取消' }).click()
     await page.getByRole('button', { name: 'IDE', exact: true }).click()
     await expect(page.getByRole('region', { name: 'IDE 工作区' })).toBeVisible()
     await expect(page.locator('.ai-workspace')).toBeVisible()
