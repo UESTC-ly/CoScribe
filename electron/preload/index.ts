@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AiRequest,
   AiCodeCompletionRequest,
+  AiCodeCompletionStreamEvent,
   AiModelListRequest,
   AiOcrRequest,
   AiStreamEvent,
@@ -187,6 +188,9 @@ const api: CoScribeAPI = {
   ai: {
     listModels: (request: AiModelListRequest) => ipcRenderer.invoke(IPC.aiListModels, request),
     completeCode: (request: AiCodeCompletionRequest) => ipcRenderer.invoke(IPC.aiCompleteCode, request),
+    cancelCodeCompletion: (requestId: string) => ipcRenderer.invoke(IPC.aiCancelCodeCompletion, requestId),
+    onCodeCompletionStream: (listener: (event: AiCodeCompletionStreamEvent) => void) =>
+      subscribe(IPC.aiCodeCompletionStream, listener),
     start: (request: AiRequest) => ipcRenderer.invoke(IPC.aiStart, request),
     stop: (requestId: string) => ipcRenderer.invoke(IPC.aiStop, requestId),
     onStream: (listener: (event: AiStreamEvent) => void) => subscribe(IPC.aiStream, listener)

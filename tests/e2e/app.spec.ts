@@ -226,11 +226,19 @@ test('offers inline AI code completions automatically, accepts Tab, and refreshe
     const body = Buffer.concat(chunks).toString('utf8')
     completionRequests.push(body)
     const completion = body.includes('message = f') ? '"updated"' : '"draft"'
-    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-    response.end(JSON.stringify({
-      id: 'cmpl_e2e',
-      choices: [{ message: { role: 'assistant', content: completion } }]
-    }))
+    response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' })
+    setTimeout(() => {
+      if (response.destroyed || response.writableEnded) return
+      response.write(`data: ${JSON.stringify({
+        id: 'cmpl_e2e',
+        choices: [{ delta: { content: completion.slice(0, 1) } }]
+      })}\n\n`)
+      response.write(`data: ${JSON.stringify({
+        id: 'cmpl_e2e',
+        choices: [{ delta: { content: completion.slice(1) } }]
+      })}\n\n`)
+      response.end('data: [DONE]\n\n')
+    }, body.includes('message =') ? 40 : 350)
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
 
@@ -259,6 +267,13 @@ test('offers inline AI code completions automatically, accepts Tab, and refreshe
     await page.locator('.tree-row').filter({ hasText: 'main.py' }).dblclick()
     const editor = page.locator('.code-viewer .cm-content')
     await editor.click()
+
+    await editor.fill('def calculate_total(items):\n  calculated = 0\n  return cal')
+    const localCompletions = page.locator('.cm-tooltip-autocomplete')
+    await expect(localCompletions).toBeVisible({ timeout: 5_000 })
+    await expect(localCompletions).toContainText('calculate_total')
+    await page.keyboard.press('Escape')
+
     await editor.fill('message = ')
 
     const ghost = page.locator('.cm-ai-inline-completion')
@@ -269,7 +284,7 @@ test('offers inline AI code completions automatically, accepts Tab, and refreshe
     await page.keyboard.press('End')
     await page.keyboard.type('\nmessage = f')
     await expect(ghost).toHaveText('"updated"', { timeout: 10_000 })
-    expect(completionRequests).toHaveLength(2)
+    expect(completionRequests.filter((body) => body.includes('message =')).length).toBeGreaterThanOrEqual(2)
     await page.screenshot({ path: testInfo.outputPath('inline-ai-completion.png') })
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))

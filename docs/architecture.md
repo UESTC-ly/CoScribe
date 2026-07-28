@@ -41,6 +41,10 @@ Renderer 没有 Node.js、文件系统或子进程访问能力。所有磁盘、
 
 AI 请求在发送时创建不可变 `ContextSnapshot`，其中包含项目、活动文档、页码/章节、选区、显式引用文件和当前代码未保存缓冲区。AI 的文件操作是“提议 → 差异预览 → 用户确认 → 主进程再校验 → 写入”的链路，不是 Renderer 或模型直接写盘。
 
+### IDE 补全
+
+代码编辑器把补全分成两条独立路径：Renderer 使用 CodeMirror 的本地候选源立即提供当前文件中的关键字、声明和变量；AI 内联补全则通过独立 IPC 通道发送轻量前后缀、导入和可见符号上下文。每次编辑、光标移动或选区变化都会取消旧请求。主进程只保留每个 Renderer 最新的补全请求，使用低推理、小输出上限和 SSE 首段转发；旧请求不能覆盖新的文档快照。
+
 ### 终端
 
 用户 PTY 和 AI Shell 是两个不同的主进程会话。AI Shell 只有在设置启用、当前项目完成两次确认、且命令审批通过后才可执行；输出经过长度与控制字符处理，并作为不可信资料交回模型。
@@ -80,6 +84,22 @@ sequenceDiagram
   M->>U: 每条命令确认（默认）
   M->>M: 在项目 cwd 创建受限生命周期 PTY
   M-->>AI: 清理并截断后的不可信输出
+```
+
+### IDE 补全
+
+```mermaid
+sequenceDiagram
+  participant R as Renderer / CodeMirror
+  participant M as Main process
+  participant AI as Provider
+  R->>R: 本地符号/关键字立即显示
+  R->>M: ai:complete-code(轻量 FIM 上下文)
+  M->>AI: stream=true, low effort, small output
+  AI-->>M: SSE delta
+  M-->>R: ai:code-completion-stream
+  R->>R: 显示 ghost text；Tab 优先接受 AI
+  R->>M: 新输入或移动光标时取消旧请求
 ```
 
 ## 扩展原则

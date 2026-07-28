@@ -86,11 +86,11 @@ flowchart LR
 | PPTX | 本地只读幻灯片预览和逐页搜索 |
 | 图片 | 查看、缩放、本地 OCR 或显式 AI 增强 |
 | 网页 | 使用最多 10 个标签页的内置资料浏览器，保留历史、Cookie 和登录状态；网页选区自动成为聊天候选，并可保存 Markdown、PDF 或 MHTML |
-| 代码 | 在 IDE 中编辑和保存；使用已配置模型进行可选补全；未保存缓冲区可作为冻结的 AI 上下文 |
+| 代码 | 在 IDE 中编辑和保存；本地关键字/符号列表始终可用，可选 AI 内联补全；未保存缓冲区可作为冻结的 AI 上下文 |
 
 ### IDE、终端与 AI Shell
 
-- IDE 直接使用当前项目文件夹，不创建另一份工程数据。代码编辑器支持 `Cmd/Ctrl + S` 保存和自动 AI 内联补全：输入停顿后显示建议，按 `Tab` 接受；继续输入或移动光标会刷新建议。
+- IDE 直接使用当前项目文件夹，不创建另一份工程数据。代码编辑器支持 `Cmd/Ctrl + S` 保存和双通道补全：本地关键字与当前文件符号立即显示为列表；AI 在输入短暂停顿后以流式内联建议显示。AI 建议可见时按 `Tab` 接受，否则 `Tab` 接受本地候选或执行缩进；继续输入或移动光标会取消旧 AI 请求并刷新建议。
 - 底部终端可在项目路径中运行命令；工具栏也可以唤起系统终端。
 - 普通终端不会自动授权 AI。AI Shell 默认关闭，需要先在“设置 → AI 行为”启用 AI Shell 功能；此开关只显示开启入口，不会授权 AI 或执行命令。
 - 每次点击“开启 AI Shell”都会先显示风险警告，再显示第二次确认。授权只绑定当前项目和当前应用会话；关闭终端、项目或应用会撤销。
@@ -137,7 +137,7 @@ const note: LearningNote = {
 | 框选截图 | `⌘ ⇧ D` | `Ctrl + Shift + D` |
 | 保存 Markdown | `⌘ S` | `Ctrl + S` |
 | 保存代码 | `⌘ S` | `Ctrl + S` |
-| AI 代码补全 | `⌘ Space` | `Ctrl + Space` |
+| AI / 本地代码补全 | `Tab` 接受可见 AI 建议，否则接受本地候选或缩进 | `Tab` 接受可见 AI 建议，否则接受本地候选或缩进 |
 | 查找 | `⌘ F` | `Ctrl + F` |
 | 发送消息 | `Enter` | `Enter` |
 | 输入换行 | `Shift + Enter` | `Shift + Enter` |
@@ -159,7 +159,7 @@ const note: LearningNote = {
 4. Use **Organize notes** when you want AI to choose an appropriate project location and create durable Markdown notes.
 5. Use the copy button on code blocks, paste images into chat, or press `Cmd/Ctrl + Shift + D` for a manual region screenshot.
 
-The **IDE** rail entry switches only the center workspace and keeps the AI sidebar intact. Code files are selected with one click and opened with a double click. The editor supports saving and optional configured-model completion. The bottom terminal is independent from AI Shell. AI Shell is off by default, requires a risk warning plus a second confirmation every time it is opened, and defaults to per-command approval.
+The **IDE** rail entry switches only the center workspace and keeps the AI sidebar intact. Code files are selected with one click and opened with a double click. The editor provides immediate local keyword/symbol candidates plus optional streamed AI inline completion; a visible AI suggestion owns `Tab`, otherwise `Tab` accepts a local candidate or indents. The bottom terminal is independent from AI Shell. AI Shell is off by default, requires a risk warning plus a second confirmation every time it is opened, and defaults to per-command approval.
 
 The OpenAI-compatible and Anthropic Messages profiles are stored separately. The lower-right switcher only shows models already fetched and enabled for the selected provider. The research browser keeps up to 10 tabs plus local history and persistent login cookies; selecting webpage text creates a removable chat candidate. The context meter shows estimated input usage and output reserve; request-only compaction never deletes the visible chat history. Re-click any active left rail icon to collapse its panel.
 

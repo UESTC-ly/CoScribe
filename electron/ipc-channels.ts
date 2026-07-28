@@ -101,6 +101,8 @@ export const IPC = {
   settingsSave: 'settings:save',
   aiListModels: 'ai:list-models',
   aiCompleteCode: 'ai:complete-code',
+  aiCancelCodeCompletion: 'ai:cancel-code-completion',
+  aiCodeCompletionStream: 'ai:code-completion-stream',
   aiStart: 'ai:start',
   aiStop: 'ai:stop',
   aiStream: 'ai:stream',

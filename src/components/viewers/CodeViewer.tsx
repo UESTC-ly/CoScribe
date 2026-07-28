@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { langs } from '@uiw/codemirror-extensions-langs'
+import {
+  acceptCompletion,
+  autocompletion,
+  closeCompletion,
+  completionKeymap,
+  type CompletionContext
+} from '@codemirror/autocomplete'
 import { Prec, StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, keymap, WidgetType } from '@codemirror/view'
 import { Check, Code2, Save, Sparkles } from 'lucide-react'
@@ -8,9 +15,12 @@ import { Check, Code2, Save, Sparkles } from 'lucide-react'
 import { codeFileExtension, codeLanguageForPath } from '../../shared/code-files'
 import {
   AUTO_COMPLETION_DELAY_MS,
+  buildAiCompletionContext,
   canRequestAutoCompletion,
   completionSnapshotMatches,
-  normalizeInlineCompletion
+  localCodeCompletionOptions,
+  normalizeInlineCompletion,
+  normalizeInlineCompletionFragment
 } from '../../lib/ai-code-completion'
 
 interface CodeViewerContext {
@@ -34,6 +44,14 @@ interface CodeViewerProps {
 interface InlineCompletion {
   anchor: number
   text: string
+}
+
+interface ActiveCompletionRequest {
+  requestId: string
+  documentText: string
+  cursor: number
+  generation: number
+  streamedCompletion: string
 }
 
 const setInlineCompletion = StateEffect.define<InlineCompletion | null>()
@@ -104,8 +122,24 @@ function acceptInlineCompletion(view: EditorView): boolean {
 
 const inlineCompletionExtension: Extension = [
   inlineCompletionField,
-  Prec.high(keymap.of([{ key: 'Tab', run: acceptInlineCompletion }]))
+  Prec.high(keymap.of([{ key: 'Tab', run: acceptInlineCompletion }])),
+  keymap.of([{ key: 'Tab', run: acceptCompletion }, ...completionKeymap])
 ]
+
+function localCompletionExtension(language: string): Extension {
+  return autocompletion({
+    activateOnTyping: true,
+    override: [(context: CompletionContext) => {
+      const word = context.matchBefore(/[\p{L}_$][\p{L}\p{N}_$]*/u)
+      if (!word && !context.explicit) return null
+      return {
+        from: word?.from ?? context.pos,
+        options: localCodeCompletionOptions(context.state.doc.toString(), language),
+        validFor: /[\p{L}\p{N}_$]*/u
+      }
+    }]
+  })
+}
 
 function languageExtension(path: string): ReturnType<(typeof langs)[keyof typeof langs]>[] {
   const name = path.split(/[\\/]/u).at(-1) ?? ''
@@ -135,23 +169,62 @@ export function CodeViewer({
   const viewRef = useRef<EditorView | null>(null)
   const completionTimerRef = useRef<number | null>(null)
   const completionGenerationRef = useRef(0)
+  const activeCompletionRef = useRef<ActiveCompletionRequest | null>(null)
   const [saving, setSaving] = useState(false)
   const [completionStatus, setCompletionStatus] = useState<'idle' | 'waiting' | 'requesting' | 'ready'>('idle')
   const language = codeLanguageForPath(path)
-  const extensions = useMemo<Extension[]>(() => [...languageExtension(path), inlineCompletionExtension], [path])
+  const extensions = useMemo<Extension[]>(
+    () => [...languageExtension(path), inlineCompletionExtension, localCompletionExtension(language)],
+    [language, path]
+  )
 
-  useEffect(() => {
-    const view = viewRef.current
+  const invalidateAutoCompletion = (view = viewRef.current): void => {
+    completionGenerationRef.current += 1
+    if (completionTimerRef.current !== null) window.clearTimeout(completionTimerRef.current)
+    completionTimerRef.current = null
+    const active = activeCompletionRef.current
+    activeCompletionRef.current = null
+    if (active) void window.coscribe.ai.cancelCodeCompletion(active.requestId).catch(() => undefined)
     if (view?.state.field(inlineCompletionField, false)) {
       view.dispatch({ effects: setInlineCompletion.of(null) })
     }
     setCompletionStatus('idle')
+  }
+
+  useEffect(() => {
+    invalidateAutoCompletion()
     return () => {
-      completionGenerationRef.current += 1
-      if (completionTimerRef.current !== null) window.clearTimeout(completionTimerRef.current)
-      completionTimerRef.current = null
+      invalidateAutoCompletion()
     }
   }, [path, aiCompletionEnabled])
+
+  useEffect(() => window.coscribe.ai.onCodeCompletionStream((event) => {
+    const active = activeCompletionRef.current
+    if (!active || event.requestId !== active.requestId) return
+    const view = viewRef.current
+    if (
+      !view ||
+      active.generation !== completionGenerationRef.current ||
+      !completionSnapshotMatches(view.state.doc.toString(), view.state.selection.main.head, active.documentText, active.cursor)
+    ) {
+      invalidateAutoCompletion(view)
+      return
+    }
+    if (event.type === 'delta') {
+      active.streamedCompletion += event.text
+      const completion = normalizeInlineCompletionFragment(active.streamedCompletion)
+      if (!completion) return
+      closeCompletion(view)
+      view.dispatch({ effects: setInlineCompletion.of({ anchor: active.cursor, text: completion }) })
+      setCompletionStatus('ready')
+      return
+    }
+    if (event.type === 'error') {
+      activeCompletionRef.current = null
+      setCompletionStatus('idle')
+      onError(event.message)
+    }
+  }), [onError])
 
   const save = async (): Promise<void> => {
     if (saving || !dirty) return
@@ -166,10 +239,8 @@ export function CodeViewer({
   }
 
   const scheduleAutoCompletion = (view: EditorView): void => {
-    completionGenerationRef.current += 1
+    invalidateAutoCompletion(view)
     const generation = completionGenerationRef.current
-    if (completionTimerRef.current !== null) window.clearTimeout(completionTimerRef.current)
-    completionTimerRef.current = null
 
     const selection = view.state.selection.main
     const documentText = view.state.doc.toString()
@@ -192,15 +263,24 @@ export function CodeViewer({
       )) return
 
       setCompletionStatus('requesting')
+      const requestId = crypto.randomUUID()
+      const context = buildAiCompletionContext(documentText, cursor)
+      activeCompletionRef.current = {
+        requestId,
+        documentText,
+        cursor,
+        generation,
+        streamedCompletion: ''
+      }
       void window.coscribe.ai.completeCode({
-        requestId: crypto.randomUUID(),
+        requestId,
         path,
         language,
-        prefix: documentText.slice(Math.max(0, cursor - 120_000), cursor),
-        suffix: documentText.slice(cursor, cursor + 60_000)
+        ...context
       }).then((result) => {
         const latestView = viewRef.current
-        if (!latestView || generation !== completionGenerationRef.current) return
+        const active = activeCompletionRef.current
+        if (!latestView || !active || active.requestId !== result.requestId || generation !== completionGenerationRef.current) return
         if (!completionSnapshotMatches(
           latestView.state.doc.toString(),
           latestView.state.selection.main.head,
@@ -209,15 +289,27 @@ export function CodeViewer({
         )) return
         const completion = normalizeInlineCompletion(result.completion)
         if (!completion) {
+          activeCompletionRef.current = null
           setCompletionStatus('idle')
           return
         }
-        latestView.dispatch({
-          effects: setInlineCompletion.of({ anchor: cursor, text: completion })
-        })
+        if (normalizeInlineCompletion(active.streamedCompletion) !== completion) {
+          closeCompletion(latestView)
+          latestView.dispatch({
+            effects: setInlineCompletion.of({ anchor: cursor, text: completion })
+          })
+        }
+        activeCompletionRef.current = null
         setCompletionStatus('ready')
-      }).catch(() => {
-        if (generation === completionGenerationRef.current) setCompletionStatus('idle')
+      }).catch((reason: unknown) => {
+        const active = activeCompletionRef.current
+        if (!active || active.requestId !== requestId) return
+        activeCompletionRef.current = null
+        if (generation === completionGenerationRef.current) {
+          setCompletionStatus('idle')
+          const message = reason instanceof Error ? reason.message : String(reason)
+          if (message !== 'AI 代码补全已取消。') onError(message)
+        }
       })
     }, AUTO_COMPLETION_DELAY_MS)
   }
@@ -242,7 +334,7 @@ export function CodeViewer({
               ? 'AI 代码补全已在设置中关闭'
               : completionStatus === 'ready'
                 ? '按 Tab 接受建议；继续输入会刷新建议'
-                : '输入停顿后自动生成代码补全建议'}
+                : '本地补全即时显示；输入停顿后自动生成 AI 内联建议'}
           >
             <Sparkles size={13} />
             {!aiCompletionEnabled
@@ -251,7 +343,7 @@ export function CodeViewer({
                 ? '正在生成建议…'
                 : completionStatus === 'ready'
                   ? '按 Tab 接受'
-                  : 'AI 自动补全'}
+                  : '本地补全 + AI'}
           </span>
           <button type="button" className="primary-button" disabled={!dirty || saving} onClick={() => void save()}>
             {dirty ? <Save size={13} /> : <Check size={13} />}{saving ? '保存中…' : dirty ? '保存' : '已保存'}
@@ -279,10 +371,7 @@ export function CodeViewer({
           viewRef.current = update.view
           if (update.docChanged) scheduleAutoCompletion(update.view)
           else if (update.selectionSet) {
-            completionGenerationRef.current += 1
-            if (completionTimerRef.current !== null) window.clearTimeout(completionTimerRef.current)
-            completionTimerRef.current = null
-            setCompletionStatus('idle')
+            invalidateAutoCompletion(update.view)
           }
           if (!update.docChanged && !update.selectionSet && !update.viewportChanged) return
           const selection = update.state.selection.main

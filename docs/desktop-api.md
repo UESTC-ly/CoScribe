@@ -53,12 +53,14 @@ applyAiOperation(proposal)
 ```text
 listModels(request) -> AiModelListResult
 completeCode(request) -> AiCodeCompletionResult
+cancelCodeCompletion(requestId) -> void
+onCodeCompletionStream(listener) -> unsubscribe
 start(request) -> void
 stop(requestId) -> void
 onStream(listener) -> unsubscribe
 ```
 
-`completeCode` 只适用于当前项目内的代码文件。参数是语言、文件路径、光标前缀和后缀；返回值必须是可直接插入光标位置的代码。Renderer 会以文档内容和光标位置二次核对异步响应，避免旧建议覆盖用户的后续输入。
+`completeCode` 只适用于当前项目内的代码文件。参数是语言、文件路径、轻量光标前后缀和可选文件符号上下文；返回值必须是可直接插入光标位置的代码。主进程以独立补全流发送 `delta`、`done` 或 `error`，并只允许创建它的 Renderer 取消该请求。Renderer 会以文档内容和光标位置二次核对异步响应，避免旧建议覆盖用户的后续输入。
 
 `ai.start` 的输出走 `onStream`，事件包括 `start`、`activity`、`context-usage`、`progress`、`delta`、`done`、`stopped` 和 `error`。
 

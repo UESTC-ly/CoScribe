@@ -33,6 +33,7 @@ import type { PdfTextService } from './pdf'
 import type { ProjectService } from './project'
 import type { ProjectSearchService } from './search'
 import type { SettingsStore } from './settings'
+import { IPC } from '../ipc-channels'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -51,6 +52,14 @@ const imageRequest: ImageGenerationRequest = {
   prompt: '  一张适合学习笔记的系统架构图  ',
   size: '1536x1024',
   quality: 'high'
+}
+
+function completionSender(): WebContents {
+  return {
+    id: 10,
+    isDestroyed: () => false,
+    send: vi.fn()
+  } as unknown as WebContents
 }
 
 describe('AI endpoint resolution', () => {
@@ -271,7 +280,7 @@ describe('IDE AI code completion', () => {
     } as unknown as ProjectService
     const ai = new AiService(settings, project, {} as PdfTextService, {} as ProjectSearchService)
 
-    await expect(ai.completeCode({
+    await expect(ai.completeCode(completionSender(), {
       requestId: 'completion-1',
       path: '/project/src/sum.ts',
       language: 'TypeScript',
@@ -285,10 +294,136 @@ describe('IDE AI code completion', () => {
     const body = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body)) as {
       instructions: string
       input: Array<{ content: string }>
+      stream: boolean
+      max_output_tokens: number
+      reasoning: { effort: string }
     }
     expect(body.instructions).toContain('只返回应插入光标位置的代码')
     expect(body.input[0].content).toContain('<prefix>\nfunction sum')
     expect(body.input[0].content).toContain('<suffix>\n\n}\n')
+    expect(body.stream).toBe(true)
+    expect(body.max_output_tokens).toBe(128)
+    expect(body.reasoning.effort).toBe('low')
+  })
+
+  it('streams a short completion before the request resolves', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"return "}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"value"}}]}\n\n',
+      'data: [DONE]\n\n'
+    ].join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } }))
+    const settings = {
+      get: vi.fn().mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiProtocol: 'chat-completions'
+      }),
+      apiKey: vi.fn().mockResolvedValue(null)
+    } as unknown as SettingsStore
+    const project = {
+      guard: { existing: vi.fn().mockResolvedValue('/project/src/sum.ts') }
+    } as unknown as ProjectService
+    const ai = new AiService(settings, project, {} as PdfTextService, {} as ProjectSearchService)
+    const send = vi.fn()
+    const sender = { id: 10, isDestroyed: () => false, send } as unknown as WebContents
+
+    await expect(ai.completeCode(sender, {
+      requestId: 'completion-stream',
+      path: '/project/src/sum.ts',
+      language: 'TypeScript',
+      prefix: 'function sum() {\n  ',
+      suffix: '\n}'
+    })).resolves.toEqual({
+      requestId: 'completion-stream',
+      completion: 'return value'
+    })
+
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenNthCalledWith(1, IPC.aiCodeCompletionStream, {
+      requestId: 'completion-stream',
+      type: 'delta',
+      text: 'return '
+    })
+    expect(send).toHaveBeenNthCalledWith(2, IPC.aiCodeCompletionStream, {
+      requestId: 'completion-stream',
+      type: 'delta',
+      text: 'value'
+    })
+    expect(send).toHaveBeenLastCalledWith(IPC.aiCodeCompletionStream, {
+      requestId: 'completion-stream',
+      type: 'done'
+    })
+  })
+
+  it('preserves indentation in an insertion-only completion', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { role: 'assistant', content: '    return value\n' } }]
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const settings = {
+      get: vi.fn().mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiProtocol: 'chat-completions'
+      }),
+      apiKey: vi.fn().mockResolvedValue(null)
+    } as unknown as SettingsStore
+    const project = {
+      guard: { existing: vi.fn().mockResolvedValue('/project/src/sum.ts') }
+    } as unknown as ProjectService
+    const ai = new AiService(settings, project, {} as PdfTextService, {} as ProjectSearchService)
+
+    await expect(ai.completeCode(completionSender(), {
+      requestId: 'completion-indentation',
+      path: '/project/src/sum.ts',
+      language: 'TypeScript',
+      prefix: 'function sum() {\n',
+      suffix: '\n}'
+    })).resolves.toEqual({
+      requestId: 'completion-indentation',
+      completion: '    return value\n'
+    })
+  })
+
+  it('cancels an in-flight completion only for the renderer that started it', async () => {
+    let markFetchStarted: (() => void) | undefined
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => new Promise((_resolve, reject) => {
+      markFetchStarted?.()
+      const signal = init?.signal
+      signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    }))
+    const settings = {
+      get: vi.fn().mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiProtocol: 'chat-completions'
+      }),
+      apiKey: vi.fn().mockResolvedValue(null)
+    } as unknown as SettingsStore
+    const project = {
+      guard: { existing: vi.fn().mockResolvedValue('/project/src/sum.ts') }
+    } as unknown as ProjectService
+    const ai = new AiService(settings, project, {} as PdfTextService, {} as ProjectSearchService)
+    const send = vi.fn()
+    const sender = { id: 10, isDestroyed: () => false, send } as unknown as WebContents
+    const otherSender = { id: 11, isDestroyed: () => false, send: vi.fn() } as unknown as WebContents
+    const pending = ai.completeCode(sender, {
+      requestId: 'completion-cancel',
+      path: '/project/src/sum.ts',
+      language: 'TypeScript',
+      prefix: 'function sum() {\n  ',
+      suffix: '\n}'
+    })
+
+    await fetchStarted
+    ai.cancelCodeCompletion(otherSender, 'completion-cancel')
+    expect(send).not.toHaveBeenCalled()
+    ai.cancelCodeCompletion(sender, 'completion-cancel')
+
+    await expect(pending).rejects.toThrow('AI 代码补全已取消')
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('does not contact the model when code completion is disabled', async () => {
@@ -304,7 +439,7 @@ describe('IDE AI code completion', () => {
     } as unknown as ProjectService
     const ai = new AiService(settings, project, {} as PdfTextService, {} as ProjectSearchService)
 
-    await expect(ai.completeCode({
+    await expect(ai.completeCode(completionSender(), {
       requestId: 'completion-disabled',
       path: '/project/main.py',
       language: 'Python',

@@ -813,12 +813,18 @@ export interface AiCodeCompletionRequest {
   language: string
   prefix: string
   suffix: string
+  context?: string
 }
 
 export interface AiCodeCompletionResult {
   requestId: string
   completion: string
 }
+
+export type AiCodeCompletionStreamEvent =
+  | { requestId: string; type: 'delta'; text: string }
+  | { requestId: string; type: 'done' }
+  | { requestId: string; type: 'error'; message: string }
 
 export type TerminalSessionKind = 'user' | 'ai'
 
@@ -1061,6 +1067,8 @@ export interface CoScribeAPI {
   ai: {
     listModels: (request: AiModelListRequest) => Promise<AiModelListResult>
     completeCode: (request: AiCodeCompletionRequest) => Promise<AiCodeCompletionResult>
+    cancelCodeCompletion: (requestId: string) => Promise<void>
+    onCodeCompletionStream: (listener: (event: AiCodeCompletionStreamEvent) => void) => () => void
     start: (request: AiRequest) => Promise<void>
     stop: (requestId: string) => Promise<void>
     onStream: (listener: (event: AiStreamEvent) => void) => () => void
