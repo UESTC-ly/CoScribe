@@ -29,20 +29,20 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 ## 中文
 
-> `v4.0.0` 开发分支新增完整 IDE 工作区：左侧 IDE 入口只切换中央工作区，AI 侧栏保持不变；代码文件单击选择、双击打开，可编辑保存。本地关键字和当前文件符号会即时显示为列表，输入代码时不会自动请求 AI 模型。右侧 AI 仍可基于冻结的代码上下文提议创建或修改代码文件，写盘前必须预览并确认。底部终端可直接操作项目，也可唤起系统终端。AI Shell 默认关闭，每次开启都要先阅读风险警告并再次确认，默认还会逐条确认命令。
+> `v4.0.0` 稳定版新增完整 IDE 工作区：左侧 IDE 入口只切换中央工作区，AI 侧栏保持不变；代码文件单击选择、双击打开，可编辑和自动保存。本地关键字和当前文件符号会即时显示为列表，输入代码时不会自动请求 AI 模型。右侧 AI 仍可基于发送时冻结的代码上下文提议创建或修改代码文件，写盘前必须预览并确认。底部终端可直接操作项目，也可唤起系统终端。AI Shell 默认关闭，每次开启都要先阅读风险警告并再次确认，默认还会逐条确认命令。
 
 ### 下载与安装
 
-从 [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest) 下载稳定版 `v3.2.4`：
+从 [`v4.0.0` GitHub Release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.0) 下载稳定版：
 
 | 系统 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS | `CoScribe-3.2.4-arm64.dmg` | Apple Silicon，macOS 13+ |
-| macOS | `CoScribe-3.2.4-arm64-mac.zip` | Apple Silicon 免安装压缩包 |
-| Windows | `CoScribe-Setup-3.2.4-x64.exe` | Windows 10/11 x64 |
-| Linux | `CoScribe-3.2.4-x64.AppImage` | 通用 x86-64 便携包 |
-| Linux | `CoScribe-3.2.4-x64.deb` | Debian / Ubuntu x86-64 |
-| 全平台 | `SHA256SUMS.txt` | 安装包 SHA-256 校验值 |
+| macOS | [`CoScribe-4.0.0-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-arm64.dmg) | Apple Silicon，macOS 13+ |
+| macOS | [`CoScribe-4.0.0-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-arm64-mac.zip) | Apple Silicon 免安装压缩包 |
+| Windows | [`CoScribe-Setup-4.0.0-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-Setup-4.0.0-x64.exe) | Windows 10/11 x64 |
+| Linux | [`CoScribe-4.0.0-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-x64.AppImage) | 通用 x86-64 便携包 |
+| Linux | [`CoScribe-4.0.0-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-x64.deb) | Debian / Ubuntu x86-64 |
+| 全平台 | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/SHA256SUMS.txt) | 安装包 SHA-256 校验值 |
 
 这些安装包目前没有 Apple Developer ID、Windows Authenticode 或 Linux 发行版签名。
 
@@ -55,7 +55,7 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 #### Windows
 
-1. 运行 `CoScribe-Setup-3.2.4-x64.exe`。
+1. 运行 `CoScribe-Setup-4.0.0-x64.exe`。
 2. 如果 SmartScreen 拦截未签名安装包，确认文件来自本仓库并核对 SHA-256 后，选择“更多信息 → 仍要运行”。
 3. 安装完成后从开始菜单启动 CoScribe。
 
@@ -64,19 +64,19 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 AppImage：
 
 ```bash
-chmod +x CoScribe-3.2.4-x64.AppImage
-./CoScribe-3.2.4-x64.AppImage
+chmod +x CoScribe-4.0.0-x64.AppImage
+./CoScribe-4.0.0-x64.AppImage
 ```
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install ./CoScribe-3.2.4-x64.deb
+sudo apt install ./CoScribe-4.0.0-x64.deb
 ```
 
 Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门户配置。
 
-> v3.2.4 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并通过架构、打包内容和成品窗口 E2E 验证。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
+> v4.0.0 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并通过架构、打包内容和成品应用冒烟验证；验证覆盖打开项目、进入 IDE、打开内置终端并实际执行命令。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
 
 ### 五分钟开始使用
 
@@ -303,27 +303,29 @@ npm run verify:package:linux
 
 ## English
 
+> The stable `v4.0.0` release adds a full IDE workspace without replacing the AI sidebar. Select a source file with one click, open it with a double-click, edit or autosave it, and use the built-in or system terminal from the project path. AI may propose new or changed code files from a frozen IDE context, but every disk write remains reviewable and confirmed. AI Shell is off by default, requires two fresh warnings before each authorization, and confirms every command by default.
+
 ### Download and install
 
-Download the stable `v3.2.4` release from [GitHub Releases](https://github.com/UESTC-ly/CoScribe/releases/latest):
+Download the stable [`v4.0.0` release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.0):
 
 | Platform | Artifact | Target |
 | --- | --- | --- |
-| macOS | `CoScribe-3.2.4-arm64.dmg` | Apple Silicon, macOS 13+ |
-| macOS | `CoScribe-3.2.4-arm64-mac.zip` | Portable Apple Silicon archive |
-| Windows | `CoScribe-Setup-3.2.4-x64.exe` | Windows 10/11 x64 |
-| Linux | `CoScribe-3.2.4-x64.AppImage` | Portable x86-64 AppImage |
-| Linux | `CoScribe-3.2.4-x64.deb` | Debian / Ubuntu x86-64 |
-| All | `SHA256SUMS.txt` | SHA-256 checksums |
+| macOS | [`CoScribe-4.0.0-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-arm64.dmg) | Apple Silicon, macOS 13+ |
+| macOS | [`CoScribe-4.0.0-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-arm64-mac.zip) | Portable Apple Silicon archive |
+| Windows | [`CoScribe-Setup-4.0.0-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-Setup-4.0.0-x64.exe) | Windows 10/11 x64 |
+| Linux | [`CoScribe-4.0.0-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-x64.AppImage) | Portable x86-64 AppImage |
+| Linux | [`CoScribe-4.0.0-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-x64.deb) | Debian / Ubuntu x86-64 |
+| All | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/SHA256SUMS.txt) | SHA-256 checksums |
 
 The builds are currently unsigned.
 
 - **macOS:** drag CoScribe into Applications, then right-click and choose **Open**. If blocked, use System Settings → Privacy & Security → Open Anyway. Screen Recording is used only for region capture; Microphone is used only for local speech input.
 - **Windows:** run the x64 installer. If SmartScreen appears, verify the checksum and source before choosing **More info → Run anyway**.
-- **Linux AppImage:** run `chmod +x CoScribe-3.2.4-x64.AppImage`, then `./CoScribe-3.2.4-x64.AppImage`.
-- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-3.2.4-x64.deb`.
+- **Linux AppImage:** run `chmod +x CoScribe-4.0.0-x64.AppImage`, then `./CoScribe-4.0.0-x64.AppImage`.
+- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-4.0.0-x64.deb`.
 
-> v3.2.4 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked for architecture, packaged contents, and packaged-window E2E behavior. Local speech recognition and system Calendar integration remain macOS-only.
+> v4.0.0 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked for architecture, packaged contents, and packaged-app smoke behavior. The smoke path opens a project, enters the IDE, opens the built-in terminal, and executes a real command. Local speech recognition and system Calendar integration remain macOS-only.
 
 ### Start in five minutes
 
@@ -357,7 +359,7 @@ Image generation has a separate endpoint and key. CoScribe calls `gpt-image-2` w
 | PPTX | Local slide rendering and per-slide text search | Read-only |
 | PPT | Convert to PDF with a separate LibreOffice installation | Read-only |
 | Images | PNG, JPEG, WebP, GIF, SVG, and more | Local OCR / AI Enhance |
-| Text and source files | TXT, JSON, YAML, and common source formats | Read-only search |
+| Text and source files | TXT, JSON, YAML, and common source formats | IDE editing, save/autosave, local symbol suggestions, and confirmed AI file operations |
 | BibTeX / RIS | Text viewer and reference import | Maintain with an external text editor |
 | MHTML / MHT | Complete archive opened by the system browser | Read-only |
 
@@ -388,11 +390,22 @@ Every sent turn freezes its project, pane, document, page or heading, webpage UR
 - Ordinary create, append, and replace operations show a file list and diff before writing.
 - Quick Note is the explicit automatic-save action. AI uses the conversation topic, project tree, and existing notes to choose a destination or create directories and linked notes; it does not default to the open document.
 - AI may create 1–50 Markdown files but cannot delete files, escape the project, follow symlinks, or overwrite binary sources.
+- In ordinary chat, AI may also create, append, or replace supported code and text files inside the project. Every proposal shows its target and diff before the user confirms the write.
 - Accepted transactions appear under AI Operations and can be undone if no later manual edit would be overwritten.
 
 `COSCRIBE.md` is transparent project-level memory for durable goals, terminology, preferences, decisions, and constraints. It is ordinary Markdown and never crosses project boundaries. Do not store secrets or raw conversation dumps there.
 
 Settings → AI Behavior groups the system prompt, context budget, reasoning effort, and project memory. Custom instructions remain below CoScribe's immutable path, secret, and confirmation boundaries.
+
+### IDE, terminal, and AI Shell
+
+- The left-side **IDE** entry treats the current project folder as a code workspace while keeping the AI sidebar, selected provider, conversation, and context scope in place.
+- In the IDE tree, one click selects a code file and a double-click opens it. The editor provides theme-aware syntax colors, a high-contrast caret, `Cmd/Ctrl + S`, and configurable code autosave with an adjustable delay.
+- Completion remains local and deterministic: keywords and symbols from the current file may appear as suggestions, while typing or moving the caret never makes a remote AI completion request.
+- Current content, Current document, and Project scopes understand the active code file. Sending freezes unsaved editor text, while an accepted AI write still revalidates the on-disk revision to prevent stale overwrites.
+- The built-in terminal runs through a main-process PTY with no Node.js access in the renderer. CoScribe can also open an installed system terminal at the current project path.
+- AI Shell is separate from the ordinary terminal and is disabled by default. Settings → AI Behavior only makes the **Enable AI Shell** entry available; it does not authorize AI or execute anything. Each authorization requires two native risk confirmations, stays in memory for the current project, and is revoked when the terminal, project, or app closes.
+- The default approval mode confirms each command separately. Commands run with the signed-in user's permissions rather than inside a filesystem sandbox. Output is size-limited, stripped of control sequences, and returned to the model as untrusted data. Each AI turn may execute at most one command.
 
 ### OCR, images, screenshots, and speech
 
@@ -444,6 +457,8 @@ MCP is an explicit connection boundary, not ambient agent authority. Discovery a
 | Send selection to chat | `⌘ ⇧ K` | `Ctrl + Shift + K` |
 | Capture a region to chat | `⌘ ⇧ D` | `Ctrl + Shift + D` |
 | Save Markdown | `⌘ S` | `Ctrl + S` |
+| Save code | `⌘ S` | `Ctrl + S` |
+| Local code suggestion | `Tab` accepts a visible local candidate; otherwise indents | `Tab` accepts a visible local candidate; otherwise indents |
 | Find | `⌘ F` | `Ctrl + F` |
 | Undo / Redo | `⌘ Z` / `⇧ ⌘ Z` | `Ctrl + Z` / `Ctrl + Shift + Z` |
 | Send / newline | `Enter` / `Shift + Enter` | `Enter` / `Shift + Enter` |
