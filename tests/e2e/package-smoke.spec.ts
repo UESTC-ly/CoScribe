@@ -53,7 +53,7 @@ test('launches the packaged application and opens a project', async () => {
     await page.getByRole('button', { name: '打开终端', exact: true }).click()
     await expect(page.getByRole('button', { name: '配置 AI Shell', exact: true })).toBeVisible()
     await page.locator('.terminal-panel .xterm-screen').click()
-    await page.keyboard.type("printf '%s\\n' \"$((20 + 22))\"")
+    await page.keyboard.type('node -e "console.log(6*7)"')
     await page.keyboard.press('Enter')
     await expect(page.locator('.terminal-panel .xterm-rows')).toContainText('42', { timeout: 15_000 })
   } finally {
