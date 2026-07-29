@@ -197,9 +197,12 @@ function sanitizeProfiles(input: Partial<AppSettings>): AiProviderProfile[] {
 
 export function sanitizeSettings(input: Partial<AppSettings>): SanitizedSettings {
   const theme = input.theme === 'light' || input.theme === 'dark' || input.theme === 'system' ? input.theme : DEFAULT_SETTINGS.theme
-  const context = CONTEXT_SCOPES.has(input.defaultContextScope as ContextScope)
-    ? (input.defaultContextScope as ContextScope)
-    : DEFAULT_SETTINGS.defaultContextScope
+  const requestedContext = input.defaultContextScope as ContextScope
+  const context = requestedContext === 'selection'
+    ? 'visible'
+    : CONTEXT_SCOPES.has(requestedContext)
+      ? requestedContext
+      : DEFAULT_SETTINGS.defaultContextScope
   const profiles = sanitizeProfiles(input)
   const requestedProvider: AiProvider = input.aiProvider === 'anthropic' ? 'anthropic' : 'openai'
   const requestedProfile = profiles.find((profile) => profile.id === input.activeAiProfileId)

@@ -13,7 +13,7 @@
 3. **打开资料**  
    CoScribe 支持 Markdown、PDF、DOCX、PPTX、图片、常见文本与代码文件。Markdown 默认使用预览模式。
 4. **选择上下文**  
-   在聊天输入框上方选择“选中内容”“当前内容”“当前文档”“当前项目”或“模型通用知识”。
+   在聊天输入框上方选择“当前内容”“当前文档”“当前项目”或“模型通用知识”。“当前内容”存在文件或网页选区时会优先只使用选区。
 5. **保存知识**  
    普通 AI 文件修改会先展示差异；点击“整理笔记”时，AI 可以在项目中选择合适位置并创建 Markdown 文件或目录。
 
@@ -30,7 +30,7 @@ flowchart LR
 ### 阅读和提问
 
 - 左侧文件、会话、搜索、标注、记忆、AI 操作和插件图标可以重复点击：第一次打开对应侧栏，再次点击当前图标会收起。左侧栏和 AI 侧栏的收起按钮都位于各自面板内。
-- 在 Markdown、PDF、DOCX、PPTX 或文本中选中文字，再选择“选中内容”。
+- 在 Markdown、PDF、DOCX、PPTX、文本或资料网页中选中文字后，保持“当前内容”即可直接提问；网页选区卡片中的复制按钮不是加入 AI 上下文的必需步骤。
 - 左侧 `IDE` 只切换中央工作区，右侧 AI 侧栏保持不变。代码文件单击选择、双击打开。
 - 按 `Cmd/Ctrl + Shift + K` 可以把文档选区放入聊天输入框。
 - 把文件树中的文件或文件夹拖到聊天输入框，会追加其路径而不会立即发送。
@@ -85,7 +85,7 @@ flowchart LR
 | DOCX | 本地语义预览和全文搜索 |
 | PPTX | 本地只读幻灯片预览和逐页搜索 |
 | 图片 | 查看、缩放、本地 OCR 或显式 AI 增强 |
-| 网页 | 使用最多 10 个标签页的内置资料浏览器，保留历史、Cookie 和登录状态；网页选区自动成为聊天候选，并可保存 Markdown、PDF 或 MHTML |
+| 网页 | 使用最多 10 个标签页的内置资料浏览器，保留历史、Cookie 和登录状态；网页选区自动成为可移除的“当前内容”，并可保存 Markdown、PDF 或 MHTML |
 | 代码 | 在 IDE 中编辑和保存；本地关键字/符号列表始终可用；未保存缓冲区可作为冻结的 AI 上下文 |
 
 ### IDE、终端与 AI Shell
@@ -162,6 +162,6 @@ const note: LearningNote = {
 
 The **IDE** rail entry switches only the center workspace and keeps the AI sidebar intact. Code files are selected with one click and opened with a double click. Code autosave has its own toggle and delay. The editor provides local keyword and current-file symbol candidates but does not call an AI model while you type. The right AI sidebar can still propose creating or editing code files through the normal preview-and-confirm flow. The bottom terminal is independent from AI Shell. AI Shell is off by default, requires a risk warning plus a second confirmation every time it is opened, and defaults to per-command approval.
 
-The OpenAI-compatible and Anthropic Messages profiles are stored separately. The lower-right switcher only shows models already fetched and enabled for the selected provider. The research browser keeps up to 10 tabs plus local history and persistent login cookies; selecting webpage text creates a removable chat candidate. The context meter shows estimated input usage and output reserve; request-only compaction never deletes the visible chat history. Re-click any active left rail icon to collapse its panel.
+The OpenAI-compatible and Anthropic Messages profiles are stored separately. The lower-right switcher only shows models already fetched and enabled for the selected provider. The research browser keeps up to 10 tabs plus local history and persistent login cookies; selected webpage text automatically becomes removable Current content and is sent only with the user's next message. The context meter shows estimated input usage and output reserve; request-only compaction never deletes the visible chat history. Re-click any active left rail icon to collapse its panel.
 
 New projects receive a local copy of this guide. The built-in copy remains available from the **User Guide** button in the upper-right corner.

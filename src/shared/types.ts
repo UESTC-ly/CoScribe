@@ -230,8 +230,9 @@ export type ResearchBrowserSelectionEvent =
   | { type: 'captured'; result: ResearchBrowserExtractResult }
   | { type: 'error'; message: string }
 
-// Auto-detected browser text selection, staged as chat candidate content
-// (never auto-sent, never overwriting the composer draft).
+// Auto-detected browser text selection. It becomes the next "current content"
+// context only when the user submits a chat turn; selection alone never sends
+// data and never overwrites the composer draft.
 export interface WebSelectionCandidate {
   text: string
   title: string

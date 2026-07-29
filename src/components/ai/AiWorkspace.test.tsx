@@ -412,7 +412,7 @@ describe('AiWorkspace', () => {
     ].join('\n'))
   })
 
-  it('preserves the current draft while staging a removable browser selection candidate', () => {
+  it('preserves the current draft while showing removable browser current content', () => {
     const candidate: WebSelectionCandidate = {
       text: 'WEB_SELECTION_CANDIDATE',
       title: '研究资料',
@@ -429,15 +429,16 @@ describe('AiWorkspace', () => {
 
     const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
     expect(textbox).toHaveValue('保留现有问题')
-    const card = screen.getByRole('region', { name: '网页选中内容候选' })
+    const card = screen.getByRole('region', { name: '网页选中内容' })
     expect(card).toHaveTextContent('WEB_SELECTION_CANDIDATE')
     expect(card).toHaveTextContent('研究资料')
+    expect(card).toHaveTextContent('已作为当前内容')
 
     fireEvent.click(within(card).getByRole('button', { name: '将网页选中内容加入输入框' }))
     expect(onInsertWebSelectionCandidate).toHaveBeenCalledWith(candidate)
     expect(textbox).toHaveValue('保留现有问题')
 
-    fireEvent.click(within(card).getByRole('button', { name: '移除网页选中内容候选' }))
+    fireEvent.click(within(card).getByRole('button', { name: '忽略网页选中内容' }))
     expect(onClearWebSelectionCandidate).toHaveBeenCalledOnce()
   })
 
@@ -471,6 +472,7 @@ describe('AiWorkspace', () => {
 
     expect(screen.getByText('LangGraph.pdf')).toBeInTheDocument()
     expect(screen.getByText(/第 17 页/)).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '选中内容' })).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('基于'), { target: { value: 'project' } })
     expect(onContextScopeChange).toHaveBeenCalledWith('project')

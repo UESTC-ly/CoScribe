@@ -66,6 +66,7 @@ import type {
 } from './shared/types'
 import { DEFAULT_SETTINGS } from './shared/types'
 import { isCodeFilePath } from './shared/code-files'
+import { captureAutomaticWebSelectionContext } from './lib/context'
 import { planContextWindow } from './lib/context-window'
 import { mergeAiProgress } from './lib/ai-progress'
 import {
@@ -342,6 +343,8 @@ export default function App(): React.JSX.Element {
     setHydrated(false)
     setError(null)
     setActivePluginId(null)
+    setPendingWebContext(null)
+    setWebSelectionCandidate(null)
     try {
       // Load the real file tree before mounting the workspace. A slow recursive
       // scan should not briefly look like an empty project, and a broken metadata
@@ -487,6 +490,7 @@ export default function App(): React.JSX.Element {
   }), [])
 
   useEffect(() => window.coscribe.browser.onSelectionCandidate((candidate) => {
+    if (candidate) setPendingWebContext(null)
     setWebSelectionCandidate(candidate)
     if (candidate) setStore().setAiVisible(true)
   }), [])
@@ -504,7 +508,7 @@ export default function App(): React.JSX.Element {
         return
       }
       setChatDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${selection}` : selection)
-      setContextScope('selection')
+      setContextScope('visible')
       setStore().setAiVisible(true)
       setChatDraftFocusToken((token) => token + 1)
       setAiError(null)
@@ -809,6 +813,7 @@ export default function App(): React.JSX.Element {
     setBrowserActive(false)
     setActivePluginId(null)
     setPendingWebContext(null)
+    setWebSelectionCandidate(null)
     const tab: OpenTab = { id: `tab:${node.path}`, path: node.path, name: node.name, kind: node.kind }
     setStore().openTab(tab)
     if (node.kind === 'pdf' && location?.page) setStore().updatePdfState(node.path, { page: location.page })
@@ -854,6 +859,7 @@ export default function App(): React.JSX.Element {
       setSelectedTreePath(null)
       setOperationHistory([])
       setPendingWebContext(null)
+      setWebSelectionCandidate(null)
       hydratedProjectPath.current = null
       setHydrated(false)
       setStore().setRecentProjects(await window.coscribe.project.recent())
@@ -1088,7 +1094,7 @@ export default function App(): React.JSX.Element {
       : `请基于这篇网页的完整正文回答：\n\n[${context.documentName}](${capture.url})`
     setPendingWebContext(context)
     setWebSelectionCandidate(null)
-    setContextScope(scope)
+    setContextScope(scope === 'selection' ? 'visible' : scope)
     setChatDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft)
     setStore().setAiVisible(true)
     setChatDraftFocusToken((token) => token + 1)
@@ -1113,7 +1119,7 @@ export default function App(): React.JSX.Element {
     }
     const content = [`网页选中内容：[${title}](${candidate.url})`, '', candidate.text].join('\n')
     setPendingWebContext(context)
-    setContextScope('selection')
+    setContextScope('visible')
     setChatDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${content}` : content)
     setWebSelectionCandidate(null)
     store.setAiVisible(true)
@@ -1138,15 +1144,26 @@ export default function App(): React.JSX.Element {
 
   const sendAiMessage = useCallback(async (payload: AiSendPayload): Promise<void> => {
     const store = setStore()
+    const project = store.project
+    if (!project) return
     let sessionId = store.workspace.currentSessionId
     if (!sessionId) sessionId = store.createSession()
     store.setReferencedFiles(payload.referencedFiles)
+    const automaticWebContext = webSelectionCandidate
+      ? captureAutomaticWebSelectionContext({
+          projectName: project.name,
+          projectPath: project.path,
+          pane: store.workspace.activePane,
+          candidate: webSelectionCandidate,
+          referencedFiles: payload.referencedFiles
+        }, payload.scope)
+      : null
     const context = payload.operationMode
       ? setStore().captureActiveContext('project')
-      : pendingWebContext && pendingWebContext.projectPath === state.project?.path
+      : pendingWebContext && pendingWebContext.projectPath === project.path
         ? { ...pendingWebContext, referencedFiles: [...pendingWebContext.referencedFiles] }
-        : setStore().captureActiveContext(payload.scope)
-    if (!context || !state.project) return
+        : automaticWebContext ?? setStore().captureActiveContext(payload.scope)
+    if (!context) return
     context.referencedFiles = [...payload.referencedFiles]
     const requestId = makeId('ai')
     const userMessage: ChatMessage = {
@@ -1176,6 +1193,7 @@ export default function App(): React.JSX.Element {
       setContextScope('visible')
     }
     setPendingWebContext(null)
+    setWebSelectionCandidate(null)
     activeRequests.current.set(requestId, {
       requestId,
       sessionId,
@@ -1211,7 +1229,7 @@ export default function App(): React.JSX.Element {
       setAiRequestActivity((current) => current?.requestId === requestId ? null : current)
       setAiError(message)
     }
-  }, [beginAiRequest, forceCompactSessionId, pendingWebContext, state.project, state.settings.allowGeneralKnowledge])
+  }, [beginAiRequest, forceCompactSessionId, pendingWebContext, state.settings.allowGeneralKnowledge, webSelectionCandidate])
 
   const captureScreenshot = useCallback(async (): Promise<void> => {
     try {
@@ -1693,6 +1711,7 @@ export default function App(): React.JSX.Element {
     }
     setBrowserActive(false)
     setPendingWebContext(null)
+    setWebSelectionCandidate(null)
     setActivePluginId(pluginId)
   }, [])
 
@@ -1931,7 +1950,16 @@ export default function App(): React.JSX.Element {
     streamingRequestId && currentRequestActivity?.requestId === streamingRequestId
   )
   const dirtyPaths = new Set(selectDirtyDocuments(state).map((document) => document.path))
-  const activeContext = pendingWebContext ?? state.captureActiveContext(contextScope)
+  const automaticWebContext = webSelectionCandidate
+    ? captureAutomaticWebSelectionContext({
+        projectName: state.project.name,
+        projectPath: state.project.path,
+        pane: state.workspace.activePane,
+        candidate: webSelectionCandidate,
+        referencedFiles: state.referencedFiles
+      }, contextScope)
+    : null
+  const activeContext = pendingWebContext ?? automaticWebContext ?? state.captureActiveContext(contextScope)
   const capturedSelectionContext = state.captureActiveContext('selection')
   const selectionContext = capturedSelectionContext?.selection?.trim()
     ? capturedSelectionContext
@@ -2181,7 +2209,7 @@ export default function App(): React.JSX.Element {
             onNewSession={() => { state.createSession() }}
             onRenameSession={state.renameSession}
             onContextScopeChange={(scope) => {
-              if (scope !== 'selection') {
+              if (scope !== 'visible') {
                 const selected = appStore.getState().captureActiveContext('selection')
                 if (selected?.selection?.trim() && selected.documentPath) {
                   setStore().setDocumentContext(selected.documentPath, { selection: '' })
@@ -2192,9 +2220,16 @@ export default function App(): React.JSX.Element {
                   }))
                   window.getSelection()?.removeAllRanges()
                 }
+                setWebSelectionCandidate(null)
               }
               setContextScope(scope)
-              if (pendingWebContext && scope !== pendingWebContext.scope) setPendingWebContext(null)
+              if (
+                pendingWebContext &&
+                scope !== pendingWebContext.scope &&
+                !(scope === 'visible' && pendingWebContext.scope === 'selection')
+              ) {
+                setPendingWebContext(null)
+              }
             }}
             onCompactContext={() => {
               if (currentSession) {

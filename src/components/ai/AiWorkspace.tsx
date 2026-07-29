@@ -179,8 +179,7 @@ const scopeOptions: Array<{
   label: string
   description: string
 }> = [
-  { value: 'selection', label: '选中内容', description: '只读取当前选中的文字' },
-  { value: 'visible', label: '当前内容', description: '当前页、章节或可见段落' },
+  { value: 'visible', label: '当前内容', description: '有选区时优先使用选中文字，否则读取当前页、章节或可见段落' },
   { value: 'document', label: '当前文档', description: '读取正在浏览的完整文档' },
   { value: 'project', label: '当前项目', description: '在项目中的相关文件里检索' },
   { value: 'general', label: '通用知识', description: '不以项目内容作为主要依据' }
@@ -352,7 +351,6 @@ export function AiWorkspace({
     ? (context?.scope === 'selection' ? context : null)
     : selectionContext
   const capturedSelection = capturedSelectionContext?.selection?.trim() ?? ''
-  const selectionAvailable = Boolean(capturedSelection || context?.selection?.trim())
   const documentAvailable = Boolean(context?.documentPath || context?.documentName)
   const sortedSessions = useMemo(
     () => [...sessions].sort((left, right) => right.updatedAt - left.updatedAt),
@@ -745,10 +743,7 @@ export function AiWorkspace({
               <option
                 value={option.value}
                 key={option.value}
-                disabled={
-                  (option.value === 'selection' && !selectionAvailable) ||
-                  (option.value === 'document' && !documentAvailable)
-                }
+                disabled={option.value === 'document' && !documentAvailable}
               >
                 {option.label}
               </option>
@@ -904,26 +899,26 @@ export function AiWorkspace({
 
       <footer className="ai-composer-wrap">
         {composerMode === 'chat' && webSelectionCandidate && (
-          <section className="ai-selection-context ai-selection-context--web" role="region" aria-label="网页选中内容候选">
+          <section className="ai-selection-context ai-selection-context--web" role="region" aria-label="网页选中内容">
             <header>
               <span className="ai-selection-context__icon"><TextQuote aria-hidden="true" /></span>
               <span className="ai-selection-context__identity">
-                <strong>网页选中内容候选</strong>
-                <small>{webSelectionCandidate.title || webSelectionCandidate.url} · {webSelectionCandidate.text.length} 字</small>
+                <strong>网页选中内容</strong>
+                <small>已作为当前内容 · {webSelectionCandidate.title || webSelectionCandidate.url} · {webSelectionCandidate.text.length} 字</small>
               </span>
               <span className="ai-selection-context__actions">
                 <button
                   type="button"
                   aria-label="将网页选中内容加入输入框"
-                  title="加入输入框并作为本次网页上下文"
+                  title="将选中文字复制到输入框"
                   onClick={() => onInsertWebSelectionCandidate?.(webSelectionCandidate)}
                 >
                   <CornerDownLeft aria-hidden="true" />
                 </button>
                 <button
                   type="button"
-                  aria-label="移除网页选中内容候选"
-                  title="忽略此条候选"
+                  aria-label="忽略网页选中内容"
+                  title="本次提问不使用此网页选区"
                   onClick={onClearWebSelectionCandidate}
                 >
                   <X aria-hidden="true" />

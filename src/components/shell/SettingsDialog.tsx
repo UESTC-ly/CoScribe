@@ -581,7 +581,7 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
                   <label className="field-label">
                     默认范围
                     <select className="field" value={draft.defaultContextScope} onChange={(event) => patch('defaultContextScope', event.target.value as AppSettings['defaultContextScope'])}>
-                      <option value="visible">自动（当前可见内容）</option>
+                      <option value="visible">当前内容（选区优先）</option>
                       <option value="document">当前文档</option>
                       <option value="project">当前项目</option>
                       <option value="general">仅模型知识</option>

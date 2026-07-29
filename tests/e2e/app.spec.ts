@@ -575,7 +575,22 @@ test('renders PPTX slides locally and searches extracted slide text', async () =
 test('browses an original isolated webpage and saves complete MHTML, semantic Markdown, and PDF', async ({}, testInfo) => {
   test.setTimeout(90_000)
   const articleRequestCookies: string[] = []
-  const server = createServer((request, response) => {
+  let aiRequestBody: Record<string, unknown> | null = null
+  const server = createServer(async (request, response) => {
+    if (request.method === 'POST' && request.url?.endsWith('/responses')) {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      aiRequestBody = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      response.end(JSON.stringify({
+        output: [{
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: '已根据网页选区回答。' }]
+        }]
+      }))
+      return
+    }
     if (request.url === '/pixel.png') {
       response.writeHead(200, { 'Content-Type': 'image/png' })
       response.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'))
@@ -608,6 +623,11 @@ test('browses an original isolated webpage and saves complete MHTML, semantic Ma
   try {
     const port = (server.address() as AddressInfo).port
     const url = `http://127.0.0.1:${port}/article`
+    await page.getByRole('button', { name: '配置', exact: true }).click()
+    await page.getByLabel('服务地址').fill(`http://127.0.0.1:${port}`)
+    await page.getByLabel('模型', { exact: true }).fill('local-web-context-model')
+    await page.getByRole('button', { name: '保存设置' }).click()
+
     await page.getByRole('button', { name: '资料浏览器', exact: true }).click()
     await expect(page.getByRole('region', { name: '资料浏览器' })).toBeVisible()
     await page.getByLabel('网址或搜索内容').fill(url)
@@ -727,11 +747,22 @@ test('browses an original isolated webpage and saves complete MHTML, semantic Ma
         document.querySelector('#selection').dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
       })()`)
     }, url)
-    const browserSelectionCandidate = page.getByRole('region', { name: '网页选中内容候选' })
+    const browserSelectionCandidate = page.getByRole('region', { name: '网页选中内容' })
     await expect(browserSelectionCandidate).toContainText('WEB_SELECTION_SENTINEL')
     await expect(page.getByLabel('向 AI 提问')).toHaveValue('')
-    await page.getByRole('button', { name: '移除网页选中内容候选' }).click()
+    await expect(page.getByLabel('基于')).toHaveValue('visible')
+    await expect(page.getByLabel('基于').locator('option[value="selection"]')).toHaveCount(0)
+    await expect(page.getByLabel('当前 AI 上下文')).toContainText('Isolated Research Page')
+
+    await page.getByLabel('向 AI 提问').fill('这是什么意思')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect(page.getByText('已根据网页选区回答。')).toBeVisible()
     await expect(browserSelectionCandidate).toBeHidden()
+    const serializedAiRequest = JSON.stringify(aiRequestBody)
+    expect(serializedAiRequest).toContain('这是什么意思')
+    expect(serializedAiRequest).toContain('WEB_SELECTION_SENTINEL')
+    expect(serializedAiRequest).toContain(url)
+    expect(serializedAiRequest).not.toContain('E2E_SENTINEL')
 
     await electronApp.evaluate(async ({ webContents }, expectedUrl) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === expectedUrl)
@@ -744,7 +775,7 @@ test('browses an original isolated webpage and saves complete MHTML, semantic Ma
       })
     }, url)
     await expect(page.getByLabel('向 AI 提问')).toContainText('WEB_SELECTION_SENTINEL')
-    await expect(page.getByLabel('基于')).toHaveValue('selection')
+    await expect(page.getByLabel('基于')).toHaveValue('visible')
     await expect(page.getByLabel('当前 AI 上下文')).toContainText('Isolated Research Page')
 
     await page.getByRole('button', { name: '保存完整网页归档' }).click()
@@ -831,7 +862,7 @@ test('copies selected document text into the AI composer with a shortcut', async
 
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+K' : 'Control+Shift+K')
   await expect(page.getByLabel('向 AI 提问')).toHaveValue('E2E_SENTINEL 路由')
-  await expect(page.getByLabel('基于')).toHaveValue('selection')
+  await expect(page.getByLabel('基于')).toHaveValue('visible')
 })
 
 test('persists transparent project memory and the editable system prompt', async () => {

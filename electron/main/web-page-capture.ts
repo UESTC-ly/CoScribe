@@ -217,7 +217,8 @@ export const PAGE_PRINT_BUDGET_SCRIPT = String.raw`(() => {
 // selections out of the isolated world. The isolated world has no ipcRenderer,
 // so it emits a console line the main process filters on. This is strictly less
 // privileged than a preload bridge: a page can only surface its own selected
-// text, and the renderer merely stages it as a removable, non-auto-sent chip.
+// text. The renderer stages it as removable current content, and it leaves the
+// machine only if the user later submits an AI request.
 export const SELECTION_CONSOLE_PREFIX = '__COSCRIBE_SELECTION__'
 
 export function parseSelectionConsoleMessage(

@@ -69,6 +69,13 @@ describe('v2 settings boundaries', () => {
     expect(settings.codeAutoSaveDelay).toBe(60_000)
   })
 
+  it('migrates the removed selection-only default to automatic current content', () => {
+    expect(sanitizeSettings({
+      ...DEFAULT_SETTINGS,
+      defaultContextScope: 'selection'
+    }).defaultContextScope).toBe('visible')
+  })
+
   it('sanitizes Anthropic and context-window preferences', () => {
     const settings = sanitizeSettings({
       ...DEFAULT_SETTINGS,

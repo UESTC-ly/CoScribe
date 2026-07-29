@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  captureAutomaticWebSelectionContext,
   captureContextSnapshot,
   choosePdfVisiblePages,
   getMarkdownHeadings,
@@ -128,6 +129,35 @@ describe('AI context priority and snapshots', () => {
     expect(snapshot.referencedFiles).toEqual(['notes.md'])
     expect(snapshot.scope).toBe('selection')
     expect(snapshot.capturedAt).toBe(123)
+  })
+
+  it('uses a staged webpage selection for current content without overriding explicit scopes', () => {
+    const draft = {
+      projectName: 'Study',
+      projectPath: '/study',
+      pane: 'primary' as const,
+      candidate: {
+        text: 'WEB_SELECTION',
+        title: 'Browser source',
+        url: 'https://example.com/source'
+      },
+      referencedFiles: ['notes.md'],
+      capturedAt: 456
+    }
+
+    expect(captureAutomaticWebSelectionContext(draft, 'visible')).toEqual(expect.objectContaining({
+      projectName: 'Study',
+      documentName: 'Browser source',
+      webUrl: 'https://example.com/source',
+      selection: 'WEB_SELECTION',
+      visibleText: 'WEB_SELECTION',
+      scope: 'selection',
+      referencedFiles: ['notes.md'],
+      capturedAt: 456
+    }))
+    expect(captureAutomaticWebSelectionContext(draft, 'document')).toBeNull()
+    expect(captureAutomaticWebSelectionContext(draft, 'project')).toBeNull()
+    expect(captureAutomaticWebSelectionContext(draft, 'general')).toBeNull()
   })
 })
 

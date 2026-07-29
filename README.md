@@ -29,20 +29,20 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 ## 中文
 
-> `v4.0.0` 稳定版新增完整 IDE 工作区：左侧 IDE 入口只切换中央工作区，AI 侧栏保持不变；代码文件单击选择、双击打开，可编辑和自动保存。本地关键字和当前文件符号会即时显示为列表，输入代码时不会自动请求 AI 模型。右侧 AI 仍可基于发送时冻结的代码上下文提议创建或修改代码文件，写盘前必须预览并确认。底部终端可直接操作项目，也可唤起系统终端。AI Shell 默认关闭，每次开启都要先阅读风险警告并再次确认，默认还会逐条确认命令。
+> `v4.0.1` 稳定版修复了网页选区上下文：在资料浏览器选中文字后，选区会标记为“当前内容”，用户发送问题时自动冻结选中文字、页面标题和 URL，不再需要额外点击“加入上下文”。上下文菜单同时简化为“当前内容、当前文档、当前项目、模型通用知识”。v4.0.0 引入的完整 IDE、终端和受控 AI Shell 保持不变。
 
 ### 下载与安装
 
-从 [`v4.0.0` GitHub Release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.0) 下载稳定版：
+从 [`v4.0.1` GitHub Release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.1) 下载稳定版：
 
 | 系统 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS | [`CoScribe-4.0.0-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-arm64.dmg) | Apple Silicon，macOS 13+ |
-| macOS | [`CoScribe-4.0.0-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-arm64-mac.zip) | Apple Silicon 免安装压缩包 |
-| Windows | [`CoScribe-Setup-4.0.0-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-Setup-4.0.0-x64.exe) | Windows 10/11 x64 |
-| Linux | [`CoScribe-4.0.0-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-x64.AppImage) | 通用 x86-64 便携包 |
-| Linux | [`CoScribe-4.0.0-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-x64.deb) | Debian / Ubuntu x86-64 |
-| 全平台 | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/SHA256SUMS.txt) | 安装包 SHA-256 校验值 |
+| macOS | [`CoScribe-4.0.1-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-arm64.dmg) | Apple Silicon，macOS 13+ |
+| macOS | [`CoScribe-4.0.1-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-arm64-mac.zip) | Apple Silicon 免安装压缩包 |
+| Windows | [`CoScribe-Setup-4.0.1-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-Setup-4.0.1-x64.exe) | Windows 10/11 x64 |
+| Linux | [`CoScribe-4.0.1-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-x64.AppImage) | 通用 x86-64 便携包 |
+| Linux | [`CoScribe-4.0.1-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-x64.deb) | Debian / Ubuntu x86-64 |
+| 全平台 | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/SHA256SUMS.txt) | 安装包 SHA-256 校验值 |
 
 这些安装包目前没有 Apple Developer ID、Windows Authenticode 或 Linux 发行版签名。
 
@@ -55,7 +55,7 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 #### Windows
 
-1. 运行 `CoScribe-Setup-4.0.0-x64.exe`。
+1. 运行 `CoScribe-Setup-4.0.1-x64.exe`。
 2. 如果 SmartScreen 拦截未签名安装包，确认文件来自本仓库并核对 SHA-256 后，选择“更多信息 → 仍要运行”。
 3. 安装完成后从开始菜单启动 CoScribe。
 
@@ -64,26 +64,26 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 AppImage：
 
 ```bash
-chmod +x CoScribe-4.0.0-x64.AppImage
-./CoScribe-4.0.0-x64.AppImage
+chmod +x CoScribe-4.0.1-x64.AppImage
+./CoScribe-4.0.1-x64.AppImage
 ```
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install ./CoScribe-4.0.0-x64.deb
+sudo apt install ./CoScribe-4.0.1-x64.deb
 ```
 
 Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门户配置。
 
-> v4.0.0 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并通过架构、打包内容和成品应用冒烟验证；验证覆盖打开项目、进入 IDE、打开内置终端并实际执行命令。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
+> v4.0.1 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并通过架构、打包内容和成品应用冒烟验证；验证覆盖打开项目、进入 IDE、打开内置终端并实际执行命令。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
 
 ### 五分钟开始使用
 
 1. **打开项目**：首页点击“打开文件夹”，选择已有资料目录；也可以创建新项目。
 2. **配置 AI**：打开“设置 → AI 服务商”，添加一组或多组 OpenAI-compatible / Anthropic 地址、模型和 API Key。
 3. **打开资料**：从文件树打开 Markdown、PDF、DOCX、PPTX、图片或文本。Markdown 默认进入预览。
-4. **固定上下文**：选择“当前内容”“选中内容”“当前文档”或“当前项目”，再向 AI 提问。
+4. **固定上下文**：选择“当前内容”“当前文档”“当前项目”或“模型通用知识”，再向 AI 提问；“当前内容”存在文件或网页选区时优先只使用选区。
 5. **保存结果**：普通文件修改先检查差异并接受；点击“整理笔记”时，AI 会在项目内选择合适位置或创建新目录和笔记。
 
 新建项目会自动包含 `CoScribe 使用指南.md`。首页和项目右上角也有“使用指南”按钮，即使打开已有文件夹也能随时查看内置版本。指南包含基础配置、上下文选择、截图/OCR、快捷键、Mermaid 与代码块示例。
@@ -139,15 +139,14 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 
 ### 把正确的上下文交给 AI
 
-上下文范围有五档：
+界面提供四种上下文范围：
 
-- **选中内容**：只发送已经捕获的文字。
-- **当前内容**：优先使用实时选区，否则使用当前页、章节或可见段落。
+- **当前内容**：优先使用已经捕获的文件或网页选区；没有选区时使用当前页、章节或可见段落。
 - **当前文档**：使用完整文档；大文件会遵守读取上限。
 - **当前项目**：查询本地增量索引，返回带文件、标题、行号或 PDF 页码的相关片段。
 - **模型通用知识**：不读取当前项目内容。
 
-在 Markdown、PDF、DOCX、PPTX 或文本中选中文字后，选择“选中内容”，或按 `Cmd/Ctrl + Shift + K`。即使随后点击聊天输入框，原文仍保留独立的 AI 上下文高亮；输入框上方会显示来源文件、字数和摘录，并提供定位、插入输入框和清除操作。发送后，这份冻结选区会保存在用户消息里。
+在 Markdown、PDF、DOCX、PPTX、文本或资料网页中选中文字后，保持“当前内容”即可直接提问。即使随后点击聊天输入框，原文仍保留独立的 AI 上下文高亮；输入框上方会显示来源、字数和摘录。网页选区卡片中的复制按钮只用于把原文也放入输入框，并不是让 AI 识别选区的必需步骤；关闭卡片则会忽略该网页选区。文档选区仍可按 `Cmd/Ctrl + Shift + K` 固定。发送时，这份选区及其文件位置或网页 URL 会一起冻结到用户消息中。
 
 ![Persistent selected-content context](docs/images/selection-context.png)
 
@@ -198,7 +197,7 @@ OCR 与 AI 输出都可能出错，重要内容需要对照原始资料。
 
 - 标签栏支持新建、切换和关闭页面；达到 10 页后需先关闭一个标签。
 - 浏览历史保存在本地并可随时清空；Cookie 与登录状态使用独立持久会话保留。
-- 选中网页文字后会自动形成可移除的聊天候选，不覆盖现有输入，也不会自动发送。
+- 选中网页文字后会自动成为可移除的“当前内容”，不覆盖现有输入，也不会在用户发送问题前传给 AI。
 - 页面保留原始 DOM、样式和交互，不会被纯文本阅读模式替换。
 - 可把网页选区、正文或引用来源发送给 AI。
 - 可保存完整 MHTML、语义化 Markdown 或保持打印排版的 PDF。
@@ -303,36 +302,36 @@ npm run verify:package:linux
 
 ## English
 
-> The stable `v4.0.0` release adds a full IDE workspace without replacing the AI sidebar. Select a source file with one click, open it with a double-click, edit or autosave it, and use the built-in or system terminal from the project path. AI may propose new or changed code files from a frozen IDE context, but every disk write remains reviewable and confirmed. AI Shell is off by default, requires two fresh warnings before each authorization, and confirms every command by default.
+> The stable `v4.0.1` release fixes webpage-selection context. Text selected in the research browser is now marked as Current content; sending a question automatically freezes the text, page title, and URL without an extra “add to context” click. The scope menu is simplified to Current content, Current document, Project, and General knowledge. The IDE, terminal, and controlled AI Shell introduced in v4.0.0 remain unchanged.
 
 ### Download and install
 
-Download the stable [`v4.0.0` release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.0):
+Download the stable [`v4.0.1` release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.1):
 
 | Platform | Artifact | Target |
 | --- | --- | --- |
-| macOS | [`CoScribe-4.0.0-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-arm64.dmg) | Apple Silicon, macOS 13+ |
-| macOS | [`CoScribe-4.0.0-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-arm64-mac.zip) | Portable Apple Silicon archive |
-| Windows | [`CoScribe-Setup-4.0.0-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-Setup-4.0.0-x64.exe) | Windows 10/11 x64 |
-| Linux | [`CoScribe-4.0.0-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-x64.AppImage) | Portable x86-64 AppImage |
-| Linux | [`CoScribe-4.0.0-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/CoScribe-4.0.0-x64.deb) | Debian / Ubuntu x86-64 |
-| All | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.0/SHA256SUMS.txt) | SHA-256 checksums |
+| macOS | [`CoScribe-4.0.1-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-arm64.dmg) | Apple Silicon, macOS 13+ |
+| macOS | [`CoScribe-4.0.1-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-arm64-mac.zip) | Portable Apple Silicon archive |
+| Windows | [`CoScribe-Setup-4.0.1-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-Setup-4.0.1-x64.exe) | Windows 10/11 x64 |
+| Linux | [`CoScribe-4.0.1-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-x64.AppImage) | Portable x86-64 AppImage |
+| Linux | [`CoScribe-4.0.1-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-x64.deb) | Debian / Ubuntu x86-64 |
+| All | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/SHA256SUMS.txt) | SHA-256 checksums |
 
 The builds are currently unsigned.
 
 - **macOS:** drag CoScribe into Applications, then right-click and choose **Open**. If blocked, use System Settings → Privacy & Security → Open Anyway. Screen Recording is used only for region capture; Microphone is used only for local speech input.
 - **Windows:** run the x64 installer. If SmartScreen appears, verify the checksum and source before choosing **More info → Run anyway**.
-- **Linux AppImage:** run `chmod +x CoScribe-4.0.0-x64.AppImage`, then `./CoScribe-4.0.0-x64.AppImage`.
-- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-4.0.0-x64.deb`.
+- **Linux AppImage:** run `chmod +x CoScribe-4.0.1-x64.AppImage`, then `./CoScribe-4.0.1-x64.AppImage`.
+- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-4.0.1-x64.deb`.
 
-> v4.0.0 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked for architecture, packaged contents, and packaged-app smoke behavior. The smoke path opens a project, enters the IDE, opens the built-in terminal, and executes a real command. Local speech recognition and system Calendar integration remain macOS-only.
+> v4.0.1 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked for architecture, packaged contents, and packaged-app smoke behavior. The smoke path opens a project, enters the IDE, opens the built-in terminal, and executes a real command. Local speech recognition and system Calendar integration remain macOS-only.
 
 ### Start in five minutes
 
 1. **Open a project:** select an existing folder or create a new one.
 2. **Configure AI:** add one or more named OpenAI-compatible or Anthropic profiles under Settings → AI Providers.
 3. **Read a source:** open Markdown, PDF, DOCX, PPTX, an image, or text. Markdown opens in Preview by default.
-4. **Freeze the scope:** choose Current content, Selection, Current document, or Project before sending.
+4. **Freeze the scope:** choose Current content, Current document, Project, or General knowledge before sending. Current content prioritizes a captured file or webpage selection.
 5. **Save durable results:** review ordinary file proposals before accepting them; use Quick Note when AI should route and save notes inside the project.
 
 Every new project includes an editable `CoScribe 使用指南.md`. The **User Guide** button on both the home screen and project title bar always opens the built-in copy, including setup, context, screenshot/OCR, shortcut, Mermaid, and code-block examples.
@@ -376,9 +375,9 @@ Image generation has a separate endpoint and key. CoScribe calls `gpt-image-2` w
 
 ### Give AI the right context
 
-The five scopes are Selection, Current content, Current document, Project, and General knowledge. Project scope queries a local incremental index and preserves source paths, headings or lines, and PDF page numbers.
+The four UI scopes are Current content, Current document, Project, and General knowledge. Current content prioritizes a captured selection and otherwise uses the active page, section, or visible text. Project scope queries a local incremental index and preserves source paths, headings or lines, and PDF page numbers.
 
-Select text in Markdown, PDF, DOCX, PPTX, or text and choose Selection, or press `Cmd/Ctrl + Shift + K`. The source keeps a dedicated AI-context highlight after focus moves to the composer. A compact card shows the document, character count, and excerpt, with Locate, Insert, and Clear actions. Sending moves the frozen selection into the user message.
+Select text in Markdown, PDF, DOCX, PPTX, text, or a research webpage and keep Current content selected. The source remains highlighted after focus moves to the composer, and a compact card shows its source, character count, and excerpt. A webpage card's copy action is optional—it inserts the excerpt into the draft but is not required for AI context—while dismissing the card ignores that selection. `Cmd/Ctrl + Shift + K` still freezes a document selection. Sending freezes the selected text together with its document location or webpage URL into the user message.
 
 ![Persistent selected-content context](docs/images/selection-context.png)
 
@@ -423,7 +422,7 @@ Always verify OCR and AI output against the primary source.
 
 ![CoScribe research browser preserving the original webpage](docs/images/research-browser.png)
 
-The globe icon opens a research browser backed by Electron's existing Chromium, with up to 10 independent tabs. Local history can be reviewed or cleared, while a dedicated persistent session preserves cookies and logins. Selecting webpage text creates a removable chat candidate without replacing or sending the current draft. Send a selection, extracted article text, or a citation to AI; save the page as complete MHTML, semantic Markdown, or print-layout PDF.
+The globe icon opens a research browser backed by Electron's existing Chromium, with up to 10 independent tabs. Local history can be reviewed or cleared, while a dedicated persistent session preserves cookies and logins. Selected webpage text becomes removable Current content without replacing the draft or reaching AI before the user sends a message. Send a selection, extracted article text, or a citation to AI; save the page as complete MHTML, semantic Markdown, or print-layout PDF.
 
 MHTML preserves the currently loaded HTML, styles, and resources as one all-or-nothing file up to 256 MB without passing through the AI text limit. Video, complex downloads, direct media, and popups go to the system browser.
 

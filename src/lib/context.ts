@@ -1,4 +1,10 @@
-import type { ContextScope, ContextSnapshot, FileKind, PaneId } from '../shared/types'
+import type {
+  ContextScope,
+  ContextSnapshot,
+  FileKind,
+  PaneId,
+  WebSelectionCandidate
+} from '../shared/types'
 
 export type ResolvedContextSource =
   | 'selection'
@@ -35,6 +41,15 @@ export interface ContextSnapshotDraft extends ContextPriorityInput {
   pdfPage?: number
   visiblePages?: number[]
   markdownHeading?: string
+  referencedFiles?: string[]
+  capturedAt?: number
+}
+
+export interface AutomaticWebSelectionContextDraft {
+  projectName: string
+  projectPath: string
+  pane: PaneId
+  candidate: WebSelectionCandidate
   referencedFiles?: string[]
   capturedAt?: number
 }
@@ -113,6 +128,30 @@ export function captureContextSnapshot(
     referencedFiles: [...(draft.referencedFiles ?? [])],
     capturedAt: draft.capturedAt ?? Date.now()
   }
+}
+
+/**
+ * Promotes a still-visible research-browser selection into the normal
+ * "current content" request. Explicit document/project/general scopes keep
+ * their existing boundaries and therefore ignore the staged selection.
+ */
+export function captureAutomaticWebSelectionContext(
+  draft: AutomaticWebSelectionContextDraft,
+  requestedScope: ContextScope
+): ContextSnapshot | null {
+  if (requestedScope !== 'visible') return null
+  const title = draft.candidate.title.trim() || draft.candidate.url
+  return captureContextSnapshot({
+    projectName: draft.projectName,
+    projectPath: draft.projectPath,
+    pane: draft.pane,
+    documentName: title,
+    webUrl: draft.candidate.url,
+    selection: draft.candidate.text,
+    visibleText: draft.candidate.text,
+    referencedFiles: draft.referencedFiles,
+    capturedAt: draft.capturedAt
+  }, 'selection')
 }
 
 export function cloneContextSnapshot(snapshot: ContextSnapshot): ContextSnapshot {
