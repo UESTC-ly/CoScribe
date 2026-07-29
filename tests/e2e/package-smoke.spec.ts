@@ -26,6 +26,7 @@ test('launches the packaged application and opens a project', async () => {
 
   try {
     const page = await app.firstWindow()
+    await page.setViewportSize({ width: 900, height: 700 })
     await page.waitForLoadState('domcontentloaded')
     await page.waitForFunction(() => Boolean(window.coscribe))
     await expect(page).toHaveTitle('CoScribe')

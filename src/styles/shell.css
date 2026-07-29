@@ -382,6 +382,12 @@
 @media (max-width: 1099px) {
   .project-navigator { position: absolute; left: 46px; top: 42px; bottom: 23px; z-index: 100; box-shadow: 12px 0 30px rgb(0 0 0 / 14%); }
   .ai-workspace { position: absolute !important; right: 0; top: 42px; bottom: 23px; z-index: 110; width: min(var(--ai-width, 400px), 88vw) !important; box-shadow: -12px 0 30px rgb(0 0 0 / 14%); }
+  .app-shell.is-ide-workspace .project-navigator {
+    position: static;
+    z-index: auto;
+    height: 100%;
+    box-shadow: none;
+  }
   .app-shell.is-ide-workspace .app-body > .ai-workspace {
     position: static !important;
     z-index: auto;

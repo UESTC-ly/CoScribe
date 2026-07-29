@@ -12,6 +12,9 @@ describe('compact IDE layout contract', () => {
 
     expect(appSource).toContain("state.workspace.navSection === 'ide' ? 'is-ide-workspace' : ''")
     expect(shellStyles).toMatch(
+      /\.app-shell\.is-ide-workspace\s+\.project-navigator\s*\{[\s\S]*?position:\s*static;[\s\S]*?z-index:\s*auto;/u
+    )
+    expect(shellStyles).toMatch(
       /\.app-shell\.is-ide-workspace\s+\.app-body\s*>\s*\.ai-workspace\s*\{[\s\S]*?position:\s*static\s*!important;[\s\S]*?width:\s*min\(var\(--ai-width,[\s\S]*?\)\s*!important;/u
     )
   })
