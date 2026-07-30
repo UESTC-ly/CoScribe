@@ -13,7 +13,7 @@ const roots: string[] = []
 async function mockProject(): Promise<ProjectService> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'coscribe-web-tracker-'))
   roots.push(root)
-  await mkdir(path.join(root, '.vibeknowledge'), { recursive: true })
+  await mkdir(path.join(root, '.coscribe'), { recursive: true })
   let data: unknown = null
   const guard = new ProjectPathGuard(root)
   const project = {

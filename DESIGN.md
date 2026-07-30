@@ -89,10 +89,10 @@
 - Framework/styling system: Electron, React, TypeScript and repository-local CSS variables; no new design-system dependency.
 - Design-token constraints: extend existing semantic tokens instead of hard-coded theme-specific component colors; light and dark themes must share the same semantic roles.
 - Performance constraints: resizing must remain synchronous and avoid layout-heavy observers in pointer-move loops.
-- Compatibility constraints: preserve existing `.vibeknowledge` project metadata and legacy user settings/API credentials during the CoScribe rename.
+- Compatibility constraints: import existing `.vibeknowledge` project metadata into `.coscribe` without deleting or overwriting legacy sources, while preserving the legacy user-level settings/API-credential path.
 - Test/screenshot expectations: unit-test layout calculations; E2E-test expansion beyond 560px, immediate reverse dragging, keyboard reset and light/dark critical surfaces.
 
 ## Open questions
 
-- [ ] Decide whether a future major version should migrate the hidden `.vibeknowledge` metadata directory to `.coscribe`; compatibility currently takes priority.
+- [x] Import project-local `.vibeknowledge` metadata and root `COSCRIBE.md` into `.coscribe`, leaving legacy sources untouched so merely opening a Git project cannot delete tracked files.
 - [ ] Define signed/notarized macOS distribution once an Apple Developer ID is available.

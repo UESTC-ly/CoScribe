@@ -29,20 +29,20 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 ## 中文
 
-> `v4.0.1` 稳定版修复了网页选区上下文：在资料浏览器选中文字后，选区会标记为“当前内容”，用户发送问题时自动冻结选中文字、页面标题和 URL，不再需要额外点击“加入上下文”。上下文菜单同时简化为“当前内容、当前文档、当前项目、模型通用知识”。v4.0.0 引入的完整 IDE、终端和受控 AI Shell 保持不变。
+> `v4.0.2` 稳定版聚焦可靠性：活动项目记忆统一存入隐藏的 `.coscribe/` 目录，旧数据复制导入但保留原文件；“整理笔记”改为确认后写入；全量会话压缩会在后续请求中持续生效；文件树刷新、AI 指令历史和设置布局获得明确反馈；macOS 截图恢复为高分辨率透明框选，并能在权限异常时自动打开系统设置。v4.0.1 的网页选区上下文与 v4.0.0 的 IDE、终端和受控 AI Shell 保持不变。
 
 ### 下载与安装
 
-从 [`v4.0.1` GitHub Release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.1) 下载稳定版：
+从 [`v4.0.2` GitHub Release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.2) 下载稳定版：
 
 | 系统 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS | [`CoScribe-4.0.1-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-arm64.dmg) | Apple Silicon，macOS 13+ |
-| macOS | [`CoScribe-4.0.1-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-arm64-mac.zip) | Apple Silicon 免安装压缩包 |
-| Windows | [`CoScribe-Setup-4.0.1-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-Setup-4.0.1-x64.exe) | Windows 10/11 x64 |
-| Linux | [`CoScribe-4.0.1-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-x64.AppImage) | 通用 x86-64 便携包 |
-| Linux | [`CoScribe-4.0.1-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-x64.deb) | Debian / Ubuntu x86-64 |
-| 全平台 | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/SHA256SUMS.txt) | 安装包 SHA-256 校验值 |
+| macOS | [`CoScribe-4.0.2-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/CoScribe-4.0.2-arm64.dmg) | Apple Silicon，macOS 13+ |
+| macOS | [`CoScribe-4.0.2-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/CoScribe-4.0.2-arm64-mac.zip) | Apple Silicon 免安装压缩包 |
+| Windows | [`CoScribe-Setup-4.0.2-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/CoScribe-Setup-4.0.2-x64.exe) | Windows 10/11 x64 |
+| Linux | [`CoScribe-4.0.2-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/CoScribe-4.0.2-x64.AppImage) | 通用 x86-64 便携包 |
+| Linux | [`CoScribe-4.0.2-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/CoScribe-4.0.2-x64.deb) | Debian / Ubuntu x86-64 |
+| 全平台 | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/SHA256SUMS.txt) | 安装包 SHA-256 校验值 |
 
 这些安装包目前没有 Apple Developer ID、Windows Authenticode 或 Linux 发行版签名。
 
@@ -55,7 +55,7 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 #### Windows
 
-1. 运行 `CoScribe-Setup-4.0.1-x64.exe`。
+1. 运行 `CoScribe-Setup-4.0.2-x64.exe`。
 2. 如果 SmartScreen 拦截未签名安装包，确认文件来自本仓库并核对 SHA-256 后，选择“更多信息 → 仍要运行”。
 3. 安装完成后从开始菜单启动 CoScribe。
 
@@ -64,19 +64,19 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 AppImage：
 
 ```bash
-chmod +x CoScribe-4.0.1-x64.AppImage
-./CoScribe-4.0.1-x64.AppImage
+chmod +x CoScribe-4.0.2-x64.AppImage
+./CoScribe-4.0.2-x64.AppImage
 ```
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install ./CoScribe-4.0.1-x64.deb
+sudo apt install ./CoScribe-4.0.2-x64.deb
 ```
 
 Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门户配置。
 
-> v4.0.1 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并通过架构、打包内容和成品应用冒烟验证；验证覆盖打开项目、进入 IDE、打开内置终端并实际执行命令。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
+> v4.0.2 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并在发布前通过架构、打包内容和成品应用冒烟验证；验证覆盖打开项目、进入 IDE、打开内置终端并实际执行命令。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
 
 ### 五分钟开始使用
 
@@ -156,7 +156,7 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 
 - AI 回答生成期间会持续显示当前阶段、服务商/模型、正在处理的工具和本次请求已用时间，不再只显示无说明的等待动画。
 - 普通创建、追加或替换 Markdown 会先显示文件列表和差异，接受后才写盘。
-- “整理笔记”是明确的自动保存动作：AI 根据会话主题、项目目录和已有笔记选择目标，也可以创建子目录、多份笔记和互链结构；不会默认追加到当前文档。
+- “整理笔记”会先生成可审阅的多文件预览：AI 根据会话主题、项目目录和已有笔记选择目标，也可以创建子目录、多份笔记和互链结构；只有接受预览后才写盘，不会默认追加到当前文档。
 - 聊天输入框支持 `/compact`（AI 全量压缩并持久化会话摘要）、`/fork`、`/resume`、`/new`、`/clear`、`/note`、`/stop`、`/quit` 和 `/help`。普通的上下文自动压缩仍保留为轻量保护策略；全量压缩不会删除原始聊天。
 - “整理笔记”会保存已处理到的会话检查点，后续只整理新增内容；筛选、检索、生成、校验和写入阶段会在聊天窗口中流式显示。
 - AI 可以一次创建 1–50 个 Markdown 文件，但不能删除文件、写入项目外路径、跟随符号链接或覆盖二进制资料。
@@ -173,7 +173,7 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 - AI Shell 与普通终端分离且默认关闭。“设置 → AI 行为 → 启用 AI Shell 功能”只显示终端里的开启入口，不会授权 AI 或执行命令；每次实际开启都必须经过两次原生风险确认，授权只驻留内存并绑定当前项目，关闭终端、项目或应用即撤销。
 - 默认“每条命令单独确认”。命令使用当前登录用户权限运行，不是文件系统沙箱；输出会清理控制序列、限制大小，并作为不可信数据返回模型。每次 AI 请求最多执行一条命令。
 
-项目根目录的 `COSCRIBE.md` 是项目级长期记忆。它适合记录稳定目标、术语、偏好、决策和限制，不适合存放 API Key、密码或大段会话原文。左侧“记忆”可以直接审阅和编辑；设置中也可以关闭向模型发送记忆，而不删除文件。
+项目隐藏文件 `.coscribe/COSCRIBE.md` 是项目级长期记忆。它适合记录稳定目标、术语、偏好、决策和限制，不适合存放 API Key、密码或大段会话原文。左侧“记忆”可以直接审阅和编辑；设置中也可以关闭向模型发送记忆，而不删除文件。首次打开旧项目时，根目录 `COSCRIBE.md` 与 `.vibeknowledge/` 的可兼容数据会复制到 `.coscribe/`，旧文件保持原样，避免仅打开项目就删除 Git 已跟踪内容；新位置已有同名文件时以新位置为准。
 
 “设置 → AI 行为”集中管理系统提示词、上下文、思考强度和项目记忆。自定义提示词不能覆盖 CoScribe 固定的路径、密钥和文件确认边界。
 
@@ -184,7 +184,7 @@ CoScribe 会识别已有文件与子文件夹，默认排除 `.git`、`.venv`、
 - 图片点击“本地文字识别”，PDF 点击“本地识别当前页”。内置 PP-OCRv6-small、ONNX Runtime Web 与 WASM 在本机运行，不需要首次下载模型。
 - “AI 增强”是单独的显式操作，会把当前图像发送到已配置的 AI 服务。
 - 可以直接把 PNG、JPEG、WebP 或非动画 GIF 粘贴进聊天；每条消息最多 4 张，单张最多 5 MB，合计最多 10 MB。
-- 点击“截图”或按 `Cmd/Ctrl + Shift + D` 后，桌面保持原样，只覆盖透明十字取景层。按住鼠标拖出需要的区域并松开即可确认；应用随后从原始屏幕像素裁剪，截图进入聊天附件但不会自动发送，`Esc` 取消。截图不再自动识别或预选区域。
+- 点击“截图”或按 `Cmd/Ctrl + Shift + D` 后，应用先保留原始物理分辨率的屏幕图像，再只显示透明、无边框的十字取景层，不会用低清快照覆盖桌面。拖出区域并松开即可确认；裁剪坐标会补偿 macOS 菜单栏偏移，截图进入聊天附件但不会自动发送，`Esc` 取消。macOS 首次截图会触发系统授权；权限已拒绝、受限或记录失效时会自动打开屏幕录制设置页。
 - macOS Apple Silicon 点击“语音”可在本机实时转写中英文，文字边说边进入输入框。识别器按需启动，停止后退出；原始录音不会发往语音云服务。
 
 OCR 与 AI 输出都可能出错，重要内容需要对照原始资料。
@@ -248,7 +248,7 @@ MCP 是显式连接边界，不是自动代理权限。每次能力发现和工�
 
 ### 本地数据与安全
 
-- 项目始终是普通文件夹；`.vibeknowledge/` 只保存工作区状态、会话、批注、OCR 缓存、可重建索引、AI 操作记录、文献元数据和网页跟踪配置。
+- 项目始终是普通文件夹；`.coscribe/` 保存项目记忆、工作区状态、会话、批注、OCR 缓存、可重建索引、AI 操作记录、文献元数据和网页跟踪配置。旧 `.vibeknowledge/` 的可兼容数据会导入新目录，旧目录不会被自动删除或改名。
 - 本地索引只重新读取新增或变化的资料；单文件文本上限 4 MB，索引文本总量上限 64 MB。
 - 路径守卫拒绝 `..` 越级、项目外绝对路径、符号链接跳转和元数据目录写入。
 - Markdown 写入使用临时文件、同步和原子替换，并检查外部修改。
@@ -302,29 +302,29 @@ npm run verify:package:linux
 
 ## English
 
-> The stable `v4.0.1` release fixes webpage-selection context. Text selected in the research browser is now marked as Current content; sending a question automatically freezes the text, page title, and URL without an extra “add to context” click. The scope menu is simplified to Current content, Current document, Project, and General knowledge. The IDE, terminal, and controlled AI Shell introduced in v4.0.0 remain unchanged.
+> The stable `v4.0.2` release focuses on reliability: active project memory now lives in the hidden `.coscribe/` directory while legacy data is copied in without deleting its source; Quick Note writes only after preview acceptance; full-session compaction remains effective on later requests; file-tree refresh, prompt history, and settings layout provide consistent feedback; and macOS capture returns to a high-resolution transparent selector with automatic permission-settings recovery. The webpage-selection context from v4.0.1 and the IDE, terminal, and controlled AI Shell from v4.0.0 remain available.
 
 ### Download and install
 
-Download the stable [`v4.0.1` release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.1):
+Download the stable [`v4.0.2` release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.2):
 
 | Platform | Artifact | Target |
 | --- | --- | --- |
-| macOS | [`CoScribe-4.0.1-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-arm64.dmg) | Apple Silicon, macOS 13+ |
-| macOS | [`CoScribe-4.0.1-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-arm64-mac.zip) | Portable Apple Silicon archive |
-| Windows | [`CoScribe-Setup-4.0.1-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-Setup-4.0.1-x64.exe) | Windows 10/11 x64 |
-| Linux | [`CoScribe-4.0.1-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-x64.AppImage) | Portable x86-64 AppImage |
-| Linux | [`CoScribe-4.0.1-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/CoScribe-4.0.1-x64.deb) | Debian / Ubuntu x86-64 |
-| All | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.1/SHA256SUMS.txt) | SHA-256 checksums |
+| macOS | [`CoScribe-4.0.2-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/CoScribe-4.0.2-arm64.dmg) | Apple Silicon, macOS 13+ |
+| macOS | [`CoScribe-4.0.2-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/CoScribe-4.0.2-arm64-mac.zip) | Portable Apple Silicon archive |
+| Windows | [`CoScribe-Setup-4.0.2-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/CoScribe-Setup-4.0.2-x64.exe) | Windows 10/11 x64 |
+| Linux | [`CoScribe-4.0.2-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/CoScribe-4.0.2-x64.AppImage) | Portable x86-64 AppImage |
+| Linux | [`CoScribe-4.0.2-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/CoScribe-4.0.2-x64.deb) | Debian / Ubuntu x86-64 |
+| All | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.2/SHA256SUMS.txt) | SHA-256 checksums |
 
 The builds are currently unsigned.
 
 - **macOS:** drag CoScribe into Applications, then right-click and choose **Open**. If blocked, use System Settings → Privacy & Security → Open Anyway. Screen Recording is used only for region capture; Microphone is used only for local speech input.
 - **Windows:** run the x64 installer. If SmartScreen appears, verify the checksum and source before choosing **More info → Run anyway**.
-- **Linux AppImage:** run `chmod +x CoScribe-4.0.1-x64.AppImage`, then `./CoScribe-4.0.1-x64.AppImage`.
-- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-4.0.1-x64.deb`.
+- **Linux AppImage:** run `chmod +x CoScribe-4.0.2-x64.AppImage`, then `./CoScribe-4.0.2-x64.AppImage`.
+- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-4.0.2-x64.deb`.
 
-> v4.0.1 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked for architecture, packaged contents, and packaged-app smoke behavior. The smoke path opens a project, enters the IDE, opens the built-in terminal, and executes a real command. Local speech recognition and system Calendar integration remain macOS-only.
+> v4.0.2 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked before publication for architecture, packaged contents, and packaged-app smoke behavior. The smoke path opens a project, enters the IDE, opens the built-in terminal, and executes a real command. Local speech recognition and system Calendar integration remain macOS-only.
 
 ### Start in five minutes
 
@@ -387,12 +387,12 @@ Every sent turn freezes its project, pane, document, page or heading, webpage UR
 
 - While a response is running, the assistant shows the current stage, provider/model, active tool, and elapsed request time instead of an unexplained waiting animation.
 - Ordinary create, append, and replace operations show a file list and diff before writing.
-- Quick Note is the explicit automatic-save action. AI uses the conversation topic, project tree, and existing notes to choose a destination or create directories and linked notes; it does not default to the open document.
+- Quick Note first produces a reviewable multi-file preview. AI uses the conversation topic, project tree, and existing notes to choose a destination or create directories and linked notes; no file is written and no checkpoint advances until the user accepts.
 - AI may create 1–50 Markdown files but cannot delete files, escape the project, follow symlinks, or overwrite binary sources.
 - In ordinary chat, AI may also create, append, or replace supported code and text files inside the project. Every proposal shows its target and diff before the user confirms the write.
 - Accepted transactions appear under AI Operations and can be undone if no later manual edit would be overwritten.
 
-`COSCRIBE.md` is transparent project-level memory for durable goals, terminology, preferences, decisions, and constraints. It is ordinary Markdown and never crosses project boundaries. Do not store secrets or raw conversation dumps there.
+`.coscribe/COSCRIBE.md` is hidden project-level memory for durable goals, terminology, preferences, decisions, and constraints. It remains Markdown and never crosses project boundaries. Compatible legacy root memory and `.vibeknowledge/` metadata are copied into `.coscribe` while the legacy sources remain untouched; an existing canonical file wins a name conflict. Do not store secrets or raw conversation dumps there.
 
 Settings → AI Behavior groups the system prompt, context budget, reasoning effort, and project memory. Custom instructions remain below CoScribe's immutable path, secret, and confirmation boundaries.
 
@@ -413,7 +413,7 @@ Settings → AI Behavior groups the system prompt, context budget, reasoning eff
 - Local OCR uses bundled PP-OCRv6-small, ONNX Runtime Web, and WASM with no first-run model download.
 - AI Enhance is a separate opt-in action that sends only the current image or rendered PDF page to the configured AI service.
 - Paste or choose up to four PNG, JPEG, WebP, or non-animated GIF images per message; each is limited to 5 MB and the total to 10 MB.
-- `Cmd/Ctrl + Shift + D` keeps the desktop visible beneath a transparent crosshair selector. Drag the exact region and release to confirm; CoScribe then crops the original display pixels, attaches the result without sending it, and uses `Esc` to cancel. Automatic detection and preselection are intentionally disabled.
+- `Cmd/Ctrl + Shift + D` keeps the original physical-pixel capture in the main process and shows only a transparent, frameless crosshair selector, so no low-resolution snapshot covers or shifts the desktop. Drag and release to confirm; CoScribe compensates for macOS menu-bar offsets, crops the original display pixels, attaches the result without sending it, and uses `Esc` to cancel. The first capture triggers native permission; denied, restricted, or stale permission state opens the Screen Recording settings pane automatically.
 - On Apple Silicon macOS, Voice performs live bilingual transcription locally. Text appears in the composer while speaking, and the on-demand recognizer exits after recording.
 
 Always verify OCR and AI output against the primary source.
@@ -467,7 +467,7 @@ Hovering a button backed by a keyboard action shows its shortcut.
 
 ### Local data and security
 
-- Projects remain ordinary folders. `.vibeknowledge/` stores workspace state, sessions, annotations, OCR metadata, the rebuildable index, AI operation history, references, and web-tracking configuration.
+- Projects remain ordinary folders. `.coscribe/` stores project memory, workspace state, sessions, annotations, OCR metadata, the rebuildable index, AI operation history, references, and web-tracking configuration. Compatible legacy `.vibeknowledge/` data is imported without deleting or renaming the legacy directory.
 - The incremental index re-reads only changed sources, limits individual text sources to 4 MB, and caps aggregate indexed text at 64 MB.
 - Path guards reject traversal, outside absolute paths, symlink escapes, and metadata writes.
 - Markdown writes use temporary files, synchronization, atomic replacement, and external-modification checks.

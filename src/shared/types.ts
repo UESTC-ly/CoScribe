@@ -68,7 +68,7 @@ export interface WorkspaceState {
 }
 
 export interface ProjectMemoryDocument {
-  /** Canonical path to the transparent, project-owned COSCRIBE.md file. */
+  /** Canonical path to the project-owned .coscribe/COSCRIBE.md file. */
   path: string
   content: string
   exists: boolean
@@ -245,6 +245,11 @@ export interface BrowserHistoryEntry {
   visitedAt: number
 }
 
+export interface ChatMessageNoteOrganization {
+  throughMessageId: string
+  sourceMessageCount: number
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -255,6 +260,7 @@ export interface ChatMessage {
   context?: ContextSnapshot
   sources?: SourceRef[]
   operation?: FileOperationProposal
+  noteOrganization?: ChatMessageNoteOrganization
   progress?: AiMessageProgress
   stopped?: boolean
   error?: string
@@ -765,7 +771,7 @@ export interface AppSettings extends AiSettings {
   autoTitle: boolean
   /** User-authored instructions applied after CoScribe's immutable safety rules. */
   customSystemPrompt: string
-  /** Whether the current project's COSCRIBE.md memory is included in AI requests. */
+  /** Whether the current project's .coscribe/COSCRIBE.md memory is included in AI requests. */
   projectMemoryEnabled: boolean
   /** Makes AI Shell available; every shell session still requires two fresh confirmations. */
   aiShellEnabled: boolean

@@ -139,6 +139,7 @@ export interface RendererStoreActions {
   clearSession: (sessionId: string, now?: number) => void
   setSessionCompaction: (sessionId: string, compaction: ChatSessionCompaction, now?: number) => void
   markSessionNotesOrganized: (sessionId: string, checkpoint: ChatSessionNoteCheckpoint, now?: number) => void
+  clearSessionNotesOrganized: (sessionId: string, throughMessageId: string, now?: number) => void
   addMessage: (sessionId: string, message: ChatMessage) => void
   updateMessage: (
     sessionId: string,
@@ -188,6 +189,7 @@ function cloneMessage(message: ChatMessage): ChatMessage {
     context: message.context ? cloneContextSnapshot(message.context) : undefined,
     sources: message.sources?.map((source) => ({ ...source })),
     operation: message.operation ? { ...message.operation } : undefined,
+    noteOrganization: message.noteOrganization ? { ...message.noteOrganization } : undefined,
     progress: message.progress ? {
       ...message.progress,
       steps: message.progress.steps.map((step) => ({ ...step }))
@@ -658,7 +660,8 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
   captureActiveContext: (scope, capturedAt) => {
     const state = get()
     if (!state.project) return null
-    const tab = activeTabFor(state)
+    const activeTab = activeTabFor(state)
+    const tab = activeTab?.missing ? undefined : activeTab
     const key = tab ? normalizedKey(tab.path) : undefined
     const context = key ? state.documentContexts[key] : undefined
     const document = key ? state.documents[key] : undefined
@@ -808,6 +811,13 @@ export const appStoreCreator: StateCreator<AppStore> = (set, get) => ({
           }
         }
       : session))
+  })),
+
+  clearSessionNotesOrganized: (sessionId, throughMessageId, now = Date.now()) => set((state) => ({
+    sessions: sortedSessions(state.sessions.map((session) =>
+      session.id === sessionId && session.noteCheckpoint?.throughMessageId === throughMessageId
+        ? { ...session, updatedAt: now, noteCheckpoint: undefined }
+        : session))
   })),
 
   addMessage: (sessionId, message) => set((state) => {

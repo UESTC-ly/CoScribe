@@ -197,7 +197,7 @@ describe('project metadata recovery', () => {
     expect(recovered.messages[2].attachments).toBeUndefined()
   })
 
-  it('restores compaction, note checkpoints, and progress metadata only when their boundaries exist', () => {
+  it('keeps durable compaction when its raw boundary is unavailable but drops unsafe note checkpoints', () => {
     const [recovered] = normalizeSessionsForProject([{
       id: 'session-progress',
       title: 'Progress',
@@ -208,6 +208,7 @@ describe('project metadata recovery', () => {
       }, {
         id: 'progress', role: 'assistant', content: 'summary', createdAt: 3,
         kind: 'session-compaction',
+        noteOrganization: { throughMessageId: 'source', sourceMessageCount: 1 },
         progress: {
           kind: 'session-compaction',
           status: 'complete',
@@ -224,16 +225,28 @@ describe('project metadata recovery', () => {
 
     expect(recovered.compaction).toMatchObject({ throughMessageId: 'source', summary: 'summary' })
     expect(recovered.noteCheckpoint).toMatchObject({ throughMessageId: 'source', targetPaths: ['notes/a.md'] })
+    expect(recovered.messages[1].noteOrganization).toEqual({ throughMessageId: 'source', sourceMessageCount: 1 })
     expect(recovered.messages[1].progress?.steps[0]).toMatchObject({ stage: 'complete', status: 'complete' })
 
     const [invalid] = normalizeSessionsForProject([{
       id: 'session-invalid', title: 'Invalid', createdAt: 1, updatedAt: 2,
-      messages: [{ id: 'source', role: 'user', content: 'source', createdAt: 2 }],
+      messages: [{
+        id: 'source',
+        role: 'user',
+        content: 'source',
+        createdAt: 2,
+        noteOrganization: { throughMessageId: 'missing', sourceMessageCount: 1 }
+      }],
       compaction: { summary: 'bad', throughMessageId: 'missing', sourceMessageCount: 1, createdAt: 3 },
       noteCheckpoint: { throughMessageId: 'missing', sourceMessageCount: 1, organizedAt: 3 }
     }], root)
-    expect(invalid.compaction).toBeUndefined()
+    expect(invalid.compaction).toMatchObject({
+      summary: 'bad',
+      throughMessageId: 'missing',
+      createdAt: 3
+    })
     expect(invalid.noteCheckpoint).toBeUndefined()
+    expect(invalid.messages[0].noteOrganization).toBeUndefined()
   })
 
   it('keeps only well-formed in-project annotations', () => {

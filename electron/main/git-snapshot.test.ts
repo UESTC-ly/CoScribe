@@ -27,6 +27,7 @@ describe('GitSnapshotService', () => {
     expect(excludedSnapshotPath('.env.local')).toBe(true)
     expect(excludedSnapshotPath('notes/private.key')).toBe(true)
     expect(excludedSnapshotPath('dist/app.js')).toBe(true)
+    expect(excludedSnapshotPath('.coscribe/COSCRIBE.md')).toBe(true)
     expect(excludedSnapshotPath('研究/论文.md')).toBe(false)
   })
 

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 interface MockOverlay {
   destroy: ReturnType<typeof vi.fn>
   isDestroyed: () => boolean
+  loadURL: ReturnType<typeof vi.fn>
   show: ReturnType<typeof vi.fn>
 }
 
@@ -19,6 +20,9 @@ const electronMock = vi.hoisted(() => {
     image,
     overlays: [] as MockOverlay[],
     getSources: vi.fn(),
+    getMediaAccessStatus: vi.fn(),
+    openExternal: vi.fn(),
+    permissionStatus: 'granted',
     resolveSources: null as (() => void) | null,
     resolveSelection: null as ((value: unknown) => void) | null
   }
@@ -33,6 +37,7 @@ vi.mock('electron', () => {
     readonly setMenuBarVisibility = vi.fn()
     readonly setAlwaysOnTop = vi.fn()
     readonly setVisibleOnAllWorkspaces = vi.fn()
+    readonly getContentBounds = vi.fn(() => ({ x: 0, y: 0, width: 1_440, height: 900 }))
     readonly once = vi.fn()
     readonly show = vi.fn()
     readonly focus = vi.fn()
@@ -52,6 +57,8 @@ vi.mock('electron', () => {
   return {
     BrowserWindow,
     desktopCapturer: { getSources: electronMock.getSources },
+    shell: { openExternal: electronMock.openExternal },
+    systemPreferences: { getMediaAccessStatus: electronMock.getMediaAccessStatus },
     screen: {
       getCursorScreenPoint: vi.fn(() => ({ x: 200, y: 160 })),
       getDisplayNearestPoint: vi.fn(() => ({
@@ -70,6 +77,11 @@ beforeEach(() => {
   electronMock.overlays.length = 0
   electronMock.resolveSources = null
   electronMock.resolveSelection = null
+  electronMock.permissionStatus = 'granted'
+  electronMock.getMediaAccessStatus.mockReset()
+  electronMock.getMediaAccessStatus.mockImplementation(() => electronMock.permissionStatus)
+  electronMock.openExternal.mockReset()
+  electronMock.openExternal.mockResolvedValue(undefined)
   electronMock.getSources.mockReset()
   electronMock.getSources.mockImplementation(() => new Promise((resolve) => {
     electronMock.resolveSources = () => resolve([{
@@ -87,6 +99,7 @@ describe('ScreenshotService window lifecycle', () => {
       isDestroyed: vi.fn(() => false),
       isMinimized: vi.fn(() => false),
       isVisible: vi.fn(() => true),
+      isFocused: vi.fn(() => true),
       restore: vi.fn(),
       show: vi.fn(),
       focus,
@@ -103,6 +116,10 @@ describe('ScreenshotService window lifecycle', () => {
     const overlay = electronMock.overlays[0]
     expect(overlay).toBeDefined()
     expect(overlay.destroy).not.toHaveBeenCalled()
+    const loadedUrl = String(overlay.loadURL.mock.calls[0]?.[0] ?? '')
+    const overlayHtml = decodeURIComponent(loadedUrl.slice(loadedUrl.indexOf(',') + 1))
+    expect(overlayHtml).not.toContain('id="screen"')
+    expect(overlayHtml).toContain('body { background: transparent; }')
     await vi.waitFor(() => expect(overlay.show).toHaveBeenCalledOnce())
     await vi.waitFor(() => expect(electronMock.resolveSelection).not.toBeNull())
     expect(electronMock.getSources.mock.invocationCallOrder[0])
@@ -139,6 +156,7 @@ describe('ScreenshotService window lifecycle', () => {
       isDestroyed: vi.fn(() => false),
       isMinimized: vi.fn(() => false),
       isVisible: vi.fn(() => true),
+      isFocused: vi.fn(() => true),
       restore: vi.fn(),
       show: vi.fn(),
       focus: vi.fn(),
@@ -157,5 +175,85 @@ describe('ScreenshotService window lifecycle', () => {
     await expect(capture).resolves.toBeNull()
     expect(electronMock.getSources).toHaveBeenCalledOnce()
     expect(overlay.destroy).toHaveBeenCalledOnce()
+  })
+
+  it('opens macOS screen recording settings when permission was denied', async () => {
+    electronMock.permissionStatus = 'denied'
+    const mainWindow = {
+      isDestroyed: vi.fn(() => false),
+      isMinimized: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
+      isFocused: vi.fn(() => true),
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+      webContents: { capturePage: vi.fn() }
+    } as unknown as Electron.BrowserWindow
+    const service = new ScreenshotService(() => mainWindow, { platform: 'darwin' })
+
+    await expect(service.capture()).rejects.toThrow(/已自动打开.*删除旧的.*完全退出.*重新授权/u)
+    expect(electronMock.openExternal).toHaveBeenCalledOnce()
+    expect(electronMock.openExternal).toHaveBeenCalledWith(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+    )
+    expect(electronMock.getSources).not.toHaveBeenCalled()
+    expect(electronMock.overlays).toHaveLength(0)
+  })
+
+  it('opens macOS screen recording settings when a stale grant cannot capture the display', async () => {
+    electronMock.getSources.mockRejectedValueOnce(new Error('screen capture failed'))
+    const mainWindow = {
+      isDestroyed: vi.fn(() => false),
+      isMinimized: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
+      isFocused: vi.fn(() => true),
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+      webContents: { capturePage: vi.fn() }
+    } as unknown as Electron.BrowserWindow
+    const service = new ScreenshotService(() => mainWindow, { platform: 'darwin' })
+
+    await expect(service.capture()).rejects.toThrow(/显示已授权.*已自动打开/u)
+    expect(electronMock.openExternal).toHaveBeenCalledOnce()
+    expect(electronMock.overlays).toHaveLength(0)
+  })
+
+  it('restores and recaptures the original CoScribe window if macOS steals focus', async () => {
+    let focused = true
+    electronMock.getSources.mockImplementation(async () => {
+      focused = false
+      return [{ display_id: '7', thumbnail: electronMock.image }]
+    })
+    const focus = vi.fn(() => { focused = true })
+    const mainWindow = {
+      isDestroyed: vi.fn(() => false),
+      isMinimized: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
+      isFocused: vi.fn(() => focused),
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus,
+      webContents: { capturePage: vi.fn() }
+    } as unknown as Electron.BrowserWindow
+    const service = new ScreenshotService(() => mainWindow, { platform: 'darwin' })
+
+    const capture = service.capture()
+    await vi.waitFor(() => expect(electronMock.overlays).toHaveLength(1))
+    await vi.waitFor(() => expect(electronMock.resolveSelection).not.toBeNull())
+    electronMock.resolveSelection?.({
+      x: 100,
+      y: 80,
+      width: 500,
+      height: 300,
+      viewportWidth: 1_440,
+      viewportHeight: 900
+    })
+
+    await expect(capture).resolves.toMatchObject({ mimeType: 'image/jpeg' })
+    expect(electronMock.getSources).toHaveBeenCalledTimes(2)
+    expect(focus).toHaveBeenCalled()
+    expect(focus.mock.invocationCallOrder[0])
+      .toBeLessThan(electronMock.overlays[0].show.mock.invocationCallOrder[0])
   })
 })

@@ -4,7 +4,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { ProjectPathGuard } from './security'
+import { assertNotMetadataPath, ProjectPathGuard } from './security'
 import { atomicCreate, atomicWrite } from './storage'
 
 describe('ProjectPathGuard', () => {
@@ -60,6 +60,12 @@ describe('ProjectPathGuard', () => {
   it('allows only Markdown targets through the Markdown write boundary', async () => {
     await expect(guard.assertMarkdown(path.join(root, 'new.md'), false)).resolves.toBe(path.join(guard.root, 'new.md'))
     await expect(guard.assertMarkdown(path.join(root, 'image.png'), false)).rejects.toThrow(/Markdown/u)
+  })
+
+  it('protects both current and legacy project-internal directories', () => {
+    expect(() => assertNotMetadataPath(root, path.join(root, '.coscribe', 'sessions.json'))).toThrow(/元数据/u)
+    expect(() => assertNotMetadataPath(root, path.join(root, '.vibeknowledge', 'sessions.json'))).toThrow(/元数据/u)
+    expect(() => assertNotMetadataPath(root, path.join(root, 'notes', 'session.md'))).not.toThrow()
   })
 
   it('rejects create when a validated parent is swapped for an outside symlink', async () => {

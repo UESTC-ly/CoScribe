@@ -83,6 +83,68 @@ export interface ImageGenerationPayload {
   quality: 'low' | 'medium' | 'high'
 }
 
+type PromptHistoryDirection = 'previous' | 'next'
+
+function textareaCaretTop(textarea: HTMLTextAreaElement, position: number): number | null {
+  const bounds = textarea.getBoundingClientRect()
+  if (!bounds.width || typeof document === 'undefined') return null
+  const style = window.getComputedStyle(textarea)
+  const mirror = document.createElement('div')
+  mirror.style.position = 'fixed'
+  mirror.style.left = '-100000px'
+  mirror.style.top = '0'
+  mirror.style.visibility = 'hidden'
+  mirror.style.pointerEvents = 'none'
+  mirror.style.boxSizing = style.boxSizing
+  mirror.style.width = `${bounds.width}px`
+  mirror.style.height = `${bounds.height}px`
+  mirror.style.overflowX = style.overflowX
+  mirror.style.overflowY = style.overflowY
+  mirror.style.padding = style.padding
+  mirror.style.borderWidth = style.borderWidth
+  mirror.style.borderStyle = style.borderStyle
+  mirror.style.fontFamily = style.fontFamily
+  mirror.style.fontSize = style.fontSize
+  mirror.style.fontStyle = style.fontStyle
+  mirror.style.fontWeight = style.fontWeight
+  mirror.style.lineHeight = style.lineHeight
+  mirror.style.letterSpacing = style.letterSpacing
+  mirror.style.wordSpacing = style.wordSpacing
+  mirror.style.textIndent = style.textIndent
+  mirror.style.textTransform = style.textTransform
+  mirror.style.tabSize = style.tabSize
+  mirror.style.whiteSpace = 'pre-wrap'
+  mirror.style.overflowWrap = style.overflowWrap || 'break-word'
+  mirror.style.wordBreak = style.wordBreak
+
+  mirror.append(document.createTextNode(textarea.value.slice(0, position)))
+  const marker = document.createElement('span')
+  marker.textContent = textarea.value.slice(position) || '\u200b'
+  mirror.append(marker)
+  document.body.append(mirror)
+  const top = marker.offsetTop
+  mirror.remove()
+  return top
+}
+
+function isTextareaCaretAtVisualBoundary(
+  textarea: HTMLTextAreaElement,
+  direction: PromptHistoryDirection
+): boolean {
+  if (textarea.selectionStart !== textarea.selectionEnd) return false
+  const position = textarea.selectionStart
+  const fallback = direction === 'previous'
+    ? !textarea.value.slice(0, position).includes('\n')
+    : !textarea.value.slice(position).includes('\n')
+  const currentTop = textareaCaretTop(textarea, position)
+  if (currentTop === null) return fallback
+  const boundaryTop = textareaCaretTop(
+    textarea,
+    direction === 'previous' ? 0 : textarea.value.length
+  )
+  return boundaryTop !== null && Math.abs(currentTop - boundaryTop) < 1
+}
+
 export interface AiWorkspaceProps {
   projectName: string
   sessions: readonly ChatSession[]
@@ -333,6 +395,8 @@ export function AiWorkspace({
   const sessionMenuRef = useRef<HTMLDivElement>(null)
   const referenceMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const promptHistoryIndex = useRef<number | null>(null)
+  const promptHistoryDraft = useRef('')
   const imageInputRef = useRef<HTMLInputElement>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -340,6 +404,12 @@ export function AiWorkspace({
   const hasTurnNavigation = (activeSession?.messages.filter((message) => message.role === 'user').length ?? 0) >= 2
   const currentDraft = draft ?? localDraft
   const isBusy = isStreaming || isGeneratingImage
+  const promptHistory = useMemo(
+    () => activeSession?.messages
+      .filter((message) => message.role === 'user' && message.content.trim())
+      .map((message) => message.content) ?? [],
+    [activeSession?.messages]
+  )
   const commandSuggestions = useMemo(() => chatCommandSuggestions(currentDraft), [currentDraft])
   const visibleCommands = commandHelpOpen ? [...chatCommandSuggestions('/')] : commandSuggestions
 
@@ -368,6 +438,42 @@ export function AiWorkspace({
     if (draft === undefined) setLocalDraft(value)
     onDraftChange?.(value)
   }
+  const resetPromptHistory = (): void => {
+    promptHistoryIndex.current = null
+    promptHistoryDraft.current = ''
+  }
+  const moveCaretToDraftEnd = (): void => {
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+      const end = textarea.value.length
+      textarea.setSelectionRange(end, end)
+    })
+  }
+  const navigatePromptHistory = (direction: PromptHistoryDirection): boolean => {
+    const current = promptHistoryIndex.current
+    if (direction === 'previous') {
+      if (!promptHistory.length) return false
+      if (current === null) promptHistoryDraft.current = currentDraft
+      const next = current === null ? promptHistory.length - 1 : Math.max(0, current - 1)
+      promptHistoryIndex.current = next
+      updateDraft(promptHistory[next] ?? '')
+      moveCaretToDraftEnd()
+      return true
+    }
+    if (current === null) return false
+    if (current < promptHistory.length - 1) {
+      const next = current + 1
+      promptHistoryIndex.current = next
+      updateDraft(promptHistory[next] ?? '')
+    } else {
+      promptHistoryIndex.current = null
+      updateDraft(promptHistoryDraft.current)
+      promptHistoryDraft.current = ''
+    }
+    moveCaretToDraftEnd()
+    return true
+  }
   const insertCapturedSelection = (): void => {
     if (!capturedSelection) return
     updateDraft(currentDraft.trim()
@@ -393,6 +499,7 @@ export function AiWorkspace({
   }, [draftFocusToken])
 
   useEffect(() => {
+    resetPromptHistory()
     setPendingImages([])
     setComposerError(null)
     setCommandNotice(null)
@@ -448,6 +555,7 @@ export function AiWorkspace({
     }
     if (parsedCommand?.kind === 'command') {
       if (parsedCommand.invocation.name === 'help') {
+        resetPromptHistory()
         updateDraft('')
         setComposerError(null)
         setCommandNotice(null)
@@ -462,6 +570,7 @@ export function AiWorkspace({
         setComposerError('当前版本暂不支持聊天命令。')
         return
       }
+      resetPromptHistory()
       updateDraft('')
       setComposerError(null)
       setCommandHelpOpen(false)
@@ -474,6 +583,7 @@ export function AiWorkspace({
     if (isBusy || speech.active || disabled || !activeSession) return
     if (composerMode === 'image') {
       if (!content || !isImageConfigured || !onGenerateImage) return
+      resetPromptHistory()
       updateDraft('')
       setComposerError(null)
       void onGenerateImage({ prompt: content, size: imageSize, quality: imageQuality })
@@ -481,6 +591,7 @@ export function AiWorkspace({
     }
     if ((!content && pendingImages.length === 0) || !isConfigured) return
     const attachments = pendingImages.map((attachment) => ({ ...attachment }))
+    resetPromptHistory()
     updateDraft('')
     setPendingImages([])
     setComposerError(null)
@@ -1076,6 +1187,26 @@ export function AiWorkspace({
                   : (current - 1 + visibleCommands.length) % visibleCommands.length)
                 return
               }
+              if (
+                composerMode === 'chat' &&
+                (event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
+                !event.shiftKey &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.nativeEvent.isComposing &&
+                event.currentTarget.selectionStart === event.currentTarget.selectionEnd
+              ) {
+                const direction = event.key === 'ArrowUp' ? 'previous' : 'next'
+                if (
+                  (direction === 'previous' || promptHistoryIndex.current !== null) &&
+                  isTextareaCaretAtVisualBoundary(event.currentTarget, direction) &&
+                  navigatePromptHistory(direction)
+                ) {
+                  event.preventDefault()
+                  return
+                }
+              }
               if (visibleCommands.length && event.key === 'Tab' && !event.shiftKey) {
                 event.preventDefault()
                 chooseCommand(visibleCommands[commandIndex] ?? visibleCommands[0]!)
@@ -1239,7 +1370,7 @@ export function AiWorkspace({
               type="button"
               disabled={disabled || !activeSession || activeSession.messages.length === 0 || isBusy || Boolean(applyingOperationId) || speech.active || !isConfigured || composerMode === 'image'}
               aria-label="整理笔记"
-              title="将当前会话整理成 Markdown 笔记并保存到本地"
+              title="将当前会话整理成 Markdown 笔记预览，确认后写入"
               onClick={() => void onQuickNote?.()}
             >
               <NotebookPen aria-hidden="true" />
@@ -1276,7 +1407,7 @@ export function AiWorkspace({
           </div>
         </div>
         <p className="ai-composer-wrap__notice">
-          {composerMode === 'image' ? '图片生成会消耗独立的 GPT-Image 2 额度。' : '普通文件修改需确认；点击“整理笔记”会在生成后直接保存。'}
+          {composerMode === 'image' ? '图片生成会消耗独立的 GPT-Image 2 额度。' : '所有文件修改都先生成预览，只有接受后才会写入项目。'}
         </p>
         {commandNotice && <p className="ai-composer-wrap__command-notice" role="status">{commandNotice}</p>}
       </footer>

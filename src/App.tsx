@@ -254,10 +254,12 @@ export default function App(): React.JSX.Element {
   })
   const [resizing, setResizing] = useState<'left' | 'ai' | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
+  const [treeRefreshing, setTreeRefreshing] = useState(false)
   const activeRequests = useRef(new Map<string, ActiveAiRequest>())
   const stoppedImageRequests = useRef(new Set<string>())
   const hydratedProjectPath = useRef<string | null>(null)
   const refreshTimer = useRef<number | null>(null)
+  const manualTreeRefreshInFlight = useRef(false)
   const appShellRef = useRef<HTMLDivElement>(null)
   const panelResizeCleanupRef = useRef<((commit: boolean) => void) | null>(null)
 
@@ -455,8 +457,23 @@ export default function App(): React.JSX.Element {
 
   const refreshTree = useCallback(async (): Promise<void> => {
     try { setStore().setFileTree(await window.coscribe.project.tree()) }
-    catch (reason) { setError(reason instanceof Error ? reason.message : '文件树刷新失败') }
+    catch (reason) {
+      const detail = (reason instanceof Error ? reason.message : '未知错误')
+        .replace(/^Error invoking remote method 'project:tree': Error: /u, '')
+      setError(`文件树刷新失败：${detail}`)
+    }
   }, [])
+
+  const refreshTreeFromButton = useCallback(async (): Promise<void> => {
+    if (manualTreeRefreshInFlight.current) return
+    manualTreeRefreshInFlight.current = true
+    setTreeRefreshing(true)
+    try { await refreshTree() }
+    finally {
+      manualTreeRefreshInFlight.current = false
+      setTreeRefreshing(false)
+    }
+  }, [refreshTree])
 
   const refreshOperationHistory = useCallback(async (): Promise<void> => {
     try { setOperationHistory(await window.coscribe.project.operationHistory()) }
@@ -611,7 +628,11 @@ export default function App(): React.JSX.Element {
       }
       if (event.type === 'done' || event.type === 'stopped' || event.type === 'error') flush(event.requestId)
       if (event.type === 'done') {
-        store.updateMessage(request.sessionId, request.assistantMessageId, { sources: event.sources, operation: event.operation })
+        store.updateMessage(request.sessionId, request.assistantMessageId, {
+          sources: event.sources,
+          operation: event.operation,
+          ...(request.noteOrganization ? { noteOrganization: { ...request.noteOrganization } } : {})
+        })
         const session = appStore.getState().sessions.find((item) => item.id === request.sessionId)
         if (session?.title === '新会话' && appStore.getState().settings.autoTitle) {
           const firstMessage = session.messages.find((message) => message.role === 'user')
@@ -654,36 +675,42 @@ export default function App(): React.JSX.Element {
             setAiError(message)
           }
         }
-        if (request.autoApplyOperation) {
-          if (!event.operation) {
-            const message = request.operationMode === 'generate-project-plan'
-              ? 'AI 没有返回可写入的项目计划，请重新生成。'
-              : 'AI 没有返回可写入的笔记文件，请重试“整理笔记”。'
+        if (request.noteOrganization) {
+          if (event.operation) {
+            store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({
+              ...message,
+              progress: mergeAiProgress(message.progress, {
+                kind: 'note-organization',
+                stage: 'complete',
+                label: '笔记预览已生成，等待用户确认后写入',
+                status: 'complete'
+              })
+            }))
+          } else {
+            const message = 'AI 没有返回可写入的笔记文件，请重试“整理笔记”。'
             store.updateMessage(request.sessionId, request.assistantMessageId, (current) => ({
               ...current,
               error: message,
-              ...(request.noteOrganization && current.progress ? {
-                progress: mergeAiProgress(current.progress, {
-                  kind: 'note-organization',
-                  stage: 'validation',
-                  label: '模型没有返回可写入的笔记建议',
-                  status: 'error'
-                })
-              } : {})
+              progress: mergeAiProgress(current.progress, {
+                kind: 'note-organization',
+                stage: 'validation',
+                label: '模型没有返回可写入的笔记建议',
+                status: 'error'
+              })
+            }))
+            setAiError(message)
+          }
+        }
+        if (request.autoApplyOperation) {
+          if (!event.operation) {
+            const message = 'AI 没有返回可写入的项目计划，请重新生成。'
+            store.updateMessage(request.sessionId, request.assistantMessageId, (current) => ({
+              ...current,
+              error: message
             }))
             setAiError(message)
           } else {
             const operation = event.operation
-            if (request.noteOrganization) {
-              store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({
-                ...message,
-                progress: mergeAiProgress(message.progress, {
-                  kind: 'note-organization',
-                  stage: 'writing',
-                  label: '正在将整理结果安全写入本地项目'
-                })
-              }))
-            }
             setApplyingOperationId(operation.id)
             void window.coscribe.file.applyAiOperation({ ...operation, status: 'accepted' }).then(async (result) => {
               store.updateMessage(request.sessionId, request.assistantMessageId, {
@@ -691,25 +718,6 @@ export default function App(): React.JSX.Element {
               })
               const files = result.files.length ? result.files : [result]
               for (const file of files) store.markDocumentSaved(file)
-              if (request.noteOrganization) {
-                const targetPaths = (operation.operations?.length ? operation.operations : [operation])
-                  .map((item) => item.targetPath)
-                store.markSessionNotesOrganized(request.sessionId, {
-                  throughMessageId: request.noteOrganization.throughMessageId,
-                  sourceMessageCount: request.noteOrganization.sourceMessageCount,
-                  organizedAt: Date.now(),
-                  targetPaths
-                })
-                store.updateMessage(request.sessionId, request.assistantMessageId, (message) => ({
-                  ...message,
-                  progress: mergeAiProgress(message.progress, {
-                    kind: 'note-organization',
-                    stage: 'complete',
-                    label: `整理完成，已保存 ${files.length} 份笔记`,
-                    status: 'complete'
-                  })
-                }))
-              }
               store.setFileTree(await window.coscribe.project.tree())
               setOperationHistory(await window.coscribe.project.operationHistory())
               const first = files[0]
@@ -721,23 +729,10 @@ export default function App(): React.JSX.Element {
             }).catch((reason: unknown) => {
               const message = reason instanceof Error
                 ? reason.message
-                : request.operationMode === 'generate-project-plan'
-                  ? '生成的项目计划无法写入本地。'
-                  : '整理后的笔记无法写入本地。'
+                : '生成的项目计划无法写入本地。'
               store.updateMessage(request.sessionId, request.assistantMessageId, {
                 operation: { ...operation, status: 'failed', error: message }
               })
-              if (request.noteOrganization) {
-                store.updateMessage(request.sessionId, request.assistantMessageId, (current) => ({
-                  ...current,
-                  progress: mergeAiProgress(current.progress, {
-                    kind: 'note-organization',
-                    stage: 'writing',
-                    label: '笔记写入失败，整理检查点未推进',
-                    status: 'error'
-                  })
-                }))
-              }
               setAiError(message)
             }).finally(() => setApplyingOperationId(null))
           }
@@ -1274,7 +1269,6 @@ export default function App(): React.JSX.Element {
       requestId,
       sessionId,
       assistantMessageId: assistantMessage.id,
-      autoApplyOperation: true,
       operationMode: 'organize-project-notes',
       noteOrganization: {
         throughMessageId: batch.throughMessageId,
@@ -1285,12 +1279,12 @@ export default function App(): React.JSX.Element {
     setAiError(null)
     const instruction = [
       `只整理本次传入的 ${batch.sourceMessageCount} 条新增会话内容；更早的 ${batch.previouslyOrganizedCount} 条内容已经整理过，禁止重复整理。`,
-      '提炼其中有长期价值的知识并立即保存为结构化 Markdown 笔记。',
+      '提炼其中有长期价值的知识并生成结构化 Markdown 笔记预览；用户确认前不得写入项目。',
       '结合会话主题、项目目录结构和现有笔记命名，自主选择最合适的保存位置。',
       '当前打开文档仅供参考，不是默认写入目标；仅当主题明确匹配时才追加，否则创建合适的新笔记或目录。',
       '内容涉及多个独立主题时，可以一次创建多份互相链接的 Markdown 笔记。',
       '保留关键结论、解释、步骤、代码和来源；去掉寒暄、重复内容和过程性指令。',
-      '必须调用 CoScribe 文件操作工具，不要只在聊天中返回笔记正文。'
+      '必须调用 CoScribe 文件操作工具生成预览，不要只在聊天中返回笔记正文，也不要声称已经保存。'
     ].join('\n')
     try {
       await window.coscribe.ai.start({
@@ -1301,7 +1295,7 @@ export default function App(): React.JSX.Element {
         operationMode: 'organize-project-notes',
         settings: { allowGeneralKnowledge: state.settings.allowGeneralKnowledge }
       })
-      return `已开始整理 ${batch.sourceMessageCount} 条新增会话内容。`
+      return `已开始为 ${batch.sourceMessageCount} 条新增会话内容生成笔记预览。`
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '整理笔记请求无法启动。'
       store.updateMessage(sessionId, assistantMessage.id, (current) => ({
@@ -1646,6 +1640,11 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const acceptOperation = useCallback(async (operation: FileOperationProposal): Promise<void> => {
+    const owner = appStore.getState().sessions.flatMap((session) =>
+      session.messages
+        .filter((message) => message.operation?.id === operation.id)
+        .map((message) => ({ sessionId: session.id, message }))
+    )[0]
     setApplyingOperationId(operation.id)
     try {
       const operations = operation.operations?.length ? operation.operations : [operation]
@@ -1659,6 +1658,25 @@ export default function App(): React.JSX.Element {
       const result = await window.coscribe.file.applyAiOperation({ ...operation, status: 'accepted' })
       updateOperation(operation.id, { status: 'accepted' })
       const files = result.files.length ? result.files : [result]
+      if (owner?.message.noteOrganization) {
+        const targetPaths = (operation.operations?.length ? operation.operations : [operation])
+          .map((item) => item.targetPath)
+        setStore().markSessionNotesOrganized(owner.sessionId, {
+          throughMessageId: owner.message.noteOrganization.throughMessageId,
+          sourceMessageCount: owner.message.noteOrganization.sourceMessageCount,
+          organizedAt: Date.now(),
+          targetPaths
+        })
+        setStore().updateMessage(owner.sessionId, owner.message.id, (message) => ({
+          ...message,
+          progress: mergeAiProgress(message.progress, {
+            kind: 'note-organization',
+            stage: 'complete',
+            label: `整理完成，已保存 ${files.length} 份笔记`,
+            status: 'complete'
+          })
+        }))
+      }
       const bufferPaths = new Set(operations.filter((item) => item.baseSource === 'buffer').map((item) => item.targetPath))
       for (const file of files) {
         if (bufferPaths.has(file.path)) setStore().loadDocument(file, true)
@@ -1676,16 +1694,54 @@ export default function App(): React.JSX.Element {
     } finally { setApplyingOperationId(null) }
   }, [openPath, refreshOperationHistory, refreshTree, updateOperation])
 
-  const rejectOperation = useCallback((operation: FileOperationProposal): void => updateOperation(operation.id, { status: 'rejected' }), [updateOperation])
+  const rejectOperation = useCallback((operation: FileOperationProposal): void => {
+    const store = appStore.getState()
+    for (const session of store.sessions) {
+      const message = session.messages.find((item) => item.operation?.id === operation.id)
+      if (!message?.operation) continue
+      store.updateMessage(session.id, message.id, {
+        operation: { ...message.operation, status: 'rejected' },
+        ...(message.noteOrganization ? {
+          progress: mergeAiProgress(message.progress, {
+            kind: 'note-organization',
+            stage: 'complete',
+            label: '用户已拒绝预览，整理检查点未推进',
+            status: 'complete'
+          })
+        } : {})
+      })
+      return
+    }
+  }, [])
 
   const undoOperation = useCallback(async (entry: AiOperationHistoryEntry): Promise<void> => {
     setUndoingOperationId(entry.id)
     try {
       const result = await window.coscribe.project.undoOperation(entry.id)
-      for (const file of result.files) setStore().markDocumentSaved(file)
+      const store = setStore()
+      for (const file of result.files) store.markDocumentSaved(file)
       for (const deletedPath of result.deletedPaths) {
-        setStore().markPathMissing(deletedPath)
-        setStore().removeDocument(deletedPath)
+        store.markPathMissing(deletedPath)
+        store.removeDocument(deletedPath)
+      }
+      for (const session of store.sessions) {
+        const message = session.messages.find((candidate) =>
+          candidate.operation?.id === result.entry.proposalId && candidate.noteOrganization)
+        if (!message?.noteOrganization) continue
+        store.clearSessionNotesOrganized(
+          session.id,
+          message.noteOrganization.throughMessageId
+        )
+        store.updateMessage(session.id, message.id, (candidate) => ({
+          ...candidate,
+          progress: mergeAiProgress(candidate.progress, {
+            kind: 'note-organization',
+            stage: 'complete',
+            label: '整理写入已撤销，这段会话可以重新整理',
+            status: 'complete'
+          })
+        }))
+        break
       }
       await Promise.all([refreshTree(), refreshOperationHistory()])
     } catch (reason) {
@@ -2054,7 +2110,8 @@ export default function App(): React.JSX.Element {
           searchResults={state.searchResults}
           searchProgress={state.searchProgress}
           onCloseProject={requestCloseProject}
-          onRefresh={() => void refreshTree()}
+          refreshingTree={treeRefreshing}
+          onRefresh={() => void refreshTreeFromButton()}
           onCreateMarkdown={createMarkdown}
           onCreateCodeFile={createCodeFile}
           onCreateFolder={createFolder}

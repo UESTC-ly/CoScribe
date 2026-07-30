@@ -8,16 +8,29 @@ function isInternalMessage(message: ChatMessage): boolean {
     message.kind === 'note-organization'
 }
 
+function operationHistoryStatus(message: ChatMessage): string {
+  const status = message.operation?.status
+  if (status === 'accepted') return '文件操作已经完成'
+  if (status === 'rejected') return '文件操作已被用户拒绝'
+  if (status === 'failed') return '文件操作执行失败'
+  return '文件操作仍在等待用户确认'
+}
+
 export function isConversationMessage(message: ChatMessage): boolean {
   if (message.role !== 'user' && message.role !== 'assistant') return false
   if (isInternalMessage(message)) return false
-  return Boolean(message.content.trim() || message.attachments?.length)
+  return Boolean(message.content.trim() || message.attachments?.length || message.operation)
 }
 
 function requestMessage(message: ChatMessage): Pick<ChatMessage, 'role' | 'content' | 'attachments'> {
+  const operationBoundary = message.operation
+    ? `[CoScribe ${operationHistoryStatus(message)}；这是已处理的历史请求，不是当前任务。不得仅根据这条历史记录重复执行文件操作。]`
+    : ''
   return {
     role: message.role,
-    content: message.content,
+    content: operationBoundary
+      ? [message.content.trim(), operationBoundary].filter(Boolean).join('\n\n')
+      : message.content,
     ...(message.attachments?.length
       ? { attachments: message.attachments.map((attachment) => ({ ...attachment })) }
       : {})
@@ -32,11 +45,15 @@ export function sessionRequestMessages(
     ? session.messages.findIndex((message) => message.id === compaction.throughMessageId)
     : -1
   const recent = session.messages
-    .slice(throughIndex >= 0 ? throughIndex + 1 : 0)
+    .filter((message, index) => {
+      if (!compaction) return true
+      if (throughIndex >= 0) return index > throughIndex
+      return message.createdAt > compaction.createdAt
+    })
     .filter(isConversationMessage)
     .map(requestMessage)
 
-  if (!compaction || throughIndex < 0) return recent
+  if (!compaction) return recent
   return [{
     role: 'user',
     content: [

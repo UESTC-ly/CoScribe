@@ -157,6 +157,68 @@ describe('AiWorkspace', () => {
     })
   })
 
+  it('recalls sent prompts in order and restores the unsent draft after the newest prompt', () => {
+    const sessionWithHistory: ChatSession = { ...session, messages: conversationMessages }
+    render(<AiWorkspace {...buildProps({ sessions: [sessionWithHistory] })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' }) as HTMLTextAreaElement
+    fireEvent.change(textbox, { target: { value: '尚未发送的草稿' } })
+
+    const pressAtEnd = (key: 'ArrowUp' | 'ArrowDown'): void => {
+      textbox.setSelectionRange(textbox.value.length, textbox.value.length)
+      fireEvent.keyDown(textbox, { key, code: key })
+    }
+
+    pressAtEnd('ArrowUp')
+    expect(textbox).toHaveValue('请给出一个最小示例')
+    pressAtEnd('ArrowUp')
+    expect(textbox).toHaveValue('它和普通数据库事务有什么区别？')
+    pressAtEnd('ArrowDown')
+    expect(textbox).toHaveValue('请给出一个最小示例')
+    pressAtEnd('ArrowDown')
+    expect(textbox).toHaveValue('尚未发送的草稿')
+    pressAtEnd('ArrowDown')
+    expect(textbox).toHaveValue('尚未发送的草稿')
+  })
+
+  it('keeps native vertical cursor movement inside multiline drafts and enters history only at a boundary', () => {
+    const sessionWithHistory: ChatSession = { ...session, messages: conversationMessages }
+    render(<AiWorkspace {...buildProps({ sessions: [sessionWithHistory] })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' }) as HTMLTextAreaElement
+    const multilineDraft = '第一行\n第二行\n第三行'
+    fireEvent.change(textbox, { target: { value: multilineDraft } })
+
+    textbox.setSelectionRange(6, 6)
+    expect(fireEvent.keyDown(textbox, { key: 'ArrowUp', code: 'ArrowUp' })).toBe(true)
+    expect(textbox).toHaveValue(multilineDraft)
+
+    textbox.setSelectionRange(6, 6)
+    expect(fireEvent.keyDown(textbox, { key: 'ArrowDown', code: 'ArrowDown' })).toBe(true)
+    expect(textbox).toHaveValue(multilineDraft)
+
+    textbox.setSelectionRange(2, 2)
+    expect(fireEvent.keyDown(textbox, { key: 'ArrowUp', code: 'ArrowUp' })).toBe(false)
+    expect(textbox).toHaveValue('请给出一个最小示例')
+
+    textbox.setSelectionRange(textbox.value.length, textbox.value.length)
+    expect(fireEvent.keyDown(textbox, { key: 'ArrowDown', code: 'ArrowDown' })).toBe(false)
+    expect(textbox).toHaveValue(multilineDraft)
+  })
+
+  it('does not replace a selected range or intercept modified arrow keys with prompt history', () => {
+    const sessionWithHistory: ChatSession = { ...session, messages: conversationMessages }
+    render(<AiWorkspace {...buildProps({ sessions: [sessionWithHistory] })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' }) as HTMLTextAreaElement
+    fireEvent.change(textbox, { target: { value: '保留这段草稿' } })
+
+    textbox.setSelectionRange(0, 2)
+    expect(fireEvent.keyDown(textbox, { key: 'ArrowUp', code: 'ArrowUp' })).toBe(true)
+    expect(textbox).toHaveValue('保留这段草稿')
+
+    textbox.setSelectionRange(0, 0)
+    expect(fireEvent.keyDown(textbox, { key: 'ArrowUp', code: 'ArrowUp', altKey: true })).toBe(true)
+    expect(textbox).toHaveValue('保留这段草稿')
+  })
+
   it('offers slash commands and executes an exact command without sending it to the model', async () => {
     const onCommand = vi.fn().mockResolvedValue('已清空当前会话。')
     const onSend = vi.fn()

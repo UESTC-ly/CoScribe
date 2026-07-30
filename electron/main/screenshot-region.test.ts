@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { screenshotCropBounds } from './screenshot-region'
+import { screenshotCropBounds, screenshotCropBoundsFromOverlay } from './screenshot-region'
 
 describe('screenshot ROI pixel mapping', () => {
   it('maps a display-space ROI to high-DPI screenshot pixels', () => {
@@ -25,5 +25,15 @@ describe('screenshot ROI pixel mapping', () => {
       { width: 800, height: 600 },
       { width: 1_600, height: 1_200 }
     )).toThrow('截图区域无效')
+  })
+
+  it('maps a macOS menu-bar offset back into the original Retina display', () => {
+    expect(screenshotCropBoundsFromOverlay(
+      { x: 100, y: 75, width: 400, height: 300 },
+      { width: 1_440, height: 875 },
+      { x: 0, y: 25, width: 1_440, height: 875 },
+      { x: 0, y: 0, width: 1_440, height: 900 },
+      { width: 2_880, height: 1_800 }
+    )).toEqual({ x: 200, y: 200, width: 800, height: 600 })
   })
 })

@@ -41,6 +41,31 @@ describe('chat session request boundaries', () => {
     ])
   })
 
+  it('never restores raw pre-compaction history when the boundary message is unavailable', () => {
+    const value = session()
+    value.messages = [
+      { id: 'old-user', role: 'user', content: '不得恢复的旧问题', createdAt: 1 },
+      { id: 'old-assistant', role: 'assistant', content: '不得恢复的旧回答', createdAt: 2 },
+      { id: 'new-user', role: 'user', content: '压缩后的问题', createdAt: 5 },
+      { id: 'new-assistant', role: 'assistant', content: '压缩后的回答', createdAt: 6 }
+    ]
+    value.compaction = {
+      summary: '旧会话的高保真摘要',
+      throughMessageId: 'missing-boundary',
+      sourceMessageCount: 2,
+      createdAt: 4
+    }
+
+    const messages = sessionRequestMessages(value)
+
+    expect(messages.map((message) => message.content)).toEqual([
+      expect.stringContaining('旧会话的高保真摘要'),
+      '压缩后的问题',
+      '压缩后的回答'
+    ])
+    expect(JSON.stringify(messages)).not.toContain('不得恢复')
+  })
+
   it('returns only conversation content added after the note checkpoint', () => {
     const value = session()
     value.noteCheckpoint = {
@@ -59,6 +84,47 @@ describe('chat session request boundaries', () => {
       sourceMessageCount: 2,
       previouslyOrganizedCount: 2
     })
+  })
+
+  it('keeps a completed file write from becoming an unfinished instruction in the next request', () => {
+    const value = session()
+    value.messages = [
+      {
+        id: 'memory-request',
+        role: 'user',
+        content: '请把这条稳定信息整理后加入项目记忆',
+        createdAt: 1
+      },
+      {
+        id: 'memory-result',
+        role: 'assistant',
+        content: '',
+        createdAt: 2,
+        operation: {
+          id: 'operation-1',
+          kind: 'replace',
+          targetPath: '/projects/example/.coscribe/COSCRIBE.md',
+          proposedContent: '# 项目记忆',
+          summary: '更新项目记忆',
+          status: 'accepted'
+        }
+      },
+      {
+        id: 'next-request',
+        role: 'user',
+        content: '这个项目有哪些核心模块？',
+        createdAt: 3
+      }
+    ]
+
+    const messages = sessionRequestMessages(value)
+
+    expect(messages).toHaveLength(3)
+    expect(messages[1]).toMatchObject({
+      role: 'assistant',
+      content: expect.stringMatching(/文件操作.*已经完成.*不是当前任务/u)
+    })
+    expect(messages.at(-1)).toEqual({ role: 'user', content: '这个项目有哪些核心模块？' })
   })
 
   it('compacts the logical conversation without including internal command messages', () => {

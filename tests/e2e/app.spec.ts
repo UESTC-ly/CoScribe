@@ -186,6 +186,85 @@ test('opens a real local project, searches content, and creates a standard Markd
   await page.screenshot({ path: testInfo.outputPath('workspace.png') })
 })
 
+test('shows file-tree refresh progress and recovers after a refresh failure', async () => {
+  const refresh = page.getByRole('button', { name: '刷新文件树' })
+  await expect(refresh).toBeVisible()
+  await electronApp.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('project:tree')
+    ipcMain.handle('project:tree', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 240))
+      throw new Error('REFRESH_E2E_FAILURE')
+    })
+  })
+
+  await refresh.click()
+  await expect(refresh).toBeDisabled()
+  await expect(refresh).toHaveAttribute('aria-busy', 'true')
+  await expect(refresh.locator('svg')).toHaveClass(/is-spinning/u)
+  await expect(page.getByRole('alert')).toContainText('文件树刷新失败：REFRESH_E2E_FAILURE')
+  await expect(refresh).toBeEnabled()
+  await expect(refresh).toHaveAttribute('aria-busy', 'false')
+})
+
+test('recalls prompt history without stealing arrows from soft-wrapped draft lines', async () => {
+  let requestCount = 0
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Consume the request before returning the mocked model response.
+    }
+    requestCount += 1
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({
+      output: [{
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: `历史导航测试回复 ${requestCount}` }]
+      }]
+    }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const port = (server.address() as AddressInfo).port
+    await page.getByRole('button', { name: '配置', exact: true }).click()
+    await page.getByLabel('服务地址').fill(`http://127.0.0.1:${port}`)
+    await page.getByLabel('模型', { exact: true }).fill('local-history-model')
+    await page.getByRole('button', { name: '保存设置' }).click()
+
+    const textbox = page.getByLabel('向 AI 提问')
+    await textbox.fill('第一条历史指令')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect(page.getByText('历史导航测试回复 1')).toBeVisible()
+    await textbox.fill('第二条历史指令')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect(page.getByText('历史导航测试回复 2')).toBeVisible()
+
+    const wrappedDraft = '这是一段没有手动换行但会在较窄聊天输入框中自动折行的未发送草稿。'.repeat(8)
+    await textbox.fill(wrappedDraft)
+    expect(await textbox.evaluate((element) => {
+      const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight)
+      return element.scrollHeight > lineHeight * 2
+    })).toBe(true)
+
+    await textbox.press('ArrowUp')
+    await expect(textbox).toHaveValue(wrappedDraft)
+    expect(await textbox.evaluate((element) => (element as HTMLTextAreaElement).selectionStart)).toBeLessThan(wrappedDraft.length)
+
+    await textbox.evaluate((element) => (element as HTMLTextAreaElement).setSelectionRange(0, 0))
+    await textbox.press('ArrowUp')
+    await expect(textbox).toHaveValue('第二条历史指令')
+
+    await textbox.evaluate((element) => {
+      const textarea = element as HTMLTextAreaElement
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    })
+    await textbox.press('ArrowDown')
+    await expect(textbox).toHaveValue(wrappedDraft)
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
 test('uses the project folder as an IDE while keeping AI visible and runs the built-in terminal', async ({}, testInfo) => {
   const aiSidebar = page.locator('.ai-workspace')
   await expect(aiSidebar).toBeVisible()
@@ -865,7 +944,7 @@ test('copies selected document text into the AI composer with a shortcut', async
   await expect(page.getByLabel('基于')).toHaveValue('visible')
 })
 
-test('persists transparent project memory and the editable system prompt', async () => {
+test('persists hidden project memory and the editable system prompt', async () => {
   await page.getByRole('button', { name: '记忆', exact: true }).click()
   const memoryEditor = page.getByLabel('项目记忆 Markdown')
   await expect(memoryEditor).toHaveValue(/CoScribe Project Memory/u)
@@ -878,7 +957,7 @@ test('persists transparent project memory and the editable system prompt', async
     '- 技术解释先给结论，再给依据。'
   ].join('\n'))
   await page.getByRole('button', { name: '保存记忆' }).click()
-  await expect.poll(async () => readFile(path.join(projectPath, 'COSCRIBE.md'), 'utf8').catch(() => '')).toContain('技术解释先给结论')
+  await expect.poll(async () => readFile(path.join(projectPath, '.coscribe', 'COSCRIBE.md'), 'utf8').catch(() => '')).toContain('技术解释先给结论')
   await expect(page.getByText('已写入项目')).toBeVisible()
 
   await page.locator('.app-titlebar__actions').getByRole('button', { name: '设置' }).click()
@@ -989,18 +1068,19 @@ test('decodes streaming speech through the isolated native ASR process', async (
   expect(transcript).toContain('星期三')
 })
 
-test('drag-selects a screenshot region and adds the crop to chat attachments', async ({}, testInfo) => {
+test('drag-selects a screenshot region and adds the crop to chat attachments', async () => {
   await page.locator('.tree-row').filter({ hasText: 'README.md' }).click()
   await expect(page.getByLabel('README.md Markdown 编辑器')).toBeVisible()
   const selectorWindow = electronApp.waitForEvent('window')
   await page.getByRole('button', { name: '截图', exact: true }).click()
   const selector = await selectorWindow
   await selector.waitForLoadState('domcontentloaded')
-  // The crosshair overlay starts empty — no predicted candidate box appears
-  // until the user drags a region.
+  // The high-resolution capture stays in the main process. The selector is
+  // transparent so it cannot blur or vertically offset the visible desktop.
   await expect(selector.locator('#selection')).not.toHaveClass(/active/u)
   await expect(selector.locator('#screen')).toHaveCount(0)
-  expect(await selector.locator('body').evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
+  expect(await selector.evaluate(() => getComputedStyle(document.body).backgroundColor))
+    .toBe('rgba(0, 0, 0, 0)')
   await expect.poll(async () => electronApp.evaluate(({ BrowserWindow }) => {
     const main = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL().startsWith('coscribe-app:'))
     return Boolean(main?.isVisible())
@@ -1023,7 +1103,6 @@ test('drag-selects a screenshot region and adds the crop to chat attachments', a
   // the captured attachment assertions below verify the resulting crop.
   expect(draggedBox!.width).toBeGreaterThanOrEqual(8)
   expect(draggedBox!.height).toBeGreaterThanOrEqual(8)
-  await selector.screenshot({ path: testInfo.outputPath('screenshot-roi-selector.png') })
   const closed = selector.waitForEvent('close')
   await selector.mouse.up()
   await closed
@@ -1065,8 +1144,8 @@ test('runs bundled local OCR from the packaged renderer origin', async () => {
 
 test('keeps the file tree when optional project metadata cannot be read', async () => {
   await electronApp.close()
-  await rm(path.join(projectPath, '.vibeknowledge', 'sessions.json'), { force: true })
-  await mkdir(path.join(projectPath, '.vibeknowledge', 'sessions.json'))
+  await rm(path.join(projectPath, '.coscribe', 'sessions.json'), { force: true })
+  await mkdir(path.join(projectPath, '.coscribe', 'sessions.json'))
   await launchProject()
   await expect(page.locator('.tree-row').filter({ hasText: 'README.md' })).toBeVisible()
   await expect(page.locator('[role="alert"]')).toContainText('会话历史无法恢复')
@@ -1446,6 +1525,9 @@ test('discovers and selects non-GPT models from an OpenAI-compatible provider', 
     // The fetched catalogue is offered as enable/disable checkboxes; the old
     // native GPT presets are stripped once the profile targets a third-party host.
     await expect(page.getByRole('checkbox', { name: '在模型菜单中显示 qwen3-coder-plus' })).toBeVisible()
+    const protocolBox = await page.getByLabel('接口协议').boundingBox()
+    if (!protocolBox) throw new Error('接口协议下拉框不可见')
+    expect(protocolBox.height).toBeLessThan(50)
     await expect(page.getByRole('checkbox', { name: '在模型菜单中显示 gpt-5.6-luna' })).toHaveCount(0)
     await page.getByRole('checkbox', { name: '在模型菜单中显示 qwen3-coder-plus' }).check()
     await page.getByLabel('模型', { exact: true }).fill('deepseek-v3.2')
@@ -1596,7 +1678,7 @@ test('keeps an AI-created note on preview until the user accepts it', async () =
   }
 })
 
-test('writes a multi-file note project immediately after the explicit quick-note action', async () => {
+test('previews quick-note files and advances the checkpoint only after acceptance', async () => {
   let requestCount = 0
   const requestBodies: Record<string, unknown>[] = []
   const server = createServer(async (request, response) => {
@@ -1618,7 +1700,7 @@ test('writes a multi-file note project immediately after the explicit quick-note
             {
               type: 'message',
               role: 'assistant',
-              content: [{ type: 'output_text', text: '已整理并保存多文件笔记。' }]
+              content: [{ type: 'output_text', text: '已生成多文件笔记预览，等待确认。' }]
             },
             {
               type: 'function_call',
@@ -1653,13 +1735,35 @@ test('writes a multi-file note project immediately after the explicit quick-note
 
     const indexPath = path.join(projectPath, '学习', 'API', 'index.md')
     const topicPath = path.join(projectPath, '学习', 'API', 'api.md')
+    await expect(page.getByText('已生成多文件笔记预览，等待确认。')).toBeVisible()
+    await expect(page.getByRole('button', { name: '接受并写入' })).toBeVisible()
+    await expect.poll(async () => access(indexPath).then(() => true).catch(() => false)).toBe(false)
+    await expect.poll(async () => access(topicPath).then(() => true).catch(() => false)).toBe(false)
+    await page.getByRole('button', { name: '拒绝' }).click()
+    await expect(page.getByText('已拒绝，磁盘文件没有变化。')).toBeVisible()
+    await expect.poll(async () => access(indexPath).then(() => true).catch(() => false)).toBe(false)
+    await expect.poll(async () => access(topicPath).then(() => true).catch(() => false)).toBe(false)
+
+    await page.getByRole('button', { name: '整理笔记', exact: true }).click()
+    await expect(page.getByRole('button', { name: '接受并写入' })).toBeVisible()
+    await page.getByRole('button', { name: '接受并写入' }).click()
     await expect.poll(async () => readFile(indexPath, 'utf8').catch(() => '')).toContain('[API 要点](api.md)')
     await expect.poll(async () => readFile(topicPath, 'utf8').catch(() => '')).toContain('自动保存的结构化内容')
     expect(await readFile(path.join(projectPath, 'README.md'), 'utf8')).toBe(readmeBefore)
     await expect(page.getByRole('button', { name: '接受并写入' })).toHaveCount(0)
-    expect(requestCount).toBe(2)
+    expect(requestCount).toBe(3)
 
-    const organizationRequest = JSON.stringify(requestBodies[1])
+    await page.getByRole('button', { name: 'AI 操作', exact: true }).click()
+    const historyItem = page.locator('.operation-history__item').filter({ hasText: '创建多文件学习笔记项目' })
+    await historyItem.getByRole('button', { name: '撤销这次操作' }).click()
+    await expect.poll(async () => access(indexPath).then(() => true).catch(() => false)).toBe(false)
+    await expect.poll(async () => access(topicPath).then(() => true).catch(() => false)).toBe(false)
+    await expect(page.getByText('整理写入已撤销，这段会话可以重新整理')).toBeVisible()
+    await page.getByRole('button', { name: '整理笔记', exact: true }).click()
+    await expect(page.getByRole('button', { name: '接受并写入' })).toBeVisible()
+    expect(requestCount).toBe(4)
+
+    const organizationRequest = JSON.stringify(requestBodies[2])
     expect(organizationRequest).toContain('项目目录结构')
     expect(organizationRequest).toContain('README.md')
     expect(organizationRequest).toContain('自主选择')

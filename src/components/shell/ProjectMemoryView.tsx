@@ -58,7 +58,7 @@ export function ProjectMemoryView({ projectPath, onOpen, onSaved, onSendToAi }: 
         <span><BrainCircuit aria-hidden="true" /></span>
         <div>
           <strong>跨会话记忆</strong>
-          <p>COSCRIBE.md 是项目内透明、可迁移的长期记忆。只记录稳定偏好、事实和决策。</p>
+          <p>.coscribe/COSCRIBE.md 是项目内隐藏、可迁移的长期记忆。只记录稳定偏好、事实和决策。</p>
         </div>
       </div>
       <label className="project-memory__editor">
@@ -73,7 +73,7 @@ export function ProjectMemoryView({ projectPath, onOpen, onSaved, onSendToAi }: 
       </label>
       <div className="project-memory__meta">
         <span>{draft.length.toLocaleString('zh-CN')} / 32,000</span>
-        <span>{document?.exists ? '已写入项目' : '保存后创建 COSCRIBE.md'}</span>
+        <span>{document?.exists ? '已写入项目隐藏目录' : '保存后创建 .coscribe/COSCRIBE.md'}</span>
       </div>
       {error && <p className="project-memory__error" role="alert">{error}</p>}
       <div className="project-memory__actions">

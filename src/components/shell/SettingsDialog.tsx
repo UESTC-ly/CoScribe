@@ -610,7 +610,7 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
                   </label>
                   <label className="check-row span-2">
                     <input type="checkbox" checked={draft.projectMemoryEnabled} onChange={(event) => patch('projectMemoryEnabled', event.target.checked)} />
-                    <span><strong>启用项目级长期记忆</strong><small>只读取当前项目的 COSCRIBE.md。</small></span>
+                    <span><strong>启用项目级长期记忆</strong><small>只读取当前项目的 .coscribe/COSCRIBE.md。</small></span>
                   </label>
                 </div>
               </section>

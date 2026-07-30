@@ -327,7 +327,7 @@
 .settings-section > header > div { min-width: 0; flex: 1; }
 .settings-section h3 { margin: 0; font-size: 13px; }
 .settings-section header p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
-.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; }
 .settings-grid .span-2 { grid-column: span 2; }
 .settings-system-prompt { min-height: 132px; resize: vertical; font: 12px/1.55 var(--font-mono); }
 .field-help { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-muted); font-size: 9.5px; font-weight: 450; }
@@ -341,6 +341,7 @@
 .settings-model-field { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .settings-model-fetch { min-width: 92px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding-inline: 8px; white-space: nowrap; }
 .settings-model-fetch .is-spinning { animation: shell-spin .8s linear infinite; }
+.navigator-section-header .is-spinning { animation: shell-spin .8s linear infinite; }
 .model-discovery-error { color: var(--danger); }
 .model-discovery-success { color: var(--success); }
 .settings-model-catalog { min-width: 0; display: flex; flex-direction: column; gap: 6px; }

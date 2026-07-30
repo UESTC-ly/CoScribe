@@ -12,6 +12,7 @@ const MAX_CHANGED_FILES = 2_000
 const MAX_SNAPSHOT_FILE_BYTES = 100 * 1024 * 1024
 const EXCLUDED_SEGMENTS = new Set([
   '.git',
+  '.coscribe',
   '.vibeknowledge',
   '.cache',
   'node_modules',

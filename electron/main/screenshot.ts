@@ -1,10 +1,19 @@
-import { BrowserWindow, desktopCapturer, screen, type Display, type NativeImage } from 'electron'
+import {
+  BrowserWindow,
+  desktopCapturer,
+  screen,
+  shell,
+  systemPreferences,
+  type Display,
+  type NativeImage
+} from 'electron'
 
 import { MAX_CHAT_IMAGE_BYTES } from '../../src/shared/chat-images'
 import type { ChatImageAttachment } from '../../src/shared/types'
-import { screenshotCropBounds, type ScreenshotRegion } from './screenshot-region'
+import { screenshotCropBoundsFromOverlay, type ScreenshotRegion } from './screenshot-region'
 
 const CAPTURE_RETRY_DELAYS_MS = [0, 140, 320] as const
+const MAC_SCREEN_RECORDING_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
 const MIN_SELECTION_SIZE = 8
 const SELECTION_TIMEOUT_MS = 5 * 60 * 1_000
 
@@ -15,7 +24,15 @@ interface ScreenshotSelection extends ScreenshotRegion {
 
 interface ScreenshotSelectionSession {
   selection: ScreenshotSelection
+  contentBounds: ScreenshotRegion
   close: () => void
+}
+
+class ScreenshotPermissionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ScreenshotPermissionError'
+  }
 }
 
 const SELECTION_HTML = `<!doctype html>
@@ -188,10 +205,20 @@ async function captureDisplayImage(display: Display, captureSize: { width: numbe
   throw new Error('没有获取到可捕获的显示器图像。请检查系统的屏幕录制权限。')
 }
 
+interface ScreenshotServiceOptions {
+  platform?: NodeJS.Platform
+}
+
 export class ScreenshotService {
   private pendingCapture: Promise<ChatImageAttachment | null> | null = null
+  private readonly platform: NodeJS.Platform
 
-  constructor(private readonly getWindow: () => BrowserWindow | null) {}
+  constructor(
+    private readonly getWindow: () => BrowserWindow | null,
+    options: ScreenshotServiceOptions = {}
+  ) {
+    this.platform = options.platform ?? process.platform
+  }
 
   capture(): Promise<ChatImageAttachment | null> {
     if (this.pendingCapture) return Promise.reject(new Error('截图正在进行，请完成当前截图后再试。'))
@@ -202,6 +229,60 @@ export class ScreenshotService {
       () => { if (this.pendingCapture === capture) this.pendingCapture = null }
     )
     return capture
+  }
+
+  private screenPermissionStatus(): string {
+    if (this.platform !== 'darwin') return 'granted'
+    try {
+      return systemPreferences.getMediaAccessStatus('screen')
+    } catch {
+      return 'unknown'
+    }
+  }
+
+  private async openMacScreenRecordingSettings(): Promise<boolean> {
+    try {
+      await shell.openExternal(MAC_SCREEN_RECORDING_SETTINGS_URL)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private macPermissionError(
+    status = this.screenPermissionStatus(),
+    settingsOpened = false
+  ): ScreenshotPermissionError {
+    const statusText = status === 'restricted'
+      ? 'macOS 已限制当前 App 的屏幕录制权限。'
+      : status === 'denied'
+        ? 'macOS 没有把屏幕录制权限授予当前 App。'
+        : status === 'not-determined'
+          ? 'macOS 尚未授予当前 App 屏幕录制权限。'
+          : status === 'granted'
+            ? 'macOS 显示已授权，但没有向当前版本返回可用的屏幕图像。'
+            : 'macOS 没有向当前版本返回可用的屏幕图像。'
+    const settingsText = settingsOpened
+      ? '已自动打开“系统设置 > 隐私与安全性 > 屏幕录制”，请允许 CoScribe；如果系统要求退出并重新打开，请按提示操作。'
+      : '未能自动打开系统授权设置，请手动进入“系统设置 > 隐私与安全性 > 屏幕录制”并允许 CoScribe。'
+    return new ScreenshotPermissionError([
+      statusText,
+      settingsText,
+      '若列表中已有 CoScribe 但仍失败，请删除旧的 CoScribe 条目，完全退出应用，再从 Finder 打开当前 App 并重新授权。'
+    ].join(' '))
+  }
+
+  private async openMacPermissionSettingsAndCreateError(
+    status = this.screenPermissionStatus()
+  ): Promise<ScreenshotPermissionError> {
+    const settingsOpened = await this.openMacScreenRecordingSettings()
+    return this.macPermissionError(status, settingsOpened)
+  }
+
+  private restoreWindowFocus(window: BrowserWindow): void {
+    if (window.isMinimized()) window.restore()
+    if (!window.isVisible()) window.show()
+    window.focus()
   }
 
   private async selectRegion(display: Display): Promise<ScreenshotSelectionSession | null> {
@@ -261,6 +342,7 @@ export class ScreenshotService {
       keepOverlayOpen = true
       return {
         selection: candidate as unknown as ScreenshotSelection,
+        contentBounds: overlay.getContentBounds(),
         close: closeOverlay
       }
     } finally {
@@ -272,6 +354,12 @@ export class ScreenshotService {
   private async captureOnce(): Promise<ChatImageAttachment | null> {
     const window = this.getWindow()
     if (!window || window.isDestroyed()) throw new Error('CoScribe 主窗口尚未就绪。')
+    const windowWasFocused = window.isFocused()
+    const usesAppWindowSource = process.env.COSCRIBE_E2E_SCREENSHOT_SOURCE === 'app-window'
+    const initialPermissionStatus = usesAppWindowSource ? 'granted' : this.screenPermissionStatus()
+    if (!usesAppWindowSource && this.platform === 'darwin' && (initialPermissionStatus === 'denied' || initialPermissionStatus === 'restricted')) {
+      throw await this.openMacPermissionSettingsAndCreateError(initialPermissionStatus)
+    }
 
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const captureSize = {
@@ -279,7 +367,7 @@ export class ScreenshotService {
       height: Math.max(1, Math.round(display.size.height * display.scaleFactor))
     }
     const captureVisibleDisplay = (): Promise<NativeImage> => (
-      process.env.COSCRIBE_E2E_SCREENSHOT_SOURCE === 'app-window'
+      usesAppWindowSource
         ? window.webContents.capturePage()
         : captureDisplayImage(display, captureSize)
     )
@@ -288,13 +376,45 @@ export class ScreenshotService {
     try {
       // Capture before showing the selector so confirming a region only crops
       // an already available image instead of waiting on desktop capture.
-      const displayImage = await captureVisibleDisplay()
+      let displayImage: NativeImage
+      try {
+        // On the first macOS request, desktopCapturer triggers the native
+        // screen-recording consent prompt because askForMediaAccess does not
+        // support the "screen" media type.
+        displayImage = await captureVisibleDisplay()
+      } catch (error) {
+        if (!usesAppWindowSource && this.platform === 'darwin') {
+          throw await this.openMacPermissionSettingsAndCreateError()
+        }
+        throw error
+      }
+      if (windowWasFocused && !window.isFocused()) {
+        this.restoreWindowFocus(window)
+        await delay(80)
+        try {
+          displayImage = await captureVisibleDisplay()
+        } catch (error) {
+          if (!usesAppWindowSource && this.platform === 'darwin') {
+            throw await this.openMacPermissionSettingsAndCreateError()
+          }
+          throw error
+        }
+        if (!window.isFocused()) {
+          this.restoreWindowFocus(window)
+          await delay(40)
+        }
+      }
+      if (!usesAppWindowSource && this.platform === 'darwin' && displayImage.isEmpty()) {
+        throw await this.openMacPermissionSettingsAndCreateError()
+      }
       selectionSession = await this.selectRegion(display)
       if (!selectionSession) return null
       const { selection } = selectionSession
-      const crop = screenshotCropBounds(
+      const crop = screenshotCropBoundsFromOverlay(
         selection,
         { width: selection.viewportWidth, height: selection.viewportHeight },
+        selectionSession.contentBounds,
+        display.bounds,
         displayImage.getSize()
       )
       const bytes = encodeScreenshot(displayImage.crop(crop))
@@ -308,9 +428,12 @@ export class ScreenshotService {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : '截图失败。'
-      const hint = process.platform === 'darwin'
-        ? 'macOS 用户请在“系统设置 > 隐私与安全性 > 屏幕录制”中允许 CoScribe。'
-        : process.platform === 'win32'
+      if (error instanceof ScreenshotPermissionError) {
+        throw error
+      }
+      const hint = this.platform === 'darwin'
+        ? this.macPermissionError().message
+        : this.platform === 'win32'
           ? 'Windows 用户请检查系统屏幕捕获权限、远程桌面策略或安全软件设置。'
           : '请检查桌面环境的屏幕捕获权限。'
       throw new Error(`${message} ${hint}`)

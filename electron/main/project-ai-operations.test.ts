@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -142,23 +142,24 @@ describe('AI Markdown operations', () => {
 })
 
 describe('transparent project memory', () => {
-  it('starts from a portable template and saves only to project-root COSCRIBE.md', async () => {
+  it('starts from a portable template and saves only to .coscribe/COSCRIBE.md', async () => {
     const { root, service } = await projectService()
     const initial = await service.memory()
 
-    expect(initial).toMatchObject({ path: path.join(root, 'COSCRIBE.md'), exists: false })
+    expect(initial).toMatchObject({ path: path.join(root, '.coscribe', 'COSCRIBE.md'), exists: false })
     expect(initial.content).toContain('# CoScribe Project Memory')
 
     const saved = await service.saveMemory('# 项目记忆\n\n- 使用双链笔记')
-    expect(saved).toMatchObject({ path: path.join(root, 'COSCRIBE.md'), exists: true })
+    expect(saved).toMatchObject({ path: path.join(root, '.coscribe', 'COSCRIBE.md'), exists: true })
     await expect(readFile(saved.path, 'utf8')).resolves.toBe('# 项目记忆\n\n- 使用双链笔记\n')
   })
 
-  it('rejects a symlinked COSCRIBE.md instead of following it outside the project', async () => {
+  it('rejects a symlinked hidden COSCRIBE.md instead of following it outside the project', async () => {
     const { root, service } = await projectService()
     const outside = path.join(path.dirname(root), 'outside-memory.md')
     await writeFile(outside, '# secret')
-    await symlink(outside, path.join(root, 'COSCRIBE.md'))
+    await mkdir(path.join(root, '.coscribe'))
+    await symlink(outside, path.join(root, '.coscribe', 'COSCRIBE.md'))
 
     await expect(service.memory()).rejects.toThrow(/符号链接/u)
     await expect(service.saveMemory('# replaced')).rejects.toThrow(/符号链接/u)

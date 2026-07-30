@@ -6,6 +6,8 @@ playwright-report/
 test-results/
 coverage/
 .cache/
+.coscribe/
+.vibeknowledge/
 .DS_Store
 *.log
 *.tmp

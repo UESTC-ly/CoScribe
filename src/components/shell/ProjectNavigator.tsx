@@ -23,6 +23,7 @@ interface ProjectNavigatorProps {
   searchResults: SearchResult[]
   searchProgress?: SearchProgress | null
   onCloseProject: () => void
+  refreshingTree: boolean
   onRefresh: () => void
   onCreateMarkdown: () => void
   onCreateCodeFile: () => void
@@ -135,6 +136,20 @@ function AnnotationsView({ annotations, onOpen, onDelete }: { annotations: Annot
 }
 
 export function ProjectNavigator(props: ProjectNavigatorProps): React.JSX.Element {
+  const refreshButton = (
+    <button
+      className="icon-button"
+      type="button"
+      disabled={props.refreshingTree}
+      aria-busy={props.refreshingTree}
+      aria-label="刷新文件树"
+      title={props.refreshingTree ? '正在刷新' : '刷新'}
+      onClick={props.onRefresh}
+    >
+      <RefreshCw className={props.refreshingTree ? 'is-spinning' : undefined} size={15} />
+    </button>
+  )
+
   return (
     <aside className="project-navigator" aria-label={`项目${sectionLabels[props.section]}`}>
       <header className="navigator-project-header">
@@ -144,8 +159,8 @@ export function ProjectNavigator(props: ProjectNavigatorProps): React.JSX.Elemen
       <div className="navigator-section-header">
         <h2>{sectionLabels[props.section]}</h2>
         <div>
-          {props.section === 'files' && <><button className="icon-button" onClick={props.onCreateMarkdown} aria-label="新建 Markdown" title="新建 Markdown"><FilePlus2 size={15} /></button><button className="icon-button" onClick={props.onCreateFolder} aria-label="新建文件夹" title="新建文件夹"><FolderPlus size={15} /></button><button className="icon-button" onClick={props.onRefresh} aria-label="刷新文件树" title="刷新"><RefreshCw size={15} /></button></>}
-          {props.section === 'ide' && <><button className="icon-button" onClick={props.onCreateCodeFile} aria-label="新建代码文件" title="新建代码文件"><FilePlus2 size={15} /></button><button className="icon-button" onClick={props.onCreateFolder} aria-label="新建文件夹" title="新建文件夹"><FolderPlus size={15} /></button><button className="icon-button" onClick={props.onRefresh} aria-label="刷新文件树" title="刷新"><RefreshCw size={15} /></button></>}
+          {props.section === 'files' && <><button className="icon-button" onClick={props.onCreateMarkdown} aria-label="新建 Markdown" title="新建 Markdown"><FilePlus2 size={15} /></button><button className="icon-button" onClick={props.onCreateFolder} aria-label="新建文件夹" title="新建文件夹"><FolderPlus size={15} /></button>{refreshButton}</>}
+          {props.section === 'ide' && <><button className="icon-button" onClick={props.onCreateCodeFile} aria-label="新建代码文件" title="新建代码文件"><FilePlus2 size={15} /></button><button className="icon-button" onClick={props.onCreateFolder} aria-label="新建文件夹" title="新建文件夹"><FolderPlus size={15} /></button>{refreshButton}</>}
           <button className="icon-button" onClick={props.onClose} aria-label="收起左侧栏" title="收起左侧栏"><PanelLeftClose size={15} /></button>
         </div>
       </div>

@@ -46,7 +46,7 @@ export default function GitSnapshotsWorkspace(): React.JSX.Element {
         <button className="secondary-button" type="button" disabled={loading} onClick={() => void load()}><RefreshCw size={14} />刷新状态</button>
       </header>
 
-      <div className="git-safety-strip"><ShieldCheck size={18} /><span><strong>默认排除敏感和生成内容。</strong>.env、私钥、凭据命名文件、.vibeknowledge、node_modules、release、dist、out 与单文件超过 100 MB 的内容不会进入快照。</span></div>
+      <div className="git-safety-strip"><ShieldCheck size={18} /><span><strong>默认排除敏感和生成内容。</strong>.env、私钥、凭据命名文件、.coscribe、旧 .vibeknowledge、node_modules、release、dist、out 与单文件超过 100 MB 的内容不会进入快照。</span></div>
       {notice && <p className="plugin-inline-message research-message" role="status">{notice}</p>}
 
       {loading || !status ? <div className="plugin-loading"><span className="viewer-spinner" />正在读取 Git 状态…</div> : <div className="git-layout">

@@ -77,6 +77,20 @@ describe('renderer store tabs and panes', () => {
     expect(store.getState().workspace.tabs[0].name).toBe('a.md')
   })
 
+  it('does not freeze a deleted tab into a later AI request context', () => {
+    const store = createAppStore()
+    store.getState().setProject(project)
+    store.getState().openTab(tab('deleted', '/study/deleted.md'))
+    store.getState().loadDocument(documentResult({ path: '/study/deleted.md' }))
+    store.getState().setFileTree([])
+
+    expect(store.getState().captureActiveContext('project')).toMatchObject({
+      projectPath: '/study',
+      scope: 'project'
+    })
+    expect(store.getState().captureActiveContext('project')?.documentPath).toBeUndefined()
+  })
+
   it('releases a clean closed document buffer but preserves unsaved content', () => {
     const store = createAppStore()
     store.getState().setProject(project)
@@ -137,6 +151,26 @@ describe('renderer store chat sessions', () => {
       compaction: undefined,
       noteCheckpoint: undefined
     })
+  })
+
+  it('clears only the note checkpoint that belongs to an undone organization', () => {
+    const store = createAppStore()
+    store.getState().setProject(project)
+    const sessionId = store.getState().createSession('Organized', 'session-organized', 1)
+    store.getState().addMessage(sessionId, message('message-1', 'first', 2))
+    store.getState().markSessionNotesOrganized(sessionId, {
+      throughMessageId: 'message-1',
+      sourceMessageCount: 1,
+      organizedAt: 3,
+      targetPaths: ['notes/first.md']
+    }, 3)
+
+    store.getState().clearSessionNotesOrganized(sessionId, 'stale-message', 4)
+    expect(store.getState().sessions.find((item) => item.id === sessionId)?.noteCheckpoint)
+      .toMatchObject({ throughMessageId: 'message-1' })
+
+    store.getState().clearSessionNotesOrganized(sessionId, 'message-1', 5)
+    expect(store.getState().sessions.find((item) => item.id === sessionId)?.noteCheckpoint).toBeUndefined()
   })
 })
 

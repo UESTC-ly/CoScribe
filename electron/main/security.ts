@@ -2,6 +2,8 @@ import { constants, realpathSync } from 'node:fs'
 import { lstat, open, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 
+import { LEGACY_PROJECT_INTERNAL_DIRECTORY, PROJECT_INTERNAL_DIRECTORY } from './project-memory'
+
 const WINDOWS_ABSOLUTE = /^[a-zA-Z]:[\\/]/
 const UNC_PATH = /^(?:\\\\|\/\/)/
 
@@ -166,8 +168,9 @@ export function assertSafeName(name: string, label = '名称'): string {
 }
 
 export function assertNotMetadataPath(root: string, candidate: string): void {
-  const metadata = path.join(root, '.vibeknowledge')
-  if (isInside(metadata, candidate)) {
-    throw new PathSecurityError('项目元数据由应用管理，不能通过文件操作修改。')
+  for (const directory of [PROJECT_INTERNAL_DIRECTORY, LEGACY_PROJECT_INTERNAL_DIRECTORY]) {
+    if (isInside(path.join(root, directory), candidate)) {
+      throw new PathSecurityError('项目元数据由应用管理，不能通过文件操作修改。')
+    }
   }
 }

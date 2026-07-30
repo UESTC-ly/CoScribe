@@ -469,6 +469,74 @@ describe('AI Markdown operation mapping', () => {
     })
   })
 
+  it('requires the current user request to explicitly authorize project-memory changes', async () => {
+    const prepareAiOperation = vi.fn().mockResolvedValue(undefined)
+    const ai = new AiService(
+      {} as SettingsStore,
+      {
+        info: { path: '/project' },
+        prepareAiOperation
+      } as unknown as ProjectService,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+    const exposed = ai as unknown as {
+      operationFromTool(
+        tool: { name: string; arguments: string },
+        mode?: 'generate-flashcards',
+        context?: undefined,
+        currentUserRequest?: string
+      ): Promise<unknown>
+    }
+    const tool = {
+      name: 'propose_workspace_operation',
+      arguments: JSON.stringify({
+        kind: 'replace',
+        targetPath: '.coscribe/COSCRIBE.md',
+        proposedContent: '# 项目记忆\n\n- 使用 TypeScript',
+        summary: '更新项目记忆'
+      })
+    }
+
+    for (const unrelatedRequest of [
+      '这个项目有哪些核心模块？',
+      '项目记忆是怎么工作的？',
+      '不要把这段内容写入项目记忆，只回答问题。'
+    ]) {
+      await expect(exposed.operationFromTool(
+        tool,
+        undefined,
+        undefined,
+        unrelatedRequest
+      )).rejects.toThrow(/当前请求.*项目记忆/u)
+    }
+    expect(prepareAiOperation).not.toHaveBeenCalled()
+
+    await expect(exposed.operationFromTool({
+      ...tool,
+      arguments: JSON.stringify({
+        kind: 'replace',
+        targetPath: '闪卡/../.coscribe/COSCRIBE.md',
+        proposedContent: '# 项目记忆',
+        summary: '错误地覆盖项目记忆'
+      })
+    }, 'generate-flashcards', undefined, '请生成闪卡')).rejects.toThrow(/当前请求.*项目记忆/u)
+    expect(prepareAiOperation).not.toHaveBeenCalled()
+
+    for (const memoryRequest of [
+      '请把“使用 TypeScript”加入项目记忆',
+      '请记住下面这条稳定约定'
+    ]) {
+      await exposed.operationFromTool(
+        tool,
+        undefined,
+        undefined,
+        memoryRequest
+      )
+    }
+    expect(prepareAiOperation).toHaveBeenCalledTimes(2)
+  })
+
   it('confines flashcard proposals to Q/A Markdown under the flashcard directory', async () => {
     const prepareAiOperation = vi.fn().mockResolvedValue(undefined)
     const ai = new AiService(

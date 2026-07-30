@@ -45,3 +45,30 @@ export function screenshotCropBounds(
   const bottomPixel = clamp(Math.ceil(bottom * imageHeight / viewport.height), y + 1, imageHeight)
   return { x, y, width: rightPixel - x, height: bottomPixel - y }
 }
+
+export function screenshotCropBoundsFromOverlay(
+  selection: ScreenshotRegion,
+  viewport: ScreenshotSize,
+  overlayContentBounds: ScreenshotRegion,
+  displayBounds: ScreenshotRegion,
+  image: ScreenshotSize
+): ScreenshotRegion {
+  if (
+    !validSize(viewport) ||
+    !validSize(overlayContentBounds) ||
+    !validSize(displayBounds) ||
+    !Object.values(overlayContentBounds).every(Number.isFinite) ||
+    !Object.values(displayBounds).every(Number.isFinite)
+  ) {
+    throw new Error('截图区域无效。')
+  }
+
+  const contentScaleX = overlayContentBounds.width / viewport.width
+  const contentScaleY = overlayContentBounds.height / viewport.height
+  return screenshotCropBounds({
+    x: overlayContentBounds.x - displayBounds.x + selection.x * contentScaleX,
+    y: overlayContentBounds.y - displayBounds.y + selection.y * contentScaleY,
+    width: selection.width * contentScaleX,
+    height: selection.height * contentScaleY
+  }, displayBounds, image)
+}

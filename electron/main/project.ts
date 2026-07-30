@@ -57,11 +57,14 @@ import { SettingsStore } from './settings'
 import { atomicCreate, atomicWrite, atomicWriteJson, readJson } from './storage'
 import {
   DEFAULT_PROJECT_MEMORY,
+  LEGACY_PROJECT_INTERNAL_DIRECTORY,
+  migrateProjectInternalStorage,
   normalizeProjectMemory,
-  PROJECT_MEMORY_FILENAME
+  PROJECT_INTERNAL_DIRECTORY,
+  PROJECT_MEMORY_RELATIVE_PATH
 } from './project-memory'
 
-const METADATA_DIRECTORY = '.vibeknowledge'
+const METADATA_DIRECTORY = PROJECT_INTERNAL_DIRECTORY
 const USER_GUIDE_FILENAME = 'CoScribe 使用指南.md'
 const MAX_RECENT_PROJECTS = 20
 const MAX_TEXT_FILE_SIZE = 32 * 1024 * 1024
@@ -91,6 +94,7 @@ type ProjectMetadataName =
 
 const IGNORED_PROJECT_ENTRY_NAMES = new Set([
   METADATA_DIRECTORY,
+  LEGACY_PROJECT_INTERNAL_DIRECTORY,
   '.DS_Store',
   'Thumbs.db',
   '.git',
@@ -202,6 +206,18 @@ function hasTraversalSegment(value: string): boolean {
   return value.split(/[\\/]+/u).some((segment) => segment === '..')
 }
 
+function projectMemoryPath(root: string): string {
+  return path.join(root, PROJECT_MEMORY_RELATIVE_PATH)
+}
+
+function isProjectMemoryPath(root: string, candidate: string): boolean {
+  return path.resolve(candidate) === projectMemoryPath(root)
+}
+
+function assertProjectContentPath(root: string, candidate: string): void {
+  if (!isProjectMemoryPath(root, candidate)) assertNotMetadataPath(root, candidate)
+}
+
 async function projectTargetAllowMissing(root: string, inputPath: string): Promise<string> {
   if (
     !inputPath ||
@@ -214,7 +230,7 @@ async function projectTargetAllowMissing(root: string, inputPath: string): Promi
   }
   const candidate = path.resolve(root, inputPath)
   if (candidate === root || !isInside(root, candidate)) throw new Error('文件路径不在当前项目内。')
-  assertNotMetadataPath(root, candidate)
+  assertProjectContentPath(root, candidate)
   const relative = path.relative(root, candidate)
   const segments = relative.split(path.sep).filter(Boolean)
   let cursor = root
@@ -297,7 +313,12 @@ function timestamp(value: unknown, fallback: number): number {
 function metadataProjectPath(value: unknown, root: string): string | undefined {
   if (typeof value !== 'string') return undefined
   const resolved = path.resolve(root, value)
-  if (!isInside(root, resolved) || isInside(path.join(root, METADATA_DIRECTORY), resolved)) return undefined
+  if (!isInside(root, resolved)) return undefined
+  try {
+    assertProjectContentPath(root, resolved)
+  } catch {
+    return undefined
+  }
   return resolved
 }
 
@@ -446,6 +467,15 @@ function normalizedMessage(value: unknown, root: string): ChatMessage | undefine
     ? value.sources.map((source) => normalizedSource(source, root)).filter((source): source is SourceRef => Boolean(source)).slice(0, 100)
     : undefined
   const operation = normalizedOperation(value.operation, root)
+  const noteOrganization = isRecord(value.noteOrganization) &&
+    typeof value.noteOrganization.throughMessageId === 'string' &&
+    typeof value.noteOrganization.sourceMessageCount === 'number' &&
+    Number.isInteger(value.noteOrganization.sourceMessageCount)
+    ? {
+        throughMessageId: value.noteOrganization.throughMessageId.slice(0, 500),
+        sourceMessageCount: Math.max(0, Math.min(value.noteOrganization.sourceMessageCount, MAX_MESSAGES_PER_SESSION))
+      }
+    : undefined
   const progress = normalizedMessageProgress(value.progress)
   const kind = value.kind === 'command' || value.kind === 'session-compaction' || value.kind === 'note-organization'
     ? value.kind
@@ -463,6 +493,7 @@ function normalizedMessage(value: unknown, root: string): ChatMessage | undefine
     ...(context ? { context } : {}),
     ...(sources?.length ? { sources } : {}),
     ...(operation ? { operation } : {}),
+    ...(noteOrganization ? { noteOrganization } : {}),
     ...(progress ? { progress } : {}),
     ...(value.stopped === true ? { stopped: true } : {}),
     ...(text(value.error, 20_000) ? { error: text(value.error, 20_000) } : {})
@@ -509,9 +540,13 @@ export function normalizeSessionsForProject(value: unknown, root: string): ChatS
       ? candidate.messages.slice(0, MAX_MESSAGES_PER_SESSION).map((message) => normalizedMessage(message, root)).filter((message): message is ChatMessage => Boolean(message))
       : []
     const messageIds = new Set(messages.map((message) => message.id))
+    for (const message of messages) {
+      if (message.noteOrganization && !messageIds.has(message.noteOrganization.throughMessageId)) {
+        delete message.noteOrganization
+      }
+    }
     const compaction = isRecord(candidate.compaction) &&
       typeof candidate.compaction.throughMessageId === 'string' &&
-      messageIds.has(candidate.compaction.throughMessageId) &&
       text(candidate.compaction.summary, MAX_MESSAGE_CHARS)?.trim()
       ? {
           summary: text(candidate.compaction.summary, MAX_MESSAGE_CHARS)!.trim(),
@@ -763,6 +798,7 @@ export class ProjectService {
   }
 
   private async ensureMetadata(root: string): Promise<void> {
+    await migrateProjectInternalStorage(root)
     const metadataPath = path.join(root, METADATA_DIRECTORY)
     try {
       const info = await lstat(metadataPath)
@@ -773,7 +809,7 @@ export class ProjectService {
       if (!isInside(root, canonical)) throw new Error('项目元数据目录越界。')
     } catch (error) {
       if (!isMissing(error)) throw error
-      await mkdir(metadataPath, { mode: 0o700 })
+      throw new Error(`${METADATA_DIRECTORY} 迁移后仍不存在。`)
     }
   }
 
@@ -991,7 +1027,8 @@ export class ProjectService {
   }
 
   async memory(): Promise<ProjectMemoryDocument> {
-    const memoryPath = path.join(this.guard.root, PROJECT_MEMORY_FILENAME)
+    await migrateProjectInternalStorage(this.guard.root)
+    const memoryPath = projectMemoryPath(this.guard.root)
     try {
       const canonical = await this.guard.existing(memoryPath, 'file')
       const info = await stat(canonical)
@@ -1012,9 +1049,10 @@ export class ProjectService {
 
   async saveMemory(value: string): Promise<ProjectMemoryDocument> {
     const content = normalizeProjectMemory(value)
-    const target = await this.guard.assertMarkdown(path.join(this.guard.root, PROJECT_MEMORY_FILENAME), false)
-    const rootIdentity = await this.guard.identity(this.guard.root, 'directory')
-    await atomicWrite(target, content, 0o600, () => this.guard.verifyIdentity(rootIdentity))
+    await migrateProjectInternalStorage(this.guard.root)
+    const target = await this.guard.assertMarkdown(projectMemoryPath(this.guard.root), false)
+    const directoryIdentity = await this.guard.identity(path.dirname(target), 'directory')
+    await atomicWrite(target, content, 0o600, () => this.guard.verifyIdentity(directoryIdentity))
     return this.memory()
   }
 
@@ -1170,7 +1208,9 @@ export class ProjectService {
     const root = guard.root
     const canonicalDirectory = path.resolve(directory)
     if (!isInside(root, canonicalDirectory)) throw new Error('目标文件夹不在当前项目内。')
-    assertNotMetadataPath(root, canonicalDirectory)
+    if (canonicalDirectory !== path.dirname(projectMemoryPath(root))) {
+      assertNotMetadataPath(root, canonicalDirectory)
+    }
     let cursor = root
     for (const segment of path.relative(root, canonicalDirectory).split(path.sep).filter(Boolean)) {
       const parent = cursor
@@ -1360,7 +1400,7 @@ export class ProjectService {
 
   async read(inputPath: string): Promise<FileReadResult> {
     const canonical = await this.guard.existing(inputPath, 'file')
-    assertNotMetadataPath(this.guard.root, canonical)
+    assertProjectContentPath(this.guard.root, canonical)
     const info = await stat(canonical)
     const kind = fileKind(canonical)
     let content = ''
@@ -1434,7 +1474,7 @@ export class ProjectService {
     if (!['markdown', 'code', 'text'].includes(fileKind(canonical))) {
       throw new Error('只能保存项目内可编辑的 Markdown、代码或文本文件。')
     }
-    assertNotMetadataPath(this.guard.root, canonical)
+    assertProjectContentPath(this.guard.root, canonical)
     const { mode, modifiedAt } = await this.assertUnchanged(canonical, expectedModifiedAt)
     const parentIdentity = await this.guard.identity(path.dirname(canonical), 'directory')
     const targetIdentity = await this.guard.identity(canonical, 'file')
@@ -1479,7 +1519,7 @@ export class ProjectService {
     await this.ensureProjectDirectories(path.dirname(unchecked), guard, verifyScope)
     const canonical = await guard.target(unchecked)
     verifyScope()
-    assertNotMetadataPath(guard.root, canonical)
+    assertProjectContentPath(guard.root, canonical)
     await assertAbsent(canonical)
     verifyScope()
     const parentIdentity = await guard.identity(path.dirname(canonical), 'directory')
@@ -1781,7 +1821,7 @@ export class ProjectService {
       if (!['markdown', 'code', 'text'].includes(fileKind(target))) {
         throw new Error('AI 只能写入项目内可编辑的 Markdown、代码或文本文件。')
       }
-      assertNotMetadataPath(this.guard.root, target)
+      assertProjectContentPath(this.guard.root, target)
       let originalContent: string | undefined
       let expectedModifiedAt: number | undefined
       if (mustExist) {

@@ -39,6 +39,8 @@ describe('project file tree', () => {
     await writeFile(path.join(root, 'node_modules', 'package', 'README.md'), '# dependency\n')
     await mkdir(path.join(root, '.vibeknowledge'), { recursive: true })
     await writeFile(path.join(root, '.vibeknowledge', 'workspace.json'), '{}\n')
+    await mkdir(path.join(root, '.coscribe'), { recursive: true })
+    await writeFile(path.join(root, '.coscribe', 'COSCRIBE.md'), '# hidden memory\n')
 
     const service = new ProjectService({} as SettingsStore, () => undefined, () => undefined)
     ;(service as unknown as { guardValue: ProjectPathGuard }).guardValue = new ProjectPathGuard(root)
