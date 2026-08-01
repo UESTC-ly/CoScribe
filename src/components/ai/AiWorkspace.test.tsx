@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiWorkspaceProps } from './AiWorkspace'
 import { AiWorkspace } from './AiWorkspace'
@@ -9,6 +10,7 @@ import type {
   ChatImageAttachment,
   ChatMessage,
   ChatSession,
+  ContextScope,
   ContextSnapshot,
   FileOperationProposal,
   WebSelectionCandidate
@@ -538,6 +540,28 @@ describe('AiWorkspace', () => {
 
     fireEvent.change(screen.getByLabelText('基于'), { target: { value: 'project' } })
     expect(onContextScopeChange).toHaveBeenCalledWith('project')
+  })
+
+  it('keeps the context scope editable while the current response is streaming', () => {
+    function StreamingWorkspace(): React.JSX.Element {
+      const [scope, setScope] = useState<ContextScope>('visible')
+      return (
+        <AiWorkspace
+          {...buildProps({
+            contextScope: scope,
+            isStreaming: true,
+            onContextScopeChange: setScope
+          })}
+        />
+      )
+    }
+    render(<StreamingWorkspace />)
+
+    const scope = screen.getByLabelText('基于')
+    expect(scope).toBeEnabled()
+
+    fireEvent.change(scope, { target: { value: 'project' } })
+    expect(scope).toHaveValue('project')
   })
 
   it('keeps a captured selection visible when the normal context uses another scope', () => {

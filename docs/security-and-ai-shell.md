@@ -1,5 +1,7 @@
 # 安全与 AI Shell
 
+> 事实源：`electron/main/index.ts`、`ipc.ts`、`security.ts`、`project.ts`、`terminal.ts` 及对应主进程测试；核对日期 2026-07-31。
+
 ## 安全模型
 
 CoScribe 假设以下输入都不可信：Renderer 输入、项目文件名和内容、网页、OCR 文本、AI 回复、MCP 回复、终端输出和第三方 Provider 响应。高权限操作只能在主进程中完成，并且需要最小 IPC 面、输入校验和用户可见确认。
@@ -25,6 +27,17 @@ CoScribe 假设以下输入都不可信：Renderer 输入、项目文件名和�
 - AI 仅能提议支持类型的创建、追加或替换；不能静默删除文件。
 
 AI 的“已接受操作”有历史记录，只有目标文件没有后续手工变更时才能安全撤销。
+
+```mermaid
+flowchart LR
+  Model[不可信 AI 输出] --> Proposal[结构化文件提议]
+  Proposal --> Preview[Renderer 差异预览]
+  Preview --> Confirm{用户确认?}
+  Confirm -->|否| Drop[不写盘]
+  Confirm -->|是| Recheck[Main 重验路径/身份/mtime/hash]
+  Recheck --> Atomic[临时文件 + fsync + 原子替换]
+  Recheck -->|冲突| Reject[拒绝并显示错误]
+```
 
 ## AI 服务与密钥
 

@@ -7,8 +7,9 @@ import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '..')
 const output = path.join(root, 'docs', 'images')
-const projectPath = await mkdtemp(path.join(tmpdir(), 'coscribe-readme-project-'))
-const userDataPath = await mkdtemp(path.join(tmpdir(), 'coscribe-readme-user-'))
+const screenshotTempRoot = process.platform === 'win32' ? tmpdir() : '/tmp'
+const projectPath = await mkdtemp(path.join(screenshotTempRoot, 'coscribe-readme-project-'))
+const userDataPath = await mkdtemp(path.join(screenshotTempRoot, 'coscribe-readme-user-'))
 
 await mkdir(output, { recursive: true })
 await copyFile(
@@ -90,7 +91,24 @@ try {
   })
   await page.evaluate(async (baseUrl) => {
     const current = await window.coscribe.settings.get()
-    await window.coscribe.settings.save({ ...current, baseUrl, model: 'local-readme-model', apiProtocol: 'responses', theme: 'light' })
+    const activeProfile = current.aiProfiles.find((profile) => profile.id === current.activeAiProfileId) ?? current.aiProfiles[0]
+    const aiProfiles = current.aiProfiles.map((profile) => profile.id === activeProfile.id
+      ? {
+          ...profile,
+          provider: 'openai',
+          baseUrl,
+          model: 'local-readme-model',
+          enabledModels: ['local-readme-model'],
+          apiProtocol: 'responses'
+        }
+      : profile)
+    await window.coscribe.settings.save({
+      ...current,
+      aiProvider: 'openai',
+      activeAiProfileId: activeProfile.id,
+      aiProfiles,
+      theme: 'light'
+    })
   }, `http://127.0.0.1:${port}`)
   await page.reload()
   await page.waitForFunction(() => Boolean(window.coscribe))
@@ -113,7 +131,6 @@ try {
     selection?.addRange(range)
     element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
   })
-  await page.getByLabel('基于').selectOption('selection')
   const selectionCard = page.getByRole('region', { name: '已捕获的 AI 选中内容' })
   await selectionCard.waitFor({ state: 'visible' })
   await page.getByLabel('向 AI 提问').focus()

@@ -847,7 +847,7 @@ export function AiWorkspace({
           <select
             id="ai-context-scope"
             value={contextScope}
-            disabled={disabled || isBusy}
+            disabled={disabled}
             onChange={(event) => onContextScopeChange(event.target.value as ContextScope)}
           >
             {scopeOptions.map((option) => (

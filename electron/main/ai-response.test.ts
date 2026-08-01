@@ -350,6 +350,172 @@ describe('AI Shell model tool boundary', () => {
   })
 })
 
+describe('Anthropic note organization operation recovery', () => {
+  const request: AiRequest = {
+    requestId: 'organize-notes-request',
+    sessionId: 'session-1',
+    operationMode: 'organize-project-notes',
+    messages: [{ role: 'user', content: '整理这次对话并写入项目笔记' }],
+    context: {
+      projectName: 'Project',
+      projectPath: '/project',
+      pane: 'primary',
+      scope: 'general',
+      referencedFiles: [],
+      capturedAt: 1
+    }
+  }
+
+  const anthropicMessage = (input: Record<string, unknown>, text = '整理完成。') => new Response(JSON.stringify({
+    type: 'message',
+    content: [
+      { type: 'text', text },
+      {
+        type: 'tool_use',
+        id: 'tool-1',
+        name: 'propose_markdown_operation',
+        input
+      }
+    ]
+  }), { status: 200, headers: { 'content-type': 'application/json' } })
+
+  const settings = () => ({
+    get: vi.fn().mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      aiProvider: 'anthropic',
+      activeAiProfileId: 'anthropic-default',
+      aiProfiles: [{
+        id: 'anthropic-default',
+        name: 'Anthropic',
+        provider: 'anthropic',
+        baseUrl: 'https://anthropic.example.com',
+        model: 'claude-sonnet-4-6',
+        enabledModels: ['claude-sonnet-4-6'],
+        apiProtocol: 'auto',
+        hasApiKey: true
+      }],
+      projectMemoryEnabled: false
+    }),
+    anthropicApiKey: vi.fn().mockResolvedValue('fixture-anthropic-key')
+  }) as unknown as SettingsStore
+
+  it('requests one parameter-only repair when Anthropic returns an invalid batch operation', async () => {
+    const invalidInput = {
+      operations: [{
+        action: 'update',
+        path: 'notes/existing.md',
+        content: '追加内容'
+      }],
+      summary: '整理笔记'
+    }
+    const validOperations = [
+      { kind: 'create', targetPath: 'notes/topic.md', proposedContent: '# Topic' },
+      { kind: 'append', targetPath: 'notes/existing.md', proposedContent: '\n补充内容' }
+    ]
+    const proposal = { operations: validOperations, summary: '整理笔记预览' }
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(anthropicMessage(invalidInput))
+      .mockResolvedValueOnce(anthropicMessage(
+        { operations: validOperations, summary: '整理笔记' },
+        '修正后的重复正文不应显示。'
+      ))
+    const prepareAiOperation = vi.fn(async (input: { operations?: Array<Record<string, unknown>> }) => {
+      const valid = input.operations?.every((operation) =>
+        (operation.kind === 'create' || operation.kind === 'append' || operation.kind === 'replace') &&
+        typeof operation.targetPath === 'string' &&
+        typeof operation.proposedContent === 'string'
+      )
+      if (!valid) throw new Error('AI 返回了不支持的文件操作。')
+      return proposal
+    })
+    const project = {
+      info: { name: 'Project', path: '/project' },
+      tree: vi.fn().mockResolvedValue([]),
+      prepareAiOperation
+    } as unknown as ProjectService
+    const send = vi.fn()
+    const sender = { isDestroyed: () => false, send } as unknown as WebContents
+    const ai = new AiService(
+      settings(),
+      project,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+    const exposed = ai as unknown as {
+      run(sender: WebContents, request: AiRequest, controller: AbortController): Promise<void>
+    }
+
+    await exposed.run(sender, request, new AbortController())
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(prepareAiOperation).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body)) as {
+      system: string
+    }
+    const repairBody = JSON.parse(String((fetchSpy.mock.calls[1]?.[1] as RequestInit).body)) as {
+      messages: Array<{ role: string; content: string }>
+      tools: Array<{ name: string }>
+    }
+    expect(firstBody.system).toContain('每个 operation 只能使用 kind、targetPath、proposedContent')
+    expect(repairBody.tools.map((tool) => tool.name)).toEqual(['propose_markdown_operation'])
+    expect(repairBody.messages.at(-1)?.content).toContain('AI 返回了不支持的文件操作')
+    expect(repairBody.messages.at(-1)?.content).toContain(JSON.stringify(invalidInput))
+    expect(send).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      requestId: request.requestId,
+      type: 'done',
+      operation: proposal
+    }))
+    expect(send).not.toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      type: 'delta',
+      text: expect.stringContaining('文件操作建议无效')
+    }))
+    expect(send).not.toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      type: 'delta',
+      text: expect.stringContaining('修正后的重复正文不应显示')
+    }))
+  })
+
+  it('rejects the preview after one failed repair without making a third request', async () => {
+    const invalidInput = {
+      operations: [{ action: 'modify', target_path: 'notes/topic.md', proposed_content: '# Topic' }],
+      summary: '整理笔记'
+    }
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(anthropicMessage(invalidInput))
+      .mockResolvedValueOnce(anthropicMessage(invalidInput, ''))
+    const prepareAiOperation = vi.fn().mockRejectedValue(new Error('AI 返回了不支持的文件操作。'))
+    const project = {
+      info: { name: 'Project', path: '/project' },
+      tree: vi.fn().mockResolvedValue([]),
+      prepareAiOperation
+    } as unknown as ProjectService
+    const send = vi.fn()
+    const sender = { isDestroyed: () => false, send } as unknown as WebContents
+    const ai = new AiService(
+      settings(),
+      project,
+      {} as PdfTextService,
+      {} as ProjectSearchService
+    )
+    const exposed = ai as unknown as {
+      run(sender: WebContents, request: AiRequest, controller: AbortController): Promise<void>
+    }
+
+    await exposed.run(sender, request, new AbortController())
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(prepareAiOperation).toHaveBeenCalledTimes(2)
+    expect(send).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      type: 'delta',
+      text: expect.stringContaining('自动修正后仍无效')
+    }))
+    const doneEvent = send.mock.calls
+      .map((call) => call[1])
+      .find((event) => event.type === 'done')
+    expect(doneEvent).not.toHaveProperty('operation')
+  })
+})
+
 describe('AI conversation image mapping', () => {
   it('maps user image attachments to Responses API input parts', () => {
     expect(aiConversationMessages('responses', [{

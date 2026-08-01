@@ -1,4 +1,20 @@
-# 测试与发布
+# 测试、打包与部署
+
+> 事实源：`package.json`、三套 Vitest 配置、`playwright.config.ts`、`tests/e2e/`、三平台校验脚本和 `.github/workflows/`；核对日期 2026-07-31。
+
+## 当前本地证据
+
+在当前工作树实际运行：
+
+| 命令 | 结果 |
+| --- | --- |
+| `npm run typecheck` | 通过：Renderer 与 Node/Electron 两套 TypeScript 检查 |
+| `npm test` | 通过：29 文件/111 unit，23 文件/162 Electron，2 文件/36 AI；合计 309 项 |
+| `npm run build` | 通过：main、preload、renderer 均产出；Vite 报告 OpenCV 的 `fs/path/crypto` 浏览器外部化警告 |
+| `npm run test:e2e` | 通过：40 项；2 项按条件跳过（未提供成品可执行文件、未提供 ASR WAV 夹具） |
+| `node scripts/capture-readme-images.mjs` | 通过：临时项目、临时 userData、本地 mock Provider，刷新 7 张截图 |
+
+上述证据不包含当前工作树的成品包 smoke、真实第三方 Provider、签名/公证或三平台安装体验。
 
 ## 本地验证层级
 
@@ -32,20 +48,41 @@ npm run test:e2e
 
 ## 打包验证
 
+`dist:dir` 只按当前平台生成未封装目录，适合本机探索，不是任一目标平台校验脚本的通用前置步骤：
+
 ```bash
 npm run dist:dir
-npm run verify:package:mac
 ```
 
-跨平台发布分别使用：
+macOS arm64 的确定性构建与校验应成对执行：
 
 ```bash
 npm run dist:mac:arm64
-npm run dist:win:x64
-npm run dist:linux:x64
+npm run verify:package:mac
 ```
 
-打包验证检查应用结构、版本、架构、asar 内容、OCR/ASR 资源、运行时依赖和 `node-pty`。包后 smoke 通过 `COSCRIBE_E2E_EXECUTABLE` 启动真实安装包，覆盖启动、项目、IDE、代码文件、PTY 和 AI Shell 默认关闭等核心路径。
+跨平台发布分别使用对应的构建与校验命令：
+
+```bash
+npm run dist:mac:arm64
+npm run verify:package:mac
+
+npm run dist:win:x64
+npm run verify:package:win
+
+npm run dist:linux:x64
+npm run verify:package:linux
+```
+
+三平台校验范围并不完全相同：
+
+| 平台 | 静态/运行校验重点 |
+| --- | --- |
+| macOS | app/asar、版本、ASR 与 sherpa 资源、`node-pty` 文件与真实 PTY probe |
+| Windows | EXE/NSIS x64 架构、asar、source map、禁止误带 macOS ASR、安装器体积 |
+| Linux | ELF/AppImage x64、deb 结构/版本/amd64、asar、source map、禁止误带 macOS ASR |
+
+包后 smoke 通过 `COSCRIBE_E2E_EXECUTABLE` 启动真实安装包，当前明确断言启动、项目打开、IDE、代码文件、普通 PTY 命令，以及已移除的模型补全 API/设置入口不存在。它只检查“配置 AI Shell”入口存在，没有直接证明 AI Shell 的默认授权状态；该状态由主进程/设置测试覆盖。
 
 ## GitHub Actions
 
@@ -67,6 +104,18 @@ Release 工作流（`.github/workflows/release.yml`）由 `v*` tag 触发：
 5. 收集五个安装包，生成 `SHA256SUMS.txt`，创建或更新 GitHub Release。
 
 构建子任务使用 `--publish never`。只有所有平台通过后，最终发布 job 才上传 Release。
+
+```mermaid
+flowchart LR
+  Tag[vX.Y.Z tag] --> Verify[typecheck + npm test]
+  Verify --> Mac[macOS arm64]
+  Verify --> Win[Windows x64]
+  Verify --> Linux[Linux x64]
+  Mac --> Publish[检查 5 个制品 + SHA256SUMS]
+  Win --> Publish
+  Linux --> Publish
+  Publish --> GH[GitHub Release]
+```
 
 ## 发布清单
 

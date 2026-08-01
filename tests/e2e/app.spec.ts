@@ -608,7 +608,6 @@ test('keeps selected Markdown visibly attached to the AI composer after focus mo
     element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
   })
 
-  await page.getByLabel('基于').selectOption('selection')
   const card = page.getByRole('region', { name: '已捕获的 AI 选中内容' })
   await expect(card).toContainText('E2E_SENTINEL 路由把请求映射到处理函数。')
   await page.getByLabel('基于').focus()

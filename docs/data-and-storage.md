@@ -1,10 +1,25 @@
 # 数据与存储
 
+> 事实源：`electron/main/project.ts`、`electron/main/project-memory.ts`、`electron/main/storage.ts`、`electron/main/settings.ts`、`electron/main/mcp.ts` 和 `electron/main/browser.ts`；核对日期 2026-07-31。当前实现没有 SQLite、ORM 或服务端数据库。
+
 ## 设计原则
 
 用户资料首先是普通文件。CoScribe 读取和写入项目中的 Markdown、代码、文本及用户明确选择的内容，不要求导入专有数据库。
 
 项目内记忆和应用元数据统一存放在隐藏目录 `.coscribe/`。首次打开旧项目时，应用会把 `.vibeknowledge/` 和根目录 `COSCRIBE.md` 中可兼容的数据复制到该目录；旧来源不会被删除或改名，因此仅打开项目不会造成 Git 已跟踪文件消失。新位置已存在同名文件时以新位置为准。
+
+```mermaid
+flowchart LR
+  Project[普通项目目录] --> Files[用户原始文件]
+  Project --> Meta[.coscribe]
+  Meta --> Memory[COSCRIBE.md]
+  Meta --> Json[workspace / sessions / annotations / ocr / knowledge-index / ai-operations / plugin-data]
+  App[Electron app] --> UserData[userData]
+  UserData --> Settings[settings.json]
+  UserData --> Recent[recent-projects.json]
+  UserData --> MCP[mcp-servers.json]
+  UserData --> Browser[browser-history + persistent partition]
+```
 
 ## 项目内数据
 
@@ -14,6 +29,8 @@
 | `.coscribe/COSCRIBE.md` | 项目级长期记忆 | 保存稳定目标、术语、偏好和决策；不要存密钥 |
 | `.coscribe/` | CoScribe 内部数据 | 记忆、工作区、会话、批注、OCR、AI 操作等 |
 | `assets/ai-images/` | 经确认写入项目的生成图片 | 由主进程保存并校验路径 |
+
+`.coscribe` 中由 `ProjectService` 管理的 JSON 基名只有 `workspace`、`sessions`、`annotations`、`ocr`、`knowledge-index`、`ai-operations` 和 `plugin-data`。项目记忆是单独的 Markdown 文件，不属于这些 JSON。
 
 项目文件树默认不把 `.coscribe`、兼容期旧目录 `.vibeknowledge`、`.git`、`node_modules`、`.venv` 等目录作为普通资料展示。
 

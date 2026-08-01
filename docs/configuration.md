@@ -1,5 +1,7 @@
 # 配置与 AI 服务
 
+> 事实源：`src/shared/types.ts` 的 `AppSettings`、`electron/main/settings.ts`、`electron/main/index.ts` 与测试/脚本中的环境变量读取；核对日期 2026-07-31。
+
 ## 配置位置与原则
 
 CoScribe 不依赖项目根目录 `.env` 作为日常运行前置条件。用户配置由主进程保存在 Electron `userData` 目录，核心设置文件为 `settings.json`。
@@ -44,7 +46,7 @@ CoScribe 不依赖项目根目录 `.env` 作为日常运行前置条件。用户
 - 是否允许模型使用通用知识。
 - 是否启用项目级 `.coscribe/COSCRIBE.md` 长期记忆。
 
-上下文是在发送时冻结的。未保存代码缓冲区可以进入冻结上下文，但 AI 文件写入仍以磁盘版本和主进程重新校验为准。
+上下文是在发送时冻结的。未保存代码缓冲区可以进入冻结上下文，但 AI 文件写入仍以磁盘版本和主进程重新校验为准。当前 UI 允许在一条回答流式输出期间调整“基于”范围；该选择只用于下一条消息，不会改变正在执行的请求。
 
 ## IDE 与 AI Shell 设置
 
@@ -79,6 +81,9 @@ CoScribe 不依赖项目根目录 `.env` 作为日常运行前置条件。用户
 | --- | --- |
 | `COSCRIBE_E2E_EXECUTABLE` | 指向已打包的应用可执行文件，启用 package smoke |
 | `COSCRIBE_ASR_TEST_WAV` | 指向语音 E2E 使用的 WAV 夹具；未提供时该场景跳过 |
-| `COSCRIBE_E2E_USER_DATA` | 隔离 Electron userData，避免测试污染真实设置 |
+| `COSCRIBE_USER_DATA_DIR` | 测试/截图/包后 smoke 使用的隔离 userData 路径 |
+| `VIBE_USER_DATA_DIR` | 仅测试模式保留的旧变量兼容入口；新脚本应使用 `COSCRIBE_USER_DATA_DIR` |
+| `COSCRIBE_E2E_SCREENSHOT_SOURCE` | 测试时选择应用窗口模拟截图；`real-screen` 走真实屏幕路径 |
+| `COSCRIBE_SOFFICE_PATH` | 指定 LibreOffice/soffice，可用于旧 `.ppt` 转 PDF |
 
 不要把实际 API Key、MCP Token、用户路径或生产聊天数据写入 `.env.example`、测试夹具、Issue、日志或文档。

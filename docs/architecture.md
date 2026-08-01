@@ -1,5 +1,7 @@
 # 系统架构
 
+> 事实源：`electron/main/index.ts`、`electron/main/ipc.ts`、`electron/preload/index.ts`、`src/shared/types.ts`、`src/App.tsx`；核对日期 2026-07-31。
+
 ## 总览
 
 CoScribe 是 Electron、React 和 TypeScript 应用。架构核心是把不可信 UI 与高权限系统能力分离：
@@ -8,14 +10,17 @@ CoScribe 是 Electron、React 和 TypeScript 应用。架构核心是把不可�
 flowchart LR
   R[Renderer\nReact UI] -->|narrow contextBridge API| P[Preload]
   P -->|named IPC channels| M[Electron main]
-  M --> F[project files and metadata]
+  M --> F[project files and .coscribe metadata]
+  M --> U[Electron userData]
   M --> A[configured AI providers]
   M --> T[user PTY and AI Shell]
-  M --> B[research BrowserView]
+  M --> B[research WebContentsView]
   R -->|local UI state| S[Zustand-style app store]
 ```
 
 Renderer 没有 Node.js、文件系统或子进程访问能力。所有磁盘、网络、系统对话框、浏览器、OCR 持久化、终端和 AI Provider 请求都通过主进程处理。
+
+主窗口在 `electron/main/index.ts` 中显式启用 `contextIsolation`、`sandbox` 和 `webSecurity`，并关闭 `nodeIntegration`。资料浏览器不是 Renderer DOM iframe，而是 main 管理的隔离 `WebContentsView`；它使用 `persist:coscribe-research-browser` 分区保存站点状态。
 
 ## 主要目录
 
@@ -30,6 +35,22 @@ Renderer 没有 Node.js、文件系统或子进程访问能力。所有磁盘、
 | `electron/ipc-channels.ts` | IPC 通道常量的唯一来源 |
 | `tests/` | 单元、主进程、AI 和 Playwright 桌面测试 |
 | `resources/` | 内置指南、OCR 模型、许可证和打包资源 |
+
+## 服务装配与数据流
+
+```mermaid
+flowchart TD
+  Boot[electron/main/index.ts] --> Services[Project / Settings / AI / Browser / Terminal services]
+  Services --> IPC[electron/main/ipc.ts]
+  IPC --> Preload[electron/preload/index.ts]
+  Preload --> API[Object.freeze window.coscribe]
+  API --> App[src/App.tsx]
+  App --> Store[src/store/app-store.ts]
+  Services --> Project[project/.coscribe/*.json]
+  Services --> UserData[settings / recent projects / MCP / browser state]
+```
+
+`electron/ipc-channels.ts` 是通道名的唯一清单，`src/shared/types.ts` 是请求、返回值与事件类型的唯一编译期契约。新增跨进程能力必须同时核对这四层，不能只改 Renderer。
 
 ## 信任边界
 
