@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react'
 import { Check, CheckCircle2, Copy, Download, ExternalLink, FileText, Loader2, RotateCcw, Sparkles, Square, XCircle } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -121,40 +121,45 @@ function ProgressTimeline({ message }: { message: ChatMessage }): React.JSX.Elem
   )
 }
 
+// Defined once at module scope: an inline object would give `pre` a new identity
+// on every render, remounting each code block and dropping any live text
+// selection inside it mid-drag.
+const markdownComponents: Components = {
+  a: ({ children, href, ...props }) => (
+    <a href={href} target="_blank" rel="noreferrer noopener" {...props}>
+      {children}
+      <ExternalLink className="ai-markdown__external" aria-hidden="true" />
+    </a>
+  ),
+  input: ({ type, ...props }) => (
+    <input type={type} {...props} disabled={type === 'checkbox' || props.disabled} />
+  ),
+  pre: ({ node, children, ...props }) => {
+    const codeNode = node?.children[0]
+    if (codeNode?.type === 'element' && codeNode.tagName === 'code') {
+      const classNames = codeNode.properties?.className
+      const classes = Array.isArray(classNames) ? classNames.map(String) : [String(classNames ?? '')]
+      const languageClass = classes.find((className) => className.startsWith('language-'))
+      const language = languageClass?.slice('language-'.length)
+      const source = codeNode.children
+        .filter((child) => child.type === 'text')
+        .map((child) => child.value)
+        .join('')
+        .replace(/\n$/u, '')
+
+      if (language?.toLowerCase() === 'mermaid') return <MermaidDiagram code={source} />
+      return <AiCodeBlock code={source} language={language} />
+    }
+    return <pre {...props}>{children}</pre>
+  }
+}
+
 export function MarkdownContent({ content }: { content: string }): React.JSX.Element {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
-      components={{
-        a: ({ children, href, ...props }) => (
-          <a href={href} target="_blank" rel="noreferrer noopener" {...props}>
-            {children}
-            <ExternalLink className="ai-markdown__external" aria-hidden="true" />
-          </a>
-        ),
-        input: ({ type, ...props }) => (
-          <input type={type} {...props} disabled={type === 'checkbox' || props.disabled} />
-        ),
-        pre: ({ node, children, ...props }) => {
-          const codeNode = node?.children[0]
-          if (codeNode?.type === 'element' && codeNode.tagName === 'code') {
-            const classNames = codeNode.properties?.className
-            const classes = Array.isArray(classNames) ? classNames.map(String) : [String(classNames ?? '')]
-            const languageClass = classes.find((className) => className.startsWith('language-'))
-            const language = languageClass?.slice('language-'.length)
-            const source = codeNode.children
-              .filter((child) => child.type === 'text')
-              .map((child) => child.value)
-              .join('')
-              .replace(/\n$/u, '')
-
-            if (language?.toLowerCase() === 'mermaid') return <MermaidDiagram code={source} />
-            return <AiCodeBlock code={source} language={language} />
-          }
-          return <pre {...props}>{children}</pre>
-        }
-      }}
+      components={markdownComponents}
     >
       {content}
     </ReactMarkdown>
