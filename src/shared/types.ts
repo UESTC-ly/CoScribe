@@ -116,12 +116,24 @@ export interface SourceRef {
   excerpt?: string
 }
 
-export type FileOperationKind = 'create' | 'append' | 'replace'
+export type FileOperationKind = 'create' | 'append' | 'replace' | 'edit'
+
+export interface LineEdit {
+  /** 1-based line number where edit starts (inclusive) */
+  startLine: number
+  /** 1-based line number where edit ends (inclusive) */
+  endLine: number
+  /** New content to replace the range. Empty string deletes lines. May contain multiple lines separated by \n. */
+  newContent: string
+}
 
 export interface TextFileOperation {
   kind: FileOperationKind
   targetPath: string
-  proposedContent: string
+  /** Used for create/append/replace operations */
+  proposedContent?: string
+  /** Used for edit operations - array of line-level edits */
+  edits?: LineEdit[]
   originalContent?: string
   /** Disk text captured when the proposal was based on a newer unsaved IDE buffer. */
   diskContent?: string

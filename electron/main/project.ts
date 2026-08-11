@@ -36,9 +36,11 @@ import {
   type FileKind,
   type FileNode,
   type FileOperationApplyResult,
+  type FileOperationKind,
   type FileOperationProposal,
   type FileReadResult,
   type FileOperationUndoResult,
+  type LineEdit,
   type MarkdownFileOperation,
   type OcrLine,
   type OcrResult,
@@ -52,6 +54,7 @@ import { normalizeChatImageAttachments } from '../../src/shared/chat-images'
 import { isCodeFilePath } from '../../src/shared/code-files'
 import { DocxService } from './docx'
 import { extractPptxText } from './pptx'
+import { applyLineEdits, normalizeLineEdits } from './line-edits'
 import { assertNotMetadataPath, assertSafeName, canonicalDirectory, isInside, ProjectPathGuard } from './security'
 import { SettingsStore } from './settings'
 import { atomicCreate, atomicWrite, atomicWriteJson, readJson } from './storage'
@@ -614,6 +617,7 @@ interface OperationInput {
   kind?: unknown
   targetPath?: unknown
   proposedContent?: unknown
+  edits?: unknown
   operations?: unknown
   summary?: unknown
 }
@@ -635,6 +639,7 @@ function proposalOperations(proposal: FileOperationProposal): MarkdownFileOperat
         kind: proposal.kind,
         targetPath: proposal.targetPath,
         proposedContent: proposal.proposedContent,
+        ...(proposal.edits !== undefined ? { edits: proposal.edits } : {}),
         ...(proposal.originalContent !== undefined ? { originalContent: proposal.originalContent } : {}),
         ...(proposal.diskContent !== undefined ? { diskContent: proposal.diskContent } : {}),
         ...(proposal.baseSource ? { baseSource: proposal.baseSource } : {}),
@@ -642,10 +647,20 @@ function proposalOperations(proposal: FileOperationProposal): MarkdownFileOperat
       }]
 }
 
+function sameLineEdits(left?: LineEdit[], right?: LineEdit[]): boolean {
+  if (!left || !right) return !left && !right
+  return left.length === right.length &&
+    left.every((edit, index) =>
+      edit.startLine === right[index].startLine &&
+      edit.endLine === right[index].endLine &&
+      edit.newContent === right[index].newContent)
+}
+
 function sameMarkdownOperation(left: MarkdownFileOperation, right: MarkdownFileOperation): boolean {
   return left.kind === right.kind &&
     left.targetPath === right.targetPath &&
     left.proposedContent === right.proposedContent &&
+    sameLineEdits(left.edits, right.edits) &&
     left.originalContent === right.originalContent &&
     left.diskContent === right.diskContent &&
     left.baseSource === right.baseSource &&
@@ -691,7 +706,10 @@ function normalizedOperationHistory(value: unknown, root: string): AiOperationHi
     if (!isRecord(candidate) || typeof candidate.id !== 'string' || typeof candidate.proposalId !== 'string') return []
     if (!Array.isArray(candidate.operations) || !candidate.operations.length || candidate.operations.length > MAX_AI_FILE_OPERATIONS) return []
     const operations = candidate.operations.flatMap((raw): AppliedMarkdownOperation[] => {
-      if (!isRecord(raw) || (raw.kind !== 'create' && raw.kind !== 'append' && raw.kind !== 'replace')) return []
+      if (
+        !isRecord(raw) ||
+        (raw.kind !== 'create' && raw.kind !== 'append' && raw.kind !== 'replace' && raw.kind !== 'edit')
+      ) return []
       const targetPath = metadataProjectPath(raw.targetPath, root)
       const beforeContent = raw.beforeContent === null ? null : text(raw.beforeContent, MAX_AI_OPERATION_CONTENT)
       const afterContent = text(raw.afterContent, MAX_AI_OPERATION_CONTENT)
@@ -1804,17 +1822,35 @@ export class ProjectService {
     const prepared: MarkdownFileOperation[] = []
     let totalContent = 0
     for (const raw of rawOperations) {
-      if (!isRecord(raw) || (raw.kind !== 'create' && raw.kind !== 'append' && raw.kind !== 'replace')) {
+      if (!isRecord(raw) || (raw.kind !== 'create' && raw.kind !== 'append' && raw.kind !== 'replace' && raw.kind !== 'edit')) {
         throw new Error('AI 返回了不支持的文件操作。')
       }
-      if (typeof raw.targetPath !== 'string' || typeof raw.proposedContent !== 'string') {
-        throw new Error('AI 文件操作缺少目标路径或内容。')
+      if (typeof raw.targetPath !== 'string') {
+        throw new Error('AI 文件操作缺少目标路径。')
       }
-      if (raw.proposedContent.length > MAX_AI_OPERATION_CONTENT) throw new Error('单个 AI 建议内容过大，已拒绝。')
-      totalContent += raw.proposedContent.length
-      if (totalContent > MAX_AI_OPERATION_TOTAL_CONTENT) throw new Error('AI 批量建议总内容过大，已拒绝。')
+      // A model may send `edits` and `proposedContent` together, or label a
+      // whole-file rewrite as `edit`. Resolve the effective kind here so an
+      // unusable edits array degrades to `replace` instead of failing.
+      const requestedEdits = raw.kind === 'edit' ? normalizeLineEdits(raw.edits) : null
+      const kind: FileOperationKind =
+        raw.kind === 'edit' && !requestedEdits && typeof raw.proposedContent === 'string'
+          ? 'replace'
+          : (raw.kind as FileOperationKind)
+      if (kind === 'edit') {
+        if (!requestedEdits) {
+          throw new Error('AI edit 操作缺少有效的 edits 数组。')
+        }
+      } else {
+        if (typeof raw.proposedContent !== 'string') {
+          throw new Error('AI 文件操作缺少内容。')
+        }
+        const content = raw.proposedContent
+        if (content.length > MAX_AI_OPERATION_CONTENT) throw new Error('单个 AI 建议内容过大，已拒绝。')
+        totalContent += content.length
+        if (totalContent > MAX_AI_OPERATION_TOTAL_CONTENT) throw new Error('AI 批量建议总内容过大，已拒绝。')
+      }
 
-      const mustExist = raw.kind !== 'create'
+      const mustExist = kind !== 'create'
       const target = mustExist
         ? await this.guard.existing(raw.targetPath, 'file')
         : await projectTargetAllowMissing(this.guard.root, raw.targetPath)
@@ -1840,22 +1876,41 @@ export class ProjectService {
         expectedModifiedAt = current.modifiedAt
         if (useBuffer) totalContent += bufferOverride!.content.length
         if (totalContent > MAX_AI_OPERATION_TOTAL_CONTENT) throw new Error('AI 批量建议的 IDE 缓冲区内容过大，已拒绝。')
-        prepared.push({
-          kind: raw.kind,
-          targetPath: target,
-          proposedContent: raw.proposedContent,
-          originalContent,
-          ...(useBuffer ? { diskContent: current.content, baseSource: 'buffer' as const } : { baseSource: 'disk' as const }),
-          expectedModifiedAt
-        })
+
+        if (kind === 'edit') {
+          // Resolve line edits against the same base the preview shows, so the
+          // diff, the accepted proposal, and the eventual write all agree.
+          const finalContent = applyLineEdits(originalContent, requestedEdits!)
+          if (finalContent.length > MAX_AI_OPERATION_CONTENT) throw new Error('单个 AI 建议内容过大，已拒绝。')
+          totalContent += finalContent.length
+          if (totalContent > MAX_AI_OPERATION_TOTAL_CONTENT) throw new Error('AI 批量建议总内容过大，已拒绝。')
+          prepared.push({
+            kind,
+            targetPath: target,
+            edits: requestedEdits!,
+            proposedContent: finalContent,
+            originalContent,
+            ...(useBuffer ? { diskContent: current.content, baseSource: 'buffer' as const } : { baseSource: 'disk' as const }),
+            expectedModifiedAt
+          })
+        } else {
+          prepared.push({
+            kind,
+            targetPath: target,
+            proposedContent: raw.proposedContent as string,
+            originalContent,
+            ...(useBuffer ? { diskContent: current.content, baseSource: 'buffer' as const } : { baseSource: 'disk' as const }),
+            expectedModifiedAt
+          })
+        }
         continue
       } else {
         await assertAbsent(target)
       }
       prepared.push({
-        kind: raw.kind,
+        kind,
         targetPath: target,
-        proposedContent: raw.proposedContent,
+        proposedContent: raw.proposedContent as string,
         ...(originalContent !== undefined ? { originalContent } : {}),
         ...(expectedModifiedAt !== undefined ? { expectedModifiedAt } : {})
       })
@@ -1929,9 +1984,10 @@ export class ProjectService {
       for (const operation of expectedOperations) {
         let result: FileReadResult
         if (operation.kind === 'create') {
+          const content = operation.proposedContent ?? ''
           result = fileKind(operation.targetPath) === 'markdown'
-            ? await this.createMarkdown(operation.targetPath, operation.proposedContent)
-            : await this.createText(operation.targetPath, operation.proposedContent)
+            ? await this.createMarkdown(operation.targetPath, content)
+            : await this.createText(operation.targetPath, content)
         } else {
           const current = await this.read(operation.targetPath)
           if (
@@ -1941,10 +1997,15 @@ export class ProjectService {
             throw new Error('文件在批量写入期间发生变化，剩余操作已停止。')
           }
           const baseContent = operation.originalContent ?? current.content
-          const nextContent =
-            operation.kind === 'append'
-              ? `${baseContent}${baseContent && !baseContent.endsWith('\n') ? '\n' : ''}${operation.proposedContent}`
-              : operation.proposedContent
+          let nextContent: string
+          if (operation.kind === 'append') {
+            const content = operation.proposedContent ?? ''
+            nextContent = `${baseContent}${baseContent && !baseContent.endsWith('\n') ? '\n' : ''}${content}`
+          } else if (operation.kind === 'edit') {
+            nextContent = applyLineEdits(baseContent, operation.edits ?? [])
+          } else {
+            nextContent = operation.proposedContent ?? ''
+          }
           result = fileKind(operation.targetPath) === 'markdown'
             ? await this.saveMarkdown(operation.targetPath, nextContent, operation.expectedModifiedAt)
             : await this.saveText(operation.targetPath, nextContent, operation.expectedModifiedAt)

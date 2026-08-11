@@ -137,7 +137,8 @@ function operationItems(operation: FileOperationProposal): TextFileOperation[] {
 const operationLabels: Record<FileOperationProposal['kind'], string> = {
   create: '创建文件',
   append: '追加内容',
-  replace: '修改文件'
+  replace: '修改文件',
+  edit: '编辑文件'
 }
 
 function isMarkdownPath(path: string): boolean {
@@ -150,9 +151,35 @@ export function MarkdownOperationCard({
   onAccept,
   onReject
 }: MarkdownOperationCardProps): React.JSX.Element {
+  // Compute after content for diff
+  let afterContent = ''
+  if (operation.kind === 'replace' || operation.kind === 'create') {
+    afterContent = operation.proposedContent ?? ''
+  } else if (operation.kind === 'edit' && operation.edits && operation.originalContent !== undefined) {
+    // Apply edits to compute after content
+    try {
+      const lines = operation.originalContent.split('\n')
+      const result = [...lines]
+      // Apply from back to front
+      for (let i = operation.edits.length - 1; i >= 0; i--) {
+        const edit = operation.edits[i]
+        const startIdx = edit.startLine - 1
+        const endIdx = edit.endLine
+        const newLines = edit.newContent ? edit.newContent.split('\n') : []
+        result.splice(startIdx, endIdx - startIdx, ...newLines)
+      }
+      afterContent = result.join('\n')
+    } catch {
+      afterContent = operation.originalContent
+    }
+  } else if (operation.kind === 'append' && operation.originalContent !== undefined) {
+    const separator = operation.originalContent.length > 0 && !operation.originalContent.endsWith('\n') ? '\n' : ''
+    afterContent = `${operation.originalContent}${separator}${operation.proposedContent ?? ''}`
+  }
+
   const diff =
-    operation.kind === 'replace'
-      ? buildLineDiff(operation.originalContent ?? '', operation.proposedContent)
+    operation.kind === 'replace' || operation.kind === 'edit'
+      ? buildLineDiff(operation.originalContent ?? '', afterContent)
       : []
   const visibleDiff = diff.slice(0, MAX_VISIBLE_DIFF_LINES)
   const isPending = operation.status === 'pending'
@@ -162,7 +189,7 @@ export function MarkdownOperationCard({
   const operationLabel = markdownOnly
     ? operation.kind === 'create'
       ? '创建 Markdown'
-      : operation.kind === 'replace'
+      : operation.kind === 'replace' || operation.kind === 'edit'
         ? '修改 Markdown'
         : operationLabels[operation.kind]
     : operationLabels[operation.kind]
@@ -197,9 +224,9 @@ export function MarkdownOperationCard({
               <summary>
                 <span><FilePlus2 aria-hidden="true" /><strong>{getFileName(item.targetPath)}</strong></span>
                 <code title={item.targetPath}>{item.targetPath}</code>
-                <em>{item.proposedContent.split(/\r?\n/u).length} 行</em>
+                <em>{(item.proposedContent ?? '').split(/\r?\n/u).length} 行</em>
               </summary>
-              <pre tabIndex={0}><code>{item.proposedContent}</code></pre>
+              <pre tabIndex={0}><code>{item.proposedContent ?? ''}</code></pre>
             </details>
           ))}
         </div>
@@ -213,7 +240,7 @@ export function MarkdownOperationCard({
 
       {operation.summary && <p className="ai-operation__summary">{operation.summary}</p>}
 
-      {!isBatch && operation.kind === 'replace' ? (
+      {!isBatch && (operation.kind === 'replace' || operation.kind === 'edit') ? (
         <div className="ai-operation__preview">
           <div className="ai-operation__preview-title">
             <span>原文 / 新文差异</span>
@@ -244,10 +271,10 @@ export function MarkdownOperationCard({
         <div className="ai-operation__preview">
           <div className="ai-operation__preview-title">
             <span>{operation.kind === 'create' ? '完整文件内容' : '将追加的内容'}</span>
-            <span>{operation.proposedContent.split(/\r?\n/).length} 行</span>
+            <span>{(operation.proposedContent ?? '').split(/\r?\n/).length} 行</span>
           </div>
           <pre className="ai-operation__content" tabIndex={0}>
-            <code>{operation.proposedContent}</code>
+            <code>{operation.proposedContent ?? ''}</code>
           </pre>
         </div>
       ) : null}

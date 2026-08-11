@@ -1,4 +1,4 @@
-import type { FileOperationKind, FileOperationProposal } from '../shared/types'
+import type { FileOperationKind, FileOperationProposal, LineEdit } from '../shared/types'
 import {
   isAbsolutePortablePath,
   isMarkdownPath,
@@ -8,6 +8,46 @@ import {
   samePortablePath,
   toProjectRelativePath
 } from './path-utils'
+
+/**
+ * Client-side line edit application (same logic as server-side).
+ * Used to generate preview content.
+ */
+function applyLineEditsClient(originalContent: string, edits: LineEdit[]): string {
+  if (!edits || edits.length === 0) {
+    return originalContent
+  }
+
+  const lines = originalContent.split('\n')
+  const totalLines = lines.length
+
+  // Validate edits
+  for (let i = 0; i < edits.length; i++) {
+    const edit = edits[i]
+    if (edit.startLine < 1 || edit.endLine < edit.startLine || edit.startLine > totalLines || edit.endLine > totalLines) {
+      throw new Error(`行号范围无效: ${edit.startLine}-${edit.endLine}`)
+    }
+    if (i > 0 && edit.startLine < edits[i - 1].startLine) {
+      throw new Error('编辑列表必须按起始行号升序排列')
+    }
+    if (i > 0 && edit.startLine <= edits[i - 1].endLine) {
+      throw new Error('编辑范围重叠')
+    }
+  }
+
+  // Apply from back to front
+  const result = [...lines]
+  for (let i = edits.length - 1; i >= 0; i--) {
+    const edit = edits[i]
+    const startIdx = edit.startLine - 1
+    const endIdx = edit.endLine
+    const newLines = edit.newContent ? edit.newContent.split('\n') : []
+    result.splice(startIdx, endIdx - startIdx, ...newLines)
+  }
+
+  return result.join('\n')
+}
+
 
 export type FileOperationSafetyCode =
   | 'invalid-project'
@@ -63,14 +103,14 @@ function containsPath(paths: readonly string[], candidate: string): boolean {
 
 /** Validate a proposal before it is shown or passed to the main process. */
 export function validateFileOperation(
-  operation: Pick<FileOperationProposal, 'kind' | 'targetPath' | 'proposedContent' | 'expectedModifiedAt'>,
+  operation: Pick<FileOperationProposal, 'kind' | 'targetPath' | 'proposedContent' | 'expectedModifiedAt' | 'edits'>,
   projectPath: string,
   knownFilePaths: readonly string[] = []
 ): FileOperationSafetyResult {
   if (!projectPath || !normalizePortablePath(projectPath) || !isAbsolutePortablePath(projectPath)) {
     return blocked('invalid-project', '当前项目路径无效。')
   }
-  if (!['create', 'append', 'replace'].includes(operation.kind)) {
+  if (!['create', 'append', 'replace', 'edit'].includes(operation.kind)) {
     return blocked('invalid-kind', 'AI 提议了不支持的文件操作。')
   }
   if (
@@ -100,9 +140,15 @@ export function validateFileOperation(
   }
 
   const warnings: string[] = []
-  if (!operation.proposedContent.trim()) warnings.push('建议内容为空。')
+  if (operation.kind === 'edit') {
+    if (!operation.edits || operation.edits.length === 0) {
+      warnings.push('edit 操作缺少 edits 数组。')
+    }
+  } else {
+    if (!operation.proposedContent?.trim()) warnings.push('建议内容为空。')
+  }
   if (
-    (operation.kind === 'append' || operation.kind === 'replace') &&
+    (operation.kind === 'append' || operation.kind === 'replace' || operation.kind === 'edit') &&
     (operation.expectedModifiedAt === undefined || !Number.isFinite(operation.expectedModifiedAt))
   ) {
     warnings.push('缺少文件版本信息，执行前应重新确认磁盘版本。')
@@ -118,7 +164,8 @@ export function describeFileOperationIntent(
   const copy: Record<FileOperationKind, { verb: string; title: string }> = {
     create: { verb: '创建', title: '创建 Markdown 笔记' },
     append: { verb: '追加', title: '追加到 Markdown 笔记' },
-    replace: { verb: '修改', title: '修改 Markdown 内容' }
+    replace: { verb: '修改', title: '修改 Markdown 内容' },
+    edit: { verb: '编辑', title: '编辑 Markdown 行' }
   }
   const labels = copy[operation.kind]
   const relative = projectPath ? toProjectRelativePath(projectPath, operation.targetPath) : null
@@ -142,10 +189,18 @@ export function buildFileOperationPreview(
   const beforeContent = operation.originalContent
   let afterContent: string | undefined
   if (operation.kind === 'create' || operation.kind === 'replace') {
-    afterContent = operation.proposedContent
-  } else if (beforeContent !== undefined) {
+    afterContent = operation.proposedContent ?? ''
+  } else if (operation.kind === 'edit' && beforeContent !== undefined && operation.edits) {
+    // Apply line edits to compute afterContent
+    try {
+      afterContent = applyLineEditsClient(beforeContent, operation.edits)
+    } catch (error) {
+      // If edit application fails, show error in preview
+      afterContent = beforeContent
+    }
+  } else if (operation.kind === 'append' && beforeContent !== undefined) {
     const separator = beforeContent.length > 0 && !beforeContent.endsWith('\n') ? '\n' : ''
-    afterContent = `${beforeContent}${separator}${operation.proposedContent}`
+    afterContent = `${beforeContent}${separator}${operation.proposedContent ?? ''}`
   }
 
   return {
@@ -153,7 +208,7 @@ export function buildFileOperationPreview(
     safe: safety.safe,
     blockedReason: safety.reason,
     beforeContent,
-    proposedContent: operation.proposedContent,
+    proposedContent: operation.proposedContent ?? '',
     afterContent,
     contentFormat: 'plain-text',
     warnings: [...safety.warnings]

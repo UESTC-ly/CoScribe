@@ -81,6 +81,71 @@ describe('AI Markdown operations', () => {
     await expect(readFile(note, 'utf8')).resolves.toBe('# Existing\n')
   })
 
+  it('previews and writes a line edit that also carries proposedContent', async () => {
+    const { root, service } = await projectService()
+    const note = path.join(root, 'note.md')
+    await writeFile(note, '# Title\n\n## A.2 Sentinel\n\nTODO placeholder\n\n## A.3 Cluster\n')
+    const proposal = await service.prepareAiOperation({
+      kind: 'edit',
+      targetPath: note,
+      // A model commonly sends both fields; the edits must win.
+      proposedContent: 'whole file rewrite that must be ignored',
+      edits: [{ startLine: 5, endLine: 5, newContent: 'Sentinel 负责故障转移。' }],
+      summary: '替换 A.2 占位符'
+    })
+
+    expect(proposal.kind).toBe('edit')
+    expect(proposal.edits).toHaveLength(1)
+    expect(proposal.proposedContent).toBe('# Title\n\n## A.2 Sentinel\n\nSentinel 负责故障转移。\n\n## A.3 Cluster\n')
+    await expect(readFile(note, 'utf8')).resolves.toContain('TODO placeholder')
+
+    await expect(service.applyAiOperation({
+      ...proposal,
+      edits: [{ startLine: 5, endLine: 5, newContent: 'tampered' }],
+      status: 'accepted'
+    })).rejects.toThrow('确认前发生变化')
+
+    const result = await service.applyAiOperation({ ...proposal, status: 'accepted' })
+    expect(result.files).toHaveLength(1)
+    await expect(readFile(note, 'utf8')).resolves.toBe('# Title\n\n## A.2 Sentinel\n\nSentinel 负责故障转移。\n\n## A.3 Cluster\n')
+
+    const undone = await service.undoOperation(result.historyId)
+    expect(undone.files).toHaveLength(1)
+    await expect(readFile(note, 'utf8')).resolves.toContain('TODO placeholder')
+  })
+
+  it('downgrades an edit with unusable edits to a whole-file replace', async () => {
+    const { root, service } = await projectService()
+    const note = path.join(root, 'note.md')
+    await writeFile(note, '# Old\n')
+    const proposal = await service.prepareAiOperation({
+      kind: 'edit',
+      targetPath: note,
+      proposedContent: '# New\n',
+      edits: [],
+      summary: '整节重写'
+    })
+
+    expect(proposal.kind).toBe('replace')
+    expect(proposal.edits).toBeUndefined()
+    const result = await service.applyAiOperation({ ...proposal, status: 'accepted' })
+    expect(result.files).toHaveLength(1)
+    await expect(readFile(note, 'utf8')).resolves.toBe('# New\n')
+  })
+
+  it('rejects an edit whose line range falls outside the file', async () => {
+    const { root, service } = await projectService()
+    const note = path.join(root, 'note.md')
+    await writeFile(note, '# Only\n')
+    await expect(service.prepareAiOperation({
+      kind: 'edit',
+      targetPath: note,
+      edits: [{ startLine: 40, endLine: 41, newContent: 'x' }],
+      summary: '越界编辑'
+    })).rejects.toThrow(/超出文件范围/u)
+    await expect(readFile(note, 'utf8')).resolves.toBe('# Only\n')
+  })
+
   it('refuses undo when a user edited the generated result afterward', async () => {
     const { root, service } = await projectService()
     const note = path.join(root, 'note.md')

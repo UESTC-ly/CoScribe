@@ -1738,16 +1738,48 @@ export class AiService {
             items: {
               type: 'object',
               additionalProperties: false,
-              required: ['kind', 'targetPath', 'proposedContent'],
+              required: ['kind', 'targetPath'],
               properties: {
-                kind: { type: 'string', enum: ['create', 'append', 'replace'] },
+                kind: {
+                  type: 'string',
+                  enum: ['create', 'append', 'replace', 'edit'],
+                  description: 'edit 只填 edits 且不填 proposedContent；create、append、replace 只填 proposedContent'
+                },
                 targetPath: {
                   type: 'string',
                   description: operationMode
                     ? '当前项目内的 Markdown 相对路径；create 可包含尚不存在的父目录'
                     : '当前项目内受支持的 Markdown、代码或文本相对路径；create 可包含尚不存在的父目录'
                 },
-                proposedContent: { type: 'string' }
+                proposedContent: {
+                  type: 'string',
+                  description: '用于 create、append、replace 操作的完整内容'
+                },
+                edits: {
+                  type: 'array',
+                  description: '用于 edit 操作的行级修改列表',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['startLine', 'endLine', 'newContent'],
+                    properties: {
+                      startLine: {
+                        type: 'integer',
+                        minimum: 1,
+                        description: '起始行号（从 1 开始，包含）'
+                      },
+                      endLine: {
+                        type: 'integer',
+                        minimum: 1,
+                        description: '结束行号（从 1 开始，包含）'
+                      },
+                      newContent: {
+                        type: 'string',
+                        description: '替换内容。空字符串表示删除行。可包含多行（用 \\n 分隔）'
+                      }
+                    }
+                  }
+                }
               }
             }
           },
