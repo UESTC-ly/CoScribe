@@ -29,20 +29,20 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 ## 中文
 
-> `v4.0.3` 稳定版聚焦可靠性：活动项目记忆统一存入隐藏的 `.coscribe/` 目录，旧数据复制导入但保留原文件；“整理笔记”改为确认后写入，并兼容 Anthropic 兼容服务的批量工具参数修正；全量会话压缩会在后续请求中持续生效；文件树刷新、AI 指令历史和设置布局获得明确反馈；macOS 截图恢复为高分辨率透明框选，并能在权限异常时自动打开系统设置。v4.0.1 的网页选区上下文与 v4.0.0 的 IDE、终端和受控 AI Shell 保持不变。
+> `v4.0.5` 稳定版聚焦 AI 文件修改的精度与阅读体验：AI 现在可以只改动指定行区间（局部编辑），预览只显示受影响的行而不是整篇重写，接受后仍可整笔撤销；代码块在流式回答刷新期间保持文本选中状态，shell、Python 等语言不再需要重新划选才能复制。v4.0.3 的隐藏项目记忆、确认后写入的“整理笔记”、持续生效的全量会话压缩与 macOS 高分辨率透明框选截图保持不变；v4.0.1 的网页选区上下文与 v4.0.0 的 IDE、终端和受控 AI Shell 同样保留。
 
 ### 下载与安装
 
-从 [`v4.0.3` GitHub Release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.3) 下载稳定版：
+从 [`v4.0.5` GitHub Release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.5) 下载稳定版：
 
 | 系统 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS | [`CoScribe-4.0.3-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/CoScribe-4.0.3-arm64.dmg) | Apple Silicon，macOS 13+ |
-| macOS | [`CoScribe-4.0.3-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/CoScribe-4.0.3-arm64-mac.zip) | Apple Silicon 免安装压缩包 |
-| Windows | [`CoScribe-Setup-4.0.3-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/CoScribe-Setup-4.0.3-x64.exe) | Windows 10/11 x64 |
-| Linux | [`CoScribe-4.0.3-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/CoScribe-4.0.3-x64.AppImage) | 通用 x86-64 便携包 |
-| Linux | [`CoScribe-4.0.3-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/CoScribe-4.0.3-x64.deb) | Debian / Ubuntu x86-64 |
-| 全平台 | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/SHA256SUMS.txt) | 安装包 SHA-256 校验值 |
+| macOS | [`CoScribe-4.0.5-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/CoScribe-4.0.5-arm64.dmg) | Apple Silicon，macOS 13+ |
+| macOS | [`CoScribe-4.0.5-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/CoScribe-4.0.5-arm64-mac.zip) | Apple Silicon 免安装压缩包 |
+| Windows | [`CoScribe-Setup-4.0.5-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/CoScribe-Setup-4.0.5-x64.exe) | Windows 10/11 x64 |
+| Linux | [`CoScribe-4.0.5-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/CoScribe-4.0.5-x64.AppImage) | 通用 x86-64 便携包 |
+| Linux | [`CoScribe-4.0.5-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/CoScribe-4.0.5-x64.deb) | Debian / Ubuntu x86-64 |
+| 全平台 | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/SHA256SUMS.txt) | 安装包 SHA-256 校验值 |
 
 这些安装包目前没有 Apple Developer ID、Windows Authenticode 或 Linux 发行版签名。
 
@@ -55,7 +55,7 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 #### Windows
 
-1. 运行 `CoScribe-Setup-4.0.3-x64.exe`。
+1. 运行 `CoScribe-Setup-4.0.5-x64.exe`。
 2. 如果 SmartScreen 拦截未签名安装包，确认文件来自本仓库并核对 SHA-256 后，选择“更多信息 → 仍要运行”。
 3. 安装完成后从开始菜单启动 CoScribe。
 
@@ -64,19 +64,19 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 AppImage：
 
 ```bash
-chmod +x CoScribe-4.0.3-x64.AppImage
-./CoScribe-4.0.3-x64.AppImage
+chmod +x CoScribe-4.0.5-x64.AppImage
+./CoScribe-4.0.5-x64.AppImage
 ```
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install ./CoScribe-4.0.3-x64.deb
+sudo apt install ./CoScribe-4.0.5-x64.deb
 ```
 
 Wayland 下框选截图是否需要额外授权取决于桌面环境和系统门户配置。
 
-> v4.0.3 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并在发布前通过架构、打包内容和成品应用冒烟验证；验证覆盖打开项目、进入 IDE、打开内置终端并实际执行命令。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
+> v4.0.5 的 macOS、Windows 和 Linux 安装包分别在 GitHub 托管的原生系统运行器上构建，并在发布前通过架构、打包内容和成品应用冒烟验证；验证覆盖打开项目、进入 IDE、打开内置终端并实际执行命令。Windows/Linux 暂不提供本地语音识别和系统日历同步，其余核心工作流均已包含。
 
 ### 五分钟开始使用
 
@@ -302,29 +302,29 @@ npm run verify:package:linux
 
 ## English
 
-> The stable `v4.0.3` release focuses on reliability: active project memory now lives in the hidden `.coscribe/` directory while legacy data is copied in without deleting its source; Quick Note writes only after preview acceptance and Anthropic-compatible batch tool parameters can be repaired once; full-session compaction remains effective on later requests; file-tree refresh, prompt history, and settings layout provide consistent feedback; and macOS capture returns to a high-resolution transparent selector with automatic permission-settings recovery. The webpage-selection context from v4.0.1 and the IDE, terminal, and controlled AI Shell from v4.0.0 remain available.
+> The stable `v4.0.5` release focuses on precise AI file edits and steadier reading: AI can now rewrite just the line ranges it needs (line-level edits), the preview shows only the affected lines instead of a whole-file rewrite, and an accepted edit stays fully undoable. Code blocks also keep their text selection while a streamed answer refreshes, so shell, Python, and other highlighted languages no longer lose a selection before you can copy it. The hidden project memory, preview-gated Quick Note, persistent full-session compaction, and high-resolution transparent macOS capture from v4.0.3 are unchanged, as are the webpage-selection context from v4.0.1 and the IDE, terminal, and controlled AI Shell from v4.0.0.
 
 ### Download and install
 
-Download the stable [`v4.0.3` release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.3):
+Download the stable [`v4.0.5` release](https://github.com/UESTC-ly/CoScribe/releases/tag/v4.0.5):
 
 | Platform | Artifact | Target |
 | --- | --- | --- |
-| macOS | [`CoScribe-4.0.3-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/CoScribe-4.0.3-arm64.dmg) | Apple Silicon, macOS 13+ |
-| macOS | [`CoScribe-4.0.3-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/CoScribe-4.0.3-arm64-mac.zip) | Portable Apple Silicon archive |
-| Windows | [`CoScribe-Setup-4.0.3-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/CoScribe-Setup-4.0.3-x64.exe) | Windows 10/11 x64 |
-| Linux | [`CoScribe-4.0.3-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/CoScribe-4.0.3-x64.AppImage) | Portable x86-64 AppImage |
-| Linux | [`CoScribe-4.0.3-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/CoScribe-4.0.3-x64.deb) | Debian / Ubuntu x86-64 |
-| All | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.3/SHA256SUMS.txt) | SHA-256 checksums |
+| macOS | [`CoScribe-4.0.5-arm64.dmg`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/CoScribe-4.0.5-arm64.dmg) | Apple Silicon, macOS 13+ |
+| macOS | [`CoScribe-4.0.5-arm64-mac.zip`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/CoScribe-4.0.5-arm64-mac.zip) | Portable Apple Silicon archive |
+| Windows | [`CoScribe-Setup-4.0.5-x64.exe`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/CoScribe-Setup-4.0.5-x64.exe) | Windows 10/11 x64 |
+| Linux | [`CoScribe-4.0.5-x64.AppImage`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/CoScribe-4.0.5-x64.AppImage) | Portable x86-64 AppImage |
+| Linux | [`CoScribe-4.0.5-x64.deb`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/CoScribe-4.0.5-x64.deb) | Debian / Ubuntu x86-64 |
+| All | [`SHA256SUMS.txt`](https://github.com/UESTC-ly/CoScribe/releases/download/v4.0.5/SHA256SUMS.txt) | SHA-256 checksums |
 
 The builds are currently unsigned.
 
 - **macOS:** drag CoScribe into Applications, then right-click and choose **Open**. If blocked, use System Settings → Privacy & Security → Open Anyway. Screen Recording is used only for region capture; Microphone is used only for local speech input.
 - **Windows:** run the x64 installer. If SmartScreen appears, verify the checksum and source before choosing **More info → Run anyway**.
-- **Linux AppImage:** run `chmod +x CoScribe-4.0.3-x64.AppImage`, then `./CoScribe-4.0.3-x64.AppImage`.
-- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-4.0.3-x64.deb`.
+- **Linux AppImage:** run `chmod +x CoScribe-4.0.5-x64.AppImage`, then `./CoScribe-4.0.5-x64.AppImage`.
+- **Debian/Ubuntu:** run `sudo apt install ./CoScribe-4.0.5-x64.deb`.
 
-> v4.0.3 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked before publication for architecture, packaged contents, and packaged-app smoke behavior. The smoke path opens a project, enters the IDE, opens the built-in terminal, and executes a real command. Local speech recognition and system Calendar integration remain macOS-only.
+> v4.0.5 installers are built on native GitHub-hosted macOS, Windows, and Linux runners, then checked before publication for architecture, packaged contents, and packaged-app smoke behavior. The smoke path opens a project, enters the IDE, opens the built-in terminal, and executes a real command. Local speech recognition and system Calendar integration remain macOS-only.
 
 ### Start in five minutes
 
