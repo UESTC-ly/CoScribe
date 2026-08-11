@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
@@ -171,10 +171,24 @@ export function SyntaxCodeBlock({
   className,
 }: SyntaxCodeBlockProps): React.JSX.Element {
   const [copied, setCopied] = useState(false)
+  const codeRef = useRef<HTMLElement>(null)
   const highlighted = useMemo(
     () => highlightCode(code, language, autoDetect),
     [autoDetect, code, language],
   )
+
+  // Manually update innerHTML only when highlighted HTML actually changes.
+  // Using dangerouslySetInnerHTML={{ __html }} directly causes React to re-apply
+  // innerHTML on every render (even when the HTML string is the same), which
+  // destroys text selection. This approach preserves selection across re-renders.
+  useEffect(() => {
+    if (!codeRef.current) return
+    if (highlighted.html === null) {
+      codeRef.current.textContent = code
+    } else {
+      codeRef.current.innerHTML = highlighted.html
+    }
+  }, [highlighted.html, code])
 
   useEffect(() => {
     if (!copied) return
@@ -208,14 +222,10 @@ export function SyntaxCodeBlock({
         </button>
       </header>
       <pre>
-        {highlighted.html === null ? (
-          <code>{code}</code>
-        ) : (
-          <code
-            className={`hljs language-${highlighted.language}`}
-            dangerouslySetInnerHTML={{ __html: highlighted.html }}
-          />
-        )}
+        <code
+          ref={codeRef}
+          className={highlighted.html === null ? undefined : `hljs language-${highlighted.language}`}
+        />
       </pre>
     </section>
   )
