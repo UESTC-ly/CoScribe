@@ -1,10 +1,10 @@
 # 桌面 API 与 IPC 契约
 
-> 事实源：`electron/preload/index.ts`、`src/shared/types.ts`、`electron/ipc-channels.ts`、`electron/main/ipc.ts`；核对日期 2026-07-31。
+> 事实源：`electron/preload/index.ts`、`src/shared/types.ts`、`electron/ipc-channels.ts`、`electron/main/ipc.ts`；核对日期 2026-08-23。
 
 ## 适用范围
 
-Renderer 不直接使用 Electron API。它只能访问 preload 通过 `contextBridge` 暴露的只读 `window.coscribe` 对象。完整的可编译契约以以下文件为准：
+Renderer 不直接使用 Electron API。它只能访问 preload 通过 `contextBridge` 暴露的 `window.coscribe`，其顶层 API 对象由 `Object.freeze` 固定。完整的可编译契约以以下文件为准：
 
 - `src/shared/types.ts`：参数、返回值、事件和数据模型。
 - `electron/ipc-channels.ts`：通道名称。
@@ -67,7 +67,9 @@ pathForDroppedFile(file)
 applyAiOperation(proposal)
 ```
 
-调用成功不代表 Renderer 获得文件系统权限。实际逻辑会重新验证路径、文件身份、项目边界和写入前版本。
+调用成功不代表 Renderer 获得文件系统权限。实际逻辑会重新验证路径、文件身份、项目边界、符号链接和写入前 `modifiedAt`/内容。
+
+`url(path)` 返回 `coscribe-file://project/...`，供 Renderer 中的图片、Markdown 资源或转换后的本地资料只读加载。读取仍由 main 的自定义协议 handler 调回 `ProjectService.pathFromProtocol()` 完成项目边界和文件存在性校验。
 
 `pathForDroppedFile(file)` 是唯一不走 IPC 的文件辅助方法；preload 使用 Electron `webUtils.getPathForFile` 取得用户实际拖入文件的路径。它只解析路径，不执行读取或写入，后续 `importFiles` 仍由 main 校验。
 
@@ -81,6 +83,10 @@ onStream(listener) -> unsubscribe
 ```
 
 `ai.start` 的输出走 `onStream`，事件包括 `start`、`activity`、`context-usage`、`progress`、`delta`、`done`、`stopped` 和 `error`。
+
+普通问答的 `done` 可附带 `nextRequest?: string`，表示模型预测的下一次用户请求。主进程从同一回复末尾的 `<coscribe_next_request>…</coscribe_next_request>` 区块中提取、校验并剥离该字段；`delta` 只包含回答正文，流式标记被拆分时也会暂存处理。未闭合、无效或超过 200 字符的候选会被忽略。候选只供 Renderer 展示和明确接受，不自动转换成用户消息，不参与会话摘要或长期记忆。
+
+Responses 问答把应用系统规则作为 `input` 的首条 `system` 消息发送，而非仅使用顶层 `instructions`，以兼容会忽略该字段的第三方服务。首轮、工具续请求和重新生成均使用相同策略；系统规则只计入和发送一次。
 
 编辑器的本地关键字和当前文件符号候选不属于桌面 API；它们完全在 Renderer 中生成。右侧 AI 创建或修改代码文件仍通过 `ai.start` 返回文件操作提议，再由 `file.applyAiOperation` 在用户确认后执行。
 

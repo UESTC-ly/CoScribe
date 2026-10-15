@@ -296,7 +296,7 @@ export class McpService {
     })
   }
 
-  async invoke(request: McpInvocationRequest): Promise<McpInvocationResult> {
+  async invoke(request: McpInvocationRequest, options?: { readOnly?: boolean; signal?: AbortSignal }): Promise<McpInvocationResult> {
     if (!request || !['tool', 'resource', 'prompt'].includes(request.kind) || !clean(request.name, 8_000)) throw new Error('MCP 调用参数无效。')
     const args = isRecord(request.arguments) ? request.arguments : {}
     if (Buffer.byteLength(JSON.stringify(args)) > MAX_ARGUMENT_BYTES) throw new Error('MCP 参数超过 128 KB 上限。')
@@ -304,8 +304,11 @@ export class McpService {
     return this.withClient(request.serverId, async (client) => {
       if (request.kind === 'tool') {
         const available = await client.listTools(undefined, { timeout: 20_000 })
-        if (!available.tools.some((tool) => tool.name === request.name)) throw new Error('MCP 服务没有声明这个工具。')
-        const result = await client.callTool({ name: request.name, arguments: args }, undefined, { timeout: REQUEST_TIMEOUT_MS })
+        const tool = available.tools.find((tool) => tool.name === request.name)
+        if (!tool) throw new Error('MCP 服务没有声明这个工具。')
+        if (options?.readOnly && tool.annotations?.readOnlyHint !== true) throw new Error('Auto Research 只允许声明为只读的 MCP 检索工具。')
+        options?.signal?.throwIfAborted()
+        const result = await client.callTool({ name: request.name, arguments: args }, undefined, { timeout: REQUEST_TIMEOUT_MS, signal: options?.signal })
         return {
           kind: request.kind,
           name: request.name,

@@ -1,13 +1,13 @@
 # 配置与 AI 服务
 
-> 事实源：`src/shared/types.ts` 的 `AppSettings`、`electron/main/settings.ts`、`electron/main/index.ts` 与测试/脚本中的环境变量读取；核对日期 2026-07-31。
+> 事实源：`src/shared/types.ts` 的 `AppSettings`、`electron/main/settings.ts`、`electron/main/index.ts` 与测试/脚本中的环境变量读取；核对日期 2026-08-23。
 
 ## 配置位置与原则
 
 CoScribe 不依赖项目根目录 `.env` 作为日常运行前置条件。用户配置由主进程保存在 Electron `userData` 目录，核心设置文件为 `settings.json`。
 
 - 非密钥设置以 JSON 保存，并在读取时归一化。
-- AI Provider Key、图片生成 Key 和 MCP 配置使用 Electron `safeStorage` 加密后保存。
+- AI Provider Key、图片生成 Key 和 MCP 配置使用 Electron `safeStorage` 加密后保存。多个 AI Provider profile 的密钥按 profile id 存入 `encryptedApiKeys`，图片生成密钥单独存入 `encryptedImageApiKey`。
 - Renderer 只获得 `hasApiKey` 等状态，不会读取已保存密钥明文。
 - 不能使用系统安全存储时，应用会拒绝保存或读取相关机密。
 
@@ -69,7 +69,7 @@ CoScribe 不依赖项目根目录 `.env` 作为日常运行前置条件。用户
 | 模式 | 行为 |
 | --- | --- |
 | 每条命令单独确认（默认） | 每次 AI 调用 Shell 前显示要执行的命令并等待确认 |
-| 当前项目会话内授权 | 在当前项目、本次应用会话内不逐条确认；关闭终端、项目或应用即撤销 |
+| 当前项目会话内授权 | 在当前项目、本次应用会话内不逐条确认；关闭 IDE 终端面板、项目或应用即撤销 |
 
 详细安全边界见 [安全与 AI Shell](./security-and-ai-shell.md)。
 

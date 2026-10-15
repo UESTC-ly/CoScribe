@@ -12,6 +12,7 @@ import {
   anthropicStreamEvent,
   availableModelIds,
   chatEndpoint,
+  describeAiRequestFailure,
   imageGenerationEndpoint,
   imageGenerationRequestBody,
   imageGenerationResult,
@@ -150,6 +151,34 @@ describe('AI endpoint resolution', () => {
       'glm-4.5',
       'moonshot-v1'
     ])
+  })
+})
+
+describe('AI request failure diagnostics', () => {
+  it('preserves the transport cause and identifies the failed stage', () => {
+    const cause = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
+    const error = Object.assign(new TypeError('fetch failed'), { cause })
+
+    expect(describeAiRequestFailure(error, {
+      requestId: 'request-1',
+      provider: 'openai',
+      protocol: 'responses',
+      endpoint: 'https://api.example.com/v1/responses?api_key=should-not-leak',
+      model: 'gpt-test',
+      stage: 'stream-read'
+    })).toBe(
+      'AI 请求失败（阶段：读取流数据；协议：Responses API；模型：gpt-test；地址：https://api.example.com/v1/responses；请求 request-1）：连接被对端重置（ECONNRESET）'
+    )
+  })
+
+  it('does not fall back to the opaque fetch failed message when no cause is available', () => {
+    expect(describeAiRequestFailure(new TypeError('fetch failed'), {
+      provider: 'openai',
+      protocol: 'chat-completions',
+      endpoint: 'https://api.example.com/v1/chat/completions',
+      model: 'gpt-test',
+      stage: 'connect'
+    })).toContain('底层网络连接失败（运行时未提供更深层原因）')
   })
 })
 
@@ -924,7 +953,7 @@ describe('Anthropic Messages API parsing', () => {
         description: 'preview changes',
         input_schema: { type: 'object' }
       }],
-      tool_choice: { type: 'auto' }
+      tool_choice: { type: 'auto', disable_parallel_tool_use: true }
     })
     expect(aiRequestHeaders('anthropic', 'sk-ant-test')).toEqual({
       Accept: 'text/event-stream, application/json',
@@ -975,6 +1004,7 @@ describe('Anthropic Messages API parsing', () => {
     expect(anthropicStreamEvent({ type: 'content_block_stop', index: 1 }, tools)).toEqual({
       tool: {
         name: 'propose_markdown_operation',
+        id: 'tool-1',
         arguments: JSON.stringify(operationInput)
       }
     })

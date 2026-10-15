@@ -238,10 +238,15 @@ export function mergeReferences(current: ResearchReference[], incoming: Research
     const normalized = normalizeReference(reference)
     const match = result.findIndex((candidate) =>
       Boolean(normalized.doi && candidate.doi?.toLocaleLowerCase() === normalized.doi.toLocaleLowerCase()) ||
-      candidate.citeKey.toLocaleLowerCase() === normalized.citeKey.toLocaleLowerCase()
+      (!normalized.doi || !candidate.doi) && candidate.citeKey.toLocaleLowerCase() === normalized.citeKey.toLocaleLowerCase()
     )
     if (match >= 0) result[match] = normalizeReference({ ...result[match], ...normalized, id: result[match].id, createdAt: result[match].createdAt })
-    else result.push(normalized)
+    else {
+      let key = normalized.citeKey
+      let suffix = 2
+      while (result.some((candidate) => candidate.citeKey.toLocaleLowerCase() === key.toLocaleLowerCase())) key = `${normalized.citeKey}-${suffix++}`
+      result.push({ ...normalized, citeKey: key })
+    }
   }
   return result.slice(0, 5_000)
 }

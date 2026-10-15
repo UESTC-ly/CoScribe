@@ -1,6 +1,6 @@
 # 已知限制与技术风险
 
-> 核对日期 2026-07-31。本文只记录代码、配置或当前验证能支持的边界；产品路线、SLA、用户规模和商业判断保持未知。
+> 核对日期 2026-08-23。本文只记录代码、配置或当前验证能支持的边界；产品路线、SLA、用户规模和商业判断保持未知。
 
 本页区分当前实现边界和需要后续验证的风险，不把建议描述成已交付能力。
 
@@ -15,7 +15,7 @@
 | 仅内置可信插件 | 没有第三方插件市场 |
 | 本地词法索引 | 不是向量检索或托管 RAG 服务 |
 | AI/OCR/图片生成可能出错 | 重要内容必须回看原始资料 |
-| 本地语音和系统日历仅 Apple Silicon macOS | Windows/Linux 能力不完全对称 |
+| 本地语音仅 Apple Silicon macOS；系统日历仅 macOS | Windows/Linux 能力不完全对称；日历写入不限制 macOS CPU 架构 |
 
 ## 分发与运维风险
 
@@ -34,7 +34,7 @@
 ## 外部服务风险
 
 - OpenAI-compatible Provider 的模型发现、流式格式、工具调用和 reasoning 字段并不总是兼容。
-- MCP 可以启动本地进程或访问远程 HTTPS；即使配置加密，用户仍应把其视为高能力显式工具。
+- MCP 可以启动本地 stdio 进程，也可以访问远程 HTTPS 或回环 HTTP 的 Streamable HTTP 服务；即使配置加密，用户仍应把其视为高能力显式工具。
 - 图片生成只发送用户明确的 prompt、size、quality，不会自动带整段会话历史；产品文案不能暗示相反行为。
 
 ## AI Shell 风险
@@ -46,14 +46,14 @@ AI Shell 以当前登录用户权限执行命令，不受项目文件夹沙箱�
 ## 技术演进风险
 
 - `App.tsx`、`electron/main/project.ts` 和 `electron/main/ai.ts` 的职责面较大；拆分前先锁定行为与回归测试。
-- 项目内 `.vibeknowledge` 的可兼容数据会导入 `.coscribe`，但旧目录会保留以避免静默修改 Git 工作树；用户级 `vibeknowledge` 路径仍为兼容包袱，不要把两者混为同一迁移。
+- 项目内 `.vibeknowledge` 的可兼容数据会复制到 `.coscribe`，但旧目录不会被删除或重命名；新副本仍可能在未忽略 `.coscribe/` 的外部 Git 中显示为未跟踪内容。用户级 `vibeknowledge` 路径仍为兼容包袱，不要把两者混为同一迁移。
 - Electron、原生 `node-pty`、OCR/ASR 资源和跨平台打包依赖升级后必须重新验证全部目标平台。
 
 建议优先级、商业化、签名证书负责人、隐私政策、数据保留期和正式 Provider 支持矩阵需要产品/运营/发布负责人明确，不能从代码推断。
 
 ## 本轮仍未验证
 
-- 当前工作树的成品包 smoke 和各目标平台安装体验；源码态 Playwright 已有 40 项通过，成品包与 ASR 两个有条件场景因缺少输入而跳过；
+- 当前工作树的成品包 smoke 和各目标平台安装体验；本次源码态 Playwright 完整运行 40 项通过，成品包与 ASR 两个有条件场景因缺少输入而跳过；
 - Developer ID/公证、Authenticode 与 Linux 包签名；
 - 真实 OpenAI-compatible、Anthropic、MCP、DOI 和图片服务兼容矩阵；
 - 首次系统权限、多个显示器、不同音频设备及无障碍工具下的实际体验。

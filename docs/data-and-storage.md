@@ -1,12 +1,12 @@
 # 数据与存储
 
-> 事实源：`electron/main/project.ts`、`electron/main/project-memory.ts`、`electron/main/storage.ts`、`electron/main/settings.ts`、`electron/main/mcp.ts` 和 `electron/main/browser.ts`；核对日期 2026-07-31。当前实现没有 SQLite、ORM 或服务端数据库。
+> 事实源：`electron/main/project.ts`、`electron/main/project-memory.ts`、`electron/main/storage.ts`、`electron/main/settings.ts`、`electron/main/mcp.ts`、`electron/main/browser.ts` 与 `electron/main/assistant/`；个人记忆部分更新于 2026-10-07。项目资料以文件为主；个人记忆正文使用 Electron userData 下的 Markdown，索引与来源、授权、活动账本和学习／复习数据使用 SQLite，未使用 ORM 或服务端数据库。
 
 ## 设计原则
 
 用户资料首先是普通文件。CoScribe 读取和写入项目中的 Markdown、代码、文本及用户明确选择的内容，不要求导入专有数据库。
 
-项目内记忆和应用元数据统一存放在隐藏目录 `.coscribe/`。首次打开旧项目时，应用会把 `.vibeknowledge/` 和根目录 `COSCRIBE.md` 中可兼容的数据复制到该目录；旧来源不会被删除或改名，因此仅打开项目不会造成 Git 已跟踪文件消失。新位置已存在同名文件时以新位置为准。
+项目内记忆和应用元数据统一存放在隐藏目录 `.coscribe/`。首次打开旧项目时，应用会把 `.vibeknowledge/` 和根目录 `COSCRIBE.md` 中可兼容的数据复制到该目录；旧来源不会被删除或改名，因此迁移不会让 Git 已跟踪的旧文件消失。新位置已存在同名文件时以新位置为准。应用不会自动修改用户项目的 `.gitignore`，所以 `.coscribe/` 的新副本仍可能在外部 Git 中显示为未跟踪内容。
 
 ```mermaid
 flowchart LR
@@ -19,6 +19,8 @@ flowchart LR
   UserData --> Recent[recent-projects.json]
   UserData --> MCP[mcp-servers.json]
   UserData --> Browser[browser-history + persistent partition]
+  UserData --> PersonalMemory[assistant/memory/稳定ID.md]
+  UserData --> AssistantIndex[assistant/assistant.sqlite]
 ```
 
 ## 项目内数据
@@ -32,6 +34,8 @@ flowchart LR
 
 `.coscribe` 中由 `ProjectService` 管理的 JSON 基名只有 `workspace`、`sessions`、`annotations`、`ocr`、`knowledge-index`、`ai-operations` 和 `plugin-data`。项目记忆是单独的 Markdown 文件，不属于这些 JSON。
 
+`sessions.json` 中普通助手消息可以保存 `nextRequest` 候选（最多 200 字符），与回答正文分开存储。只有用户接受后，它才进入输入草稿；再次发送后才成为用户消息。读取旧会话时允许该字段缺失，并丢弃无效、失败或已停止回答上的候选。
+
 项目文件树默认不把 `.coscribe`、兼容期旧目录 `.vibeknowledge`、`.git`、`node_modules`、`.venv` 等目录作为普通资料展示。
 
 ## 用户级数据
@@ -40,24 +44,28 @@ Electron `userData` 用于保存：
 
 | 文件/区域 | 内容 |
 | --- | --- |
-| `settings.json` | 非机密设置和加密密钥的引用/密文 |
+| `settings.json` | 非机密设置、`encryptedApiKeys` 和 `encryptedImageApiKey` 密文 |
 | `recent-projects.json` | 最近项目记录 |
 | `mcp-servers.json` | 加密的 MCP 配置 |
 | `browser-history.json` | 资料浏览器历史 |
+| `assistant/memory/<稳定 ID>.md` | 全局已确认个人记忆正文；修改文字保留 ID |
+| `assistant/assistant.sqlite` | 记忆索引、来源、版本和授权、经文件核对的正文缓存、活动账本、复盘草稿，以及稳定知识点、学习状态、关联材料和复习事件；schema 4，迁移保留备份 |
 | 浏览器持久分区 | 资料浏览器 Cookie/localStorage 等登录态 |
 
 具体目录由操作系统和 Electron 解析。当前应用为了兼容历史配置使用 `vibeknowledge` userData 名称。
 
 ## 一致性与恢复
 
-JSON 写入使用临时文件、同步和原子重命名。读取损坏或不存在的 JSON 时，相关服务会尽量回退到安全默认值而不阻止用户继续打开项目。
+JSON 写入使用临时文件、同步和原子重命名。一般工作区数据沿用安全默认值回退；插件／研究元数据和全局助理数据库损坏会明确报错并保留原文件，不静默清空。助理 SQLite 使用 WAL、完整同步和事务，修订冲突拒绝覆盖；个人学习状态与复习的一致性和旧闪卡兼容策略见 [学习与复习 MVP](./learning-review-mvp.md)。
+
+个人记忆正文与索引使用持久化 outbox、前后内容哈希及原子文件替换协调；重启核对未完成操作，手工改动冲突时保留原文件。正文损坏或索引身份丢失不会静默回退到缓存。设置页可重建派生检索索引，数据库中的来源、授权和学习历史仍须保留；不能仅凭 Markdown 重建整个数据库。详见 [个人记忆检索](./personal-memory-retrieval.md)。
 
 AI 文件操作保留 before/after 内容以支持撤销，因此 `ai-operations.json` 可能包含敏感正文。备份、同步、问题报告和人工共享前应审查 `.coscribe/` 内容。
 
 ## 备份建议
 
 1. 优先备份项目原始文件和 Markdown。
-2. 需要恢复记忆、会话、批注、OCR 或工作区布局时，再同时备份 `.coscribe/`。
+2. 需要恢复项目记忆、会话、批注、OCR 或工作区布局时，再同时备份 `.coscribe/`。全局个人记忆与学习进度另行备份 userData 下整个 `assistant/`；应用关闭后复制数据库与 Markdown 一致组合。运行中不能只复制主文件而遗漏 WAL，也不能把分别取得的数据库与 Markdown 当作一致快照。
 3. 需要迁移 AI 服务配置时，依赖目标系统的 `safeStorage` 可用性；不要复制明文 API Key 到项目。
 4. 资料浏览器的登录态可能敏感，默认不应纳入共享归档。
 

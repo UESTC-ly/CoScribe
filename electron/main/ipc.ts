@@ -23,6 +23,9 @@ import type { PluginPermission } from '../../src/shared/types'
 import { trustedPlugin } from '../../src/plugins/registry'
 import { IPC } from '../ipc-channels'
 import { AiService } from './ai'
+import { AssistantService } from './assistant/service'
+import { ReviewService } from './assistant/review-service'
+import { LearningService } from './assistant/learning-service'
 import { CalendarService } from './calendar'
 import { DiagnosticsService } from './diagnostics'
 import { GitSnapshotService } from './git-snapshot'
@@ -33,6 +36,10 @@ import { PdfTextService } from './pdf'
 import { ProjectService } from './project'
 import { ProjectSearchService } from './search'
 import { ReferenceMetadataService } from './references'
+import { AutoResearchService } from './research/service'
+import { ResearchProviders } from './research/providers'
+import { ConfiguredResearchModel } from './research/model'
+import type { ResearchSearchRequest } from '../../src/shared/research'
 import { ScreenshotService } from './screenshot'
 import { SettingsStore } from './settings'
 import { SpeechRecognitionService } from './speech'
@@ -40,6 +47,7 @@ import { TerminalService } from './terminal'
 import { WebTrackerService } from './web-tracker'
 
 interface Services {
+  assistant: AssistantService
   project: ProjectService
   pdf: PdfTextService
   search: ProjectSearchService
@@ -87,19 +95,45 @@ function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1])
   })
 }
 
-export function registerIpc(services: Services): void {
+export function registerIpc(services: Services): AutoResearchService {
   const {
     project, pdf, search, settings, ai, screenshot, browser, speech, knowledge, calendar, diagnostics,
-    references, mcp, gitSnapshots, webTracker, terminal
+    references, mcp, gitSnapshots, webTracker, terminal, assistant
   } = services
+  const review = new ReviewService(assistant, project)
+  let pendingSettingsUpdates = 0
   const requirePlugin = async (pluginId: string, permission: PluginPermission): Promise<void> => {
+    if (pendingSettingsUpdates) throw new Error('设置正在保存，请完成后重试插件操作。')
+    const revision = settings.revision
     const manifest = trustedPlugin(pluginId)
     const preferences = await settings.get()
+    if (pendingSettingsUpdates || revision !== settings.revision) throw new Error('插件授权或设置已变化，请刷新后重试。')
     if (!manifest || ![...manifest.permissions, ...(manifest.optionalPermissions ?? [])].includes(permission) || !preferences.enabledPlugins.includes(pluginId)) {
       throw new Error('插件未启用或未声明所需权限。')
     }
     if (!(preferences.pluginGrants[pluginId] ?? []).includes(permission)) throw new Error('插件权限尚未获得用户授权。')
   }
+
+  const learning = new LearningService({ assistant, project, pdf, settingsRevision: () => settings.revision, authorize: (permission) => requirePlugin('flashcards', permission) })
+
+  const research = new AutoResearchService({
+    project, pdf, providers: new ResearchProviders((...args) => fetch(...args), mcp), model: new ConfiguredResearchModel(settings),
+    settingsRevision: () => settings.revision,
+    authorize: async (useAi, useMcp, network) => {
+      await requirePlugin('references', 'project:read')
+      await requirePlugin('references', 'project:write')
+      if (network) await requirePlugin('references', 'network:read')
+      if (useAi) await requirePlugin('references', 'ai:request')
+      if (useMcp) await requirePlugin('mcp-connectors', 'mcp:connect')
+    }
+  })
+  handle(IPC.researchList, async () => { await requirePlugin('references', 'project:read'); return research.list() })
+  handle(IPC.researchGet, async (_event, id: string) => { await requirePlugin('references', 'project:read'); return research.get(id) })
+  handle(IPC.researchStart, (_event, request: ResearchSearchRequest) => research.start(request))
+  handle(IPC.researchCancel, async (_event, id: string) => { await requirePlugin('references', 'project:write'); return research.cancel(id) })
+  handle(IPC.researchImport, (_event, id: string, ids: string[], download: boolean) => research.import(id, ids, download))
+  handle(IPC.researchDraft, (_event, id: string, ids: string[], kind: 'note' | 'review', useAi: boolean) => research.draft(id, ids, kind, useAi))
+  handle(IPC.researchConfirm, (_event, id: string) => research.confirm(id))
 
   handle(IPC.appVersion, () => app.getVersion())
   handle(IPC.clipboardWriteText, (_event, text: unknown) => {
@@ -126,14 +160,25 @@ export function registerIpc(services: Services): void {
   handle(IPC.projectUndoOperation, (_event, historyId: string) => project.undoOperation(historyId))
 
   handle(IPC.fileRead, (_event, filePath: string) => project.read(filePath))
-  handle(IPC.fileSaveMarkdown, (_event, filePath: string, content: string, expectedModifiedAt?: number) =>
-    project.saveMarkdown(filePath, content, expectedModifiedAt)
-  )
-  handle(IPC.fileSaveText, (_event, filePath: string, content: string, expectedModifiedAt?: number) =>
-    project.saveText(filePath, content, expectedModifiedAt)
-  )
-  handle(IPC.fileCreateMarkdown, (_event, filePath: string, content?: string) => project.createMarkdown(filePath, content))
-  handle(IPC.fileCreateText, (_event, filePath: string, content?: string) => project.createText(filePath, content))
+  const saveNote = async (filePath: string, content: string, expectedModifiedAt?: number, markdownOnly = false) => {
+    const scope = project.captureWriteScope()
+    const policy = await review.policy().catch(() => null)
+    const before = await project.read(filePath)
+    const after = markdownOnly
+      ? await project.saveMarkdown(filePath, content, expectedModifiedAt, scope)
+      : await project.saveText(filePath, content, expectedModifiedAt, scope)
+    return policy ? review.noteSaved(scope, policy, before, after) : { ...after, warnings: [...(after.warnings ?? []), '文件已保存，但活动账本不可用。'] }
+  }
+  const createNote = async (filePath: string, content = '', markdownOnly = false) => {
+    const scope = project.captureWriteScope()
+    const policy = await review.policy().catch(() => null)
+    const after = markdownOnly ? await project.createMarkdown(filePath, content, scope) : await project.createText(filePath, content, scope)
+    return policy ? review.noteSaved(scope, policy, null, after) : { ...after, warnings: [...(after.warnings ?? []), '文件已创建，但活动账本不可用。'] }
+  }
+  handle(IPC.fileSaveMarkdown, (_event, filePath: string, content: string, expectedModifiedAt?: number) => saveNote(filePath, content, expectedModifiedAt, true))
+  handle(IPC.fileSaveText, (_event, filePath: string, content: string, expectedModifiedAt?: number) => saveNote(filePath, content, expectedModifiedAt))
+  handle(IPC.fileCreateMarkdown, (_event, filePath: string, content?: string) => createNote(filePath, content, true))
+  handle(IPC.fileCreateText, (_event, filePath: string, content?: string) => createNote(filePath, content))
   handle(IPC.fileCreateFolder, (_event, filePath: string) => project.createFolder(filePath))
   handle(IPC.fileRename, (_event, filePath: string, nextName: string) => project.rename(filePath, nextName))
   handle(IPC.fileMove, (_event, filePath: string, targetFolder: string) => project.move(filePath, targetFolder))
@@ -155,8 +200,8 @@ export function registerIpc(services: Services): void {
   handle(IPC.knowledgeStatus, async () => { await requirePlugin('diagnostics', 'diagnostics:read'); return knowledge.status() })
   handle(IPC.knowledgeRebuild, async () => { await requirePlugin('diagnostics', 'diagnostics:read'); return knowledge.rebuild() })
   handle(IPC.knowledgeBacklinks, async () => { await requirePlugin('backlinks', 'project:read'); return knowledge.backlinks() })
-  handle(IPC.pluginData, async (_event, pluginId: string) => { await requirePlugin(pluginId, 'project:read'); return project.pluginData(pluginId) })
-  handle(IPC.pluginSaveData, async (_event, pluginId: string, value: unknown) => { await requirePlugin(pluginId, 'project:write'); return project.savePluginData(pluginId, value) })
+  handle(IPC.pluginData, async (_event, pluginId: string) => { const scope = project.captureWriteScope(); await requirePlugin(pluginId, 'project:read'); return project.pluginData(pluginId, scope) })
+  handle(IPC.pluginSaveData, async (_event, pluginId: string, value: unknown) => { const scope = project.captureWriteScope(); await requirePlugin(pluginId, 'project:write'); return project.savePluginData(pluginId, value, scope) })
   handle(IPC.calendarSync, async (_event, request: CalendarSyncRequest) => { await requirePlugin('planner', 'calendar:write'); return calendar.sync(request) })
   handle(IPC.diagnosticsSnapshot, async () => { await requirePlugin('diagnostics', 'diagnostics:read'); return diagnostics.snapshot() })
   handle(IPC.referencesLookupDoi, async (_event, doi: string) => {
@@ -260,10 +305,45 @@ export function registerIpc(services: Services): void {
   handle(IPC.imagesStop, (_event, requestId: string) => ai.stopImage(requestId))
 
   handle(IPC.settingsGet, () => settings.get())
+  handle(IPC.assistantMemoryList, () => assistant.list())
+  const mutateMemory = async (action: () => Promise<unknown>): Promise<unknown> => {
+    // Stop in-flight requests before enqueueing a correction/revocation, then
+    // also stop requests that began while the database worker was committing.
+    ai.stopAll()
+    const result = await action()
+    ai.stopAll()
+    return result
+  }
+  handle(IPC.learningList, () => learning.list())
+  handle(IPC.learningInspect, () => learning.inspect())
+  handle(IPC.learningCorrect, (_event, input: unknown) => mutateMemory(() => learning.correct(input)))
+  handle(IPC.learningMutate, (_event, input: unknown) => mutateMemory(() => learning.mutate(input)))
+  handle(IPC.learningDue, (_event, through: unknown) => learning.due(through))
+  handle(IPC.learningImport, (_event, input: unknown) => mutateMemory(() => learning.importLegacy(input)))
+  handle(IPC.assistantMemoryRemember, (_event, input: unknown) => mutateMemory(() => assistant.remember(input)))
+  handle(IPC.assistantMemoryUpdate, (_event, input: unknown) => mutateMemory(() => assistant.update(input)))
+  handle(IPC.assistantMemoryForget, (_event, input: unknown) => mutateMemory(() => assistant.forget(input)))
+  handle(IPC.assistantMemoryPolicy, (_event, input: unknown) => mutateMemory(() => assistant.setPolicy(input)))
+  handle(IPC.assistantMemorySearchPolicy, (_event, input: unknown) => mutateMemory(() => assistant.setSearch(input)))
+  handle(IPC.assistantMemoryRebuildIndex, (_event, input: unknown) => mutateMemory(() => assistant.rebuildIndex(input)))
+  handle(IPC.assistantAutomaticPolicy, (_event, input: unknown) => mutateMemory(() => assistant.setAutomatic(input)))
+  handle(IPC.assistantCandidateResolve, (_event, input: unknown) => mutateMemory(() => assistant.resolveCandidate(input)))
+  handle(IPC.assistantReviewPolicy, () => review.policy())
+  handle(IPC.assistantReviewSetPolicy, (_event, input: unknown) => review.setPolicy(input))
+  handle(IPC.assistantReviewAdd, (_event, input: unknown) => review.addActivity(input))
+  handle(IPC.assistantReviewGenerate, (_event, input: unknown) => review.generate(input))
+  handle(IPC.assistantReviewPrepare, (_event, input: unknown) => review.prepareExport(input))
+  handle(IPC.assistantReviewCommit, (_event, id: unknown) => review.commitExport(id))
+  handle(IPC.assistantReviewClear, (_event, revision: unknown) => review.clear(revision))
   handle(IPC.settingsSave, async (_event, value: AppSettings) => {
-    const saved = await settings.save(value)
-    if (!saved.aiShellEnabled) await terminal.revoke()
-    return saved
+    pendingSettingsUpdates += 1
+    try {
+      const saved = await settings.save(value)
+      if (!saved.aiShellEnabled) await terminal.revoke()
+      return saved
+    } finally {
+      pendingSettingsUpdates -= 1
+    }
   })
 
   handle(IPC.aiListModels, (_event, request: AiModelListRequest) => ai.listModels(request))
@@ -280,4 +360,5 @@ export function registerIpc(services: Services): void {
   handle(IPC.terminalAuthorizeAiShell, (event) => terminal.authorize(event.sender))
   handle(IPC.terminalRevokeAiShell, () => terminal.revoke())
   handle(IPC.terminalAiShellStatus, () => terminal.status())
+  return research
 }

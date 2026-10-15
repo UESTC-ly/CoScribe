@@ -270,6 +270,8 @@ export interface ChatMessage {
   kind?: 'command' | 'session-compaction' | 'note-organization'
   attachments?: ChatImageAttachment[]
   context?: ContextSnapshot
+  /** Model-predicted draft for the next turn; only sent after explicit acceptance. */
+  nextRequest?: string
   sources?: SourceRef[]
   operation?: FileOperationProposal
   noteOrganization?: ChatMessageNoteOrganization
@@ -425,6 +427,8 @@ export type PluginPermission =
   | 'network:read'
   | 'mcp:connect'
   | 'git:snapshot'
+  | 'learning:read'
+  | 'learning:write'
 
 export interface CalendarSyncRequest {
   kind: 'event' | 'reminder'
@@ -902,7 +906,7 @@ export type AiStreamEvent =
       detail?: string
     }
   | { requestId: string; type: 'delta'; text: string }
-  | { requestId: string; type: 'done'; sources: SourceRef[]; operation?: FileOperationProposal }
+  | { requestId: string; type: 'done'; sources: SourceRef[]; operation?: FileOperationProposal; nextRequest?: string }
   | { requestId: string; type: 'stopped' }
   | { requestId: string; type: 'error'; message: string }
 
@@ -919,6 +923,7 @@ export interface PdfSearchMatch {
 }
 
 export interface CoScribeAPI {
+  assistant: import('./assistant').AssistantAPI
   app: {
     platform: string
     version: () => Promise<string>
@@ -989,6 +994,7 @@ export interface CoScribeAPI {
   diagnostics: {
     snapshot: () => Promise<DiagnosticsSnapshot>
   }
+  research: import('./research').ResearchAPI
   references: {
     lookupDoi: (doi: string) => Promise<Partial<ResearchReference>>
   }

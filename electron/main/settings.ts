@@ -402,7 +402,11 @@ export class SettingsStore {
     return this.activeApiKey('anthropic')
   }
 
+  private revisionValue = 0
+  get revision(): number { return this.revisionValue }
+
   async save(input: AppSettings): Promise<AppSettings> {
+    this.revisionValue += 1
     const previous = await this.stored()
     const settings = sanitizeSettings(input)
     const profileIds = new Set(settings.aiProfiles.map((profile) => profile.id))

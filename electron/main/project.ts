@@ -51,6 +51,7 @@ import {
   type WorkspaceState
 } from '../../src/shared/types'
 import { normalizeChatImageAttachments } from '../../src/shared/chat-images'
+import { normalizeNextRequest } from '../../src/shared/next-request'
 import { isCodeFilePath } from '../../src/shared/code-files'
 import { DocxService } from './docx'
 import { extractPptxText } from './pptx'
@@ -94,6 +95,7 @@ type ProjectMetadataName =
   | 'knowledge-index'
   | 'ai-operations'
   | 'plugin-data'
+  | 'research-runs'
 
 const IGNORED_PROJECT_ENTRY_NAMES = new Set([
   METADATA_DIRECTORY,
@@ -221,7 +223,7 @@ function assertProjectContentPath(root: string, candidate: string): void {
   if (!isProjectMemoryPath(root, candidate)) assertNotMetadataPath(root, candidate)
 }
 
-async function projectTargetAllowMissing(root: string, inputPath: string): Promise<string> {
+export async function projectTargetAllowMissing(root: string, inputPath: string): Promise<string> {
   if (
     !inputPath ||
     inputPath.includes('\0') ||
@@ -483,6 +485,9 @@ function normalizedMessage(value: unknown, root: string): ChatMessage | undefine
   const kind = value.kind === 'command' || value.kind === 'session-compaction' || value.kind === 'note-organization'
     ? value.kind
     : undefined
+  const nextRequest = value.role === 'assistant' && !kind && !value.error && value.stopped !== true
+    ? normalizeNextRequest(value.nextRequest)
+    : undefined
   const attachments = value.role !== 'system'
     ? normalizeChatImageAttachments(value.attachments).map((attachment) => normalizedAttachmentPaths(value.attachments, attachment, root))
     : []
@@ -494,6 +499,7 @@ function normalizedMessage(value: unknown, root: string): ChatMessage | undefine
     ...(kind ? { kind } : {}),
     ...(attachments.length ? { attachments } : {}),
     ...(context ? { context } : {}),
+    ...(nextRequest ? { nextRequest } : {}),
     ...(sources?.length ? { sources } : {}),
     ...(operation ? { operation } : {}),
     ...(noteOrganization ? { noteOrganization } : {}),
@@ -628,6 +634,7 @@ interface PendingOperation {
 }
 
 export interface ProjectWriteScope {
+  verify?: () => void
   root: string
   revision: number
 }
@@ -770,6 +777,7 @@ export class ProjectService {
   }
 
   private guardForWriteScope(scope: ProjectWriteScope): ProjectPathGuard {
+    scope.verify?.()
     const guard = this.guardValue
     if (!guard || scope.revision !== this.projectRevision || scope.root !== guard.root) {
       throw new Error('项目已切换，本次文件写入已取消。')
@@ -790,29 +798,57 @@ export class ProjectService {
     return path.join(app.getPath('userData'), 'recent-projects.json')
   }
 
-  private async metadataFile(name: ProjectMetadataName): Promise<string> {
-    await this.ensureMetadata(this.guard.root)
-    const filePath = path.join(this.guard.root, METADATA_DIRECTORY, `${name}.json`)
+  private async metadataFile(name: ProjectMetadataName, scope: ProjectWriteScope = this.captureWriteScope()): Promise<string> {
+    const guard = this.guardForWriteScope(scope)
+    await this.ensureMetadata(guard.root)
+    this.guardForWriteScope(scope)
+    const filePath = path.join(guard.root, METADATA_DIRECTORY, `${name}.json`)
     try {
       const info = await lstat(filePath)
       if (info.isSymbolicLink() || !info.isFile()) throw new Error('项目元数据文件不是普通文件。')
       const canonical = await realpath(filePath)
-      if (!isInside(this.guard.root, canonical)) throw new Error('项目元数据文件越界。')
+      if (!isInside(guard.root, canonical)) throw new Error('项目元数据文件越界。')
     } catch (error) {
       if (!isMissing(error)) throw error
     }
+    this.guardForWriteScope(scope)
     return filePath
   }
 
-  async readMetadata<T>(name: ProjectMetadataName, fallback: T): Promise<T> {
-    return readJson<T>(await this.metadataFile(name), fallback)
+  assertWriteScope(scope: ProjectWriteScope): void { this.guardForWriteScope(scope) }
+
+  async readMetadata<T>(name: ProjectMetadataName, fallback: T, scope: ProjectWriteScope = this.captureWriteScope()): Promise<T> {
+    const filePath = await this.metadataFile(name, scope)
+    const guard = this.guardForWriteScope(scope)
+    let result: T
+    if (name === 'plugin-data' || name === 'research-runs') {
+      try {
+        const descriptor = await guard.openReadOnly(filePath)
+        try {
+          const info = await descriptor.stat()
+          if (info.size > MAX_PLUGIN_DATA_BYTES) throw new Error('项目元数据超过 4 MB 上限。')
+          result = JSON.parse(await descriptor.readFile('utf8')) as T
+        } finally { await descriptor.close() }
+      } catch (reason) {
+        if (isMissing(reason)) result = fallback
+        else throw reason
+      }
+    } else result = await readJson<T>(filePath, fallback)
+    this.guardForWriteScope(scope)
+    return result
   }
 
-  async writeMetadata(name: ProjectMetadataName, value: unknown): Promise<void> {
-    const filePath = await this.metadataFile(name)
-    const directoryIdentity = await this.guard.identity(path.dirname(filePath), 'directory')
-    const verify = () => this.guard.verifyIdentity(directoryIdentity)
+  async writeMetadata(name: ProjectMetadataName, value: unknown, scope: ProjectWriteScope = this.captureWriteScope()): Promise<void> {
+    const guard = this.guardForWriteScope(scope)
+    const filePath = await this.metadataFile(name, scope)
+    const directoryIdentity = await guard.identity(path.dirname(filePath), 'directory')
+    const verify = async () => {
+      this.guardForWriteScope(scope)
+      await guard.verifyIdentity(directoryIdentity)
+      this.guardForWriteScope(scope)
+    }
     await atomicWriteJson(filePath, value, verify)
+    this.guardForWriteScope(scope)
   }
 
   private async ensureMetadata(root: string): Promise<void> {
@@ -1094,27 +1130,43 @@ export class ProjectService {
     await this.writeMetadata('annotations', normalizeAnnotationsForProject(annotations, this.guard.root))
   }
 
-  async pluginData(pluginId: string): Promise<unknown> {
+  async pluginData(pluginId: string, scope: ProjectWriteScope = this.captureWriteScope()): Promise<unknown> {
     if (typeof pluginId !== 'string' || !/^[a-z0-9-]{1,80}$/u.test(pluginId)) throw new Error('插件 ID 无效。')
-    const data = await this.readMetadata<Record<string, unknown>>('plugin-data', {})
+    const data = await this.readMetadata<Record<string, unknown>>('plugin-data', {}, scope)
     if (!data || typeof data !== 'object' || Array.isArray(data)) return null
     return Object.prototype.hasOwnProperty.call(data, pluginId) ? data[pluginId] : null
   }
 
-  async savePluginData(pluginId: string, value: unknown): Promise<void> {
+  private pluginWriteQueue: Promise<unknown> = Promise.resolve()
+
+  async updatePluginData(pluginId: string, update: (existing: unknown) => unknown, scope: ProjectWriteScope = this.captureWriteScope()): Promise<void> {
     if (typeof pluginId !== 'string' || !/^[a-z0-9-]{1,80}$/u.test(pluginId)) throw new Error('插件 ID 无效。')
-    let serialized: string
-    try {
-      serialized = JSON.stringify(value)
-    } catch {
-      throw new Error('插件数据必须可以安全序列化为 JSON。')
-    }
-    if (serialized === undefined || Buffer.byteLength(serialized) > MAX_PLUGIN_DATA_BYTES) throw new Error('插件数据超过 4 MB 上限。')
-    const existing = await this.readMetadata<Record<string, unknown>>('plugin-data', {})
-    const next = existing && typeof existing === 'object' && !Array.isArray(existing) ? { ...existing } : {}
-    next[pluginId] = JSON.parse(serialized) as unknown
-    if (Buffer.byteLength(JSON.stringify(next)) > MAX_PLUGIN_DATA_BYTES) throw new Error('项目插件数据总量超过 4 MB 上限。')
-    await this.writeMetadata('plugin-data', next)
+    const work = this.pluginWriteQueue.then(async () => {
+      this.guardForWriteScope(scope)
+      const existing = await this.readMetadata<Record<string, unknown>>('plugin-data', {}, scope)
+      if (!existing || typeof existing !== 'object' || Array.isArray(existing)) throw new Error('项目插件数据格式无效。')
+      const updated = update(existing[pluginId])
+      if (updated === undefined) throw new Error('插件数据必须可以安全序列化为 JSON。')
+      const next = { ...existing, [pluginId]: updated }
+      let serialized: string
+      try { serialized = JSON.stringify(next) }
+      catch { throw new Error('插件数据必须可以安全序列化为 JSON。') }
+      if (Buffer.byteLength(serialized) > MAX_PLUGIN_DATA_BYTES) throw new Error('项目插件数据总量超过 4 MB 上限。')
+      await this.writeMetadata('plugin-data', JSON.parse(serialized), scope)
+    })
+    this.pluginWriteQueue = work.catch(() => undefined)
+    await work
+  }
+
+  async savePluginData(pluginId: string, value: unknown, scope: ProjectWriteScope = this.captureWriteScope()): Promise<void> {
+    await this.updatePluginData(pluginId, (existing) => {
+      if (pluginId !== 'references') return value
+      const current = existing as { revision?: number } | undefined
+      const incoming = value as { revision?: number; version?: number; references?: unknown } | undefined
+      if (!incoming || incoming.version !== 1 || !Array.isArray(incoming.references)) throw new Error('文献库格式无效。')
+      if ((incoming.revision ?? 0) !== (current?.revision ?? 0)) throw new Error('文献库已更新，请刷新后再保存，避免覆盖刚导入的记录。')
+      return { ...incoming, revision: (current?.revision ?? 0) + 1 }
+    }, scope)
   }
 
   async operationHistory(): Promise<AiOperationHistoryEntry[]> {
@@ -1479,33 +1531,44 @@ export class ProjectService {
     return { mode: info.mode & 0o777, modifiedAt: info.mtimeMs }
   }
 
-  async saveMarkdown(inputPath: string, content: string, expectedModifiedAt?: number): Promise<FileReadResult> {
+  async saveMarkdown(inputPath: string, content: string, expectedModifiedAt?: number, scope: ProjectWriteScope = this.captureWriteScope()): Promise<FileReadResult> {
+    const guard = this.guardForWriteScope(scope)
+    const verifyScope = (): void => { this.guardForWriteScope(scope) }
     if (typeof content !== 'string') throw new Error('Markdown 内容格式无效。')
-    await this.guard.assertMarkdown(inputPath, true)
-    return this.saveText(inputPath, content, expectedModifiedAt)
+    await guard.assertMarkdown(inputPath, true)
+    verifyScope()
+    return this.saveText(inputPath, content, expectedModifiedAt, scope)
   }
 
-  async saveText(inputPath: string, content: string, expectedModifiedAt?: number): Promise<FileReadResult> {
+  async saveText(inputPath: string, content: string, expectedModifiedAt?: number, scope: ProjectWriteScope = this.captureWriteScope()): Promise<FileReadResult> {
+    const guard = this.guardForWriteScope(scope)
+    const verifyScope = (): void => { this.guardForWriteScope(scope) }
     if (typeof content !== 'string') throw new Error('文本内容格式无效。')
     if (Buffer.byteLength(content, 'utf8') > MAX_TEXT_FILE_SIZE) throw new Error('文本文件超过 32 MB，无法保存。')
-    const canonical = await this.guard.existing(inputPath, 'file')
+    const canonical = await guard.existing(inputPath, 'file')
     if (!['markdown', 'code', 'text'].includes(fileKind(canonical))) {
       throw new Error('只能保存项目内可编辑的 Markdown、代码或文本文件。')
     }
-    assertProjectContentPath(this.guard.root, canonical)
+    assertProjectContentPath(guard.root, canonical)
     const { mode, modifiedAt } = await this.assertUnchanged(canonical, expectedModifiedAt)
-    const parentIdentity = await this.guard.identity(path.dirname(canonical), 'directory')
-    const targetIdentity = await this.guard.identity(canonical, 'file')
+    const parentIdentity = await guard.identity(path.dirname(canonical), 'directory')
+    const targetIdentity = await guard.identity(canonical, 'file')
     const verify = async () => {
-      await this.guard.verifyIdentity(parentIdentity)
-      await this.guard.verifyIdentity(targetIdentity)
+      verifyScope()
+      await guard.verifyIdentity(parentIdentity)
+      await guard.verifyIdentity(targetIdentity)
       await this.assertUnchanged(canonical, modifiedAt)
-      const checked = await this.guard.existing(canonical, 'file')
+      const checked = await guard.existing(canonical, 'file')
       if (checked !== canonical) throw new Error('写入目标在校验后发生变化。')
+      verifyScope()
     }
+    verifyScope()
     await atomicWrite(canonical, content, mode, verify)
-    await this.guard.existing(canonical, 'file')
-    return this.read(canonical)
+    await guard.existing(canonical, 'file')
+    verifyScope()
+    const result = await this.read(canonical)
+    verifyScope()
+    return result
   }
 
   async createMarkdown(
@@ -1946,6 +2009,8 @@ export class ProjectService {
     }
     return proposal
   }
+
+  discardAiOperation(id: string): void { this.pendingOperations.delete(id) }
 
   async applyAiOperation(input: FileOperationProposal): Promise<FileOperationApplyResult> {
     if (!input || input.status !== 'accepted') throw new Error('只有用户明确接受的 AI 文件建议才可以写入。')

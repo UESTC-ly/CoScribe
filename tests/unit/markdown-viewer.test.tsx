@@ -79,7 +79,7 @@ describe('MarkdownViewer preview', () => {
     fireEvent.click(copyButton)
     await waitFor(() => expect(desktopWriteText).toHaveBeenCalledWith(code))
     expect(browserWriteText).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: '代码已复制' })).toBeVisible()
+    await waitFor(() => expect(screen.getByRole('button', { name: '代码已复制' })).toBeVisible())
   })
 
   it('collapses and expands only descendants of the selected outline branch', () => {

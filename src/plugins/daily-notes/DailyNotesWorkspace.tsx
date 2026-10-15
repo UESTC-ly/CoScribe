@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, BookOpenText, CalendarDays, FilePlus2, Save } from 'lucide-react'
 
+import { DailyReviewPanel } from '../../components/assistant/DailyReviewPanel'
 import type { FileReadResult } from '../../shared/types'
 import {
   dailyNotePath,
@@ -124,6 +125,7 @@ export default function DailyNotesWorkspace(props: DailyNotesWorkspaceProps): Re
           />
         </section>
       </div>
+      {mode === 'daily' && <DailyReviewPanel date={date} onFileChanged={props.onFileChanged} onOpenMarkdown={props.onOpenMarkdown} />}
     </section>
   )
 }
