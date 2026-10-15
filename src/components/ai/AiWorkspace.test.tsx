@@ -129,6 +129,85 @@ const conversationMessages: ChatMessage[] = [
 ]
 
 describe('AiWorkspace', () => {
+  const predictedRequest = '请给出 Checkpointer 的最小示例'
+  const predictionSession: ChatSession = {
+    ...session,
+    messages: [{ id: 'predicted-answer', role: 'assistant', content: '状态已保存。', nextRequest: predictedRequest, createdAt: 2 }]
+  }
+
+  it('shows a ghost prediction without filling or sending it, then accepts, edits and sends', () => {
+    const onSend = vi.fn()
+    render(<AiWorkspace {...buildProps({ sessions: [predictionSession], onSend })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+    expect(textbox).toHaveValue('')
+    expect(screen.getByRole('button', { name: '接受下一次请求预测' })).toBeVisible()
+    expect(textbox).toHaveAccessibleDescription(expect.stringContaining(predictedRequest))
+    fireEvent.keyDown(textbox, { key: 'Enter' })
+    expect(onSend).not.toHaveBeenCalled()
+    fireEvent.keyDown(textbox, { key: 'Tab' })
+    expect(textbox).toHaveValue(predictedRequest)
+    expect(textbox).toHaveFocus()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '接受下一次请求预测' })).not.toBeInTheDocument()
+    fireEvent.change(textbox, { target: { value: `${predictedRequest}，使用 C++` } })
+    fireEvent.keyDown(textbox, { key: 'Enter' })
+    expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: `${predictedRequest}，使用 C++` }))
+    expect(screen.queryByRole('button', { name: '接受下一次请求预测' })).not.toBeInTheDocument()
+  })
+
+  it('completes a matching prefix and keeps a different draft untouched', () => {
+    render(<AiWorkspace {...buildProps({ sessions: [predictionSession] })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+    fireEvent.change(textbox, { target: { value: '请给出' } })
+    expect(screen.getByRole('button', { name: '接受下一次请求预测' })).toBeVisible()
+    fireEvent.change(textbox, { target: { value: '我想先问别的' } })
+    expect(screen.queryByRole('button', { name: '接受下一次请求预测' })).not.toBeInTheDocument()
+    expect(fireEvent.keyDown(textbox, { key: 'Tab' })).toBe(true)
+    expect(textbox).toHaveValue('我想先问别的')
+    fireEvent.change(textbox, { target: { value: '请给出' } })
+    fireEvent.keyDown(textbox, { key: 'Tab' })
+    expect(textbox).toHaveValue(predictedRequest)
+  })
+
+  it('supports dismissing predictions and preserves Shift Tab and IME composition', () => {
+    const onSend = vi.fn()
+    render(<AiWorkspace {...buildProps({ sessions: [predictionSession], onSend })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+    expect(fireEvent.keyDown(textbox, { key: 'Tab', shiftKey: true })).toBe(true)
+    expect(textbox).toHaveValue('')
+    fireEvent.compositionStart(textbox)
+    expect(fireEvent.keyDown(textbox, { key: 'Tab', isComposing: true })).toBe(true)
+    fireEvent.keyDown(textbox, { key: 'Enter', isComposing: true })
+    expect(onSend).not.toHaveBeenCalled()
+    fireEvent.compositionEnd(textbox)
+    expect(screen.getByRole('button', { name: '接受下一次请求预测' })).toBeVisible()
+    fireEvent.keyDown(textbox, { key: 'Escape' })
+    expect(screen.queryByRole('button', { name: '接受下一次请求预测' })).not.toBeInTheDocument()
+    expect(textbox).toHaveValue('')
+    expect(fireEvent.keyDown(textbox, { key: 'Tab' })).toBe(true)
+  })
+
+  it('does not show stale predictions during a new reply or in another session', () => {
+    const props = buildProps({ sessions: [predictionSession] })
+    const view = render(<AiWorkspace {...props} />)
+    expect(screen.getByRole('button', { name: '接受下一次请求预测' })).toBeVisible()
+    view.rerender(<AiWorkspace {...props} isStreaming />)
+    expect(screen.queryByRole('button', { name: '接受下一次请求预测' })).not.toBeInTheDocument()
+    view.rerender(<AiWorkspace {...props} sessions={[predictionSession, { ...session, id: 'other' }]} currentSessionId="other" />)
+    expect(screen.queryByRole('button', { name: '接受下一次请求预测' })).not.toBeInTheDocument()
+    view.rerender(<AiWorkspace {...props} sessions={[{ ...predictionSession, messages: [...predictionSession.messages, { id: 'new-question', role: 'user', content: '新问题', createdAt: 3 }] }]} />)
+    expect(screen.queryByRole('button', { name: '接受下一次请求预测' })).not.toBeInTheDocument()
+  })
+
+  it('preserves slash command completion when predictions are available', () => {
+    render(<AiWorkspace {...buildProps({ sessions: [predictionSession] })} />)
+    const textbox = screen.getByRole('textbox', { name: '向 AI 提问' })
+    fireEvent.change(textbox, { target: { value: '/hel' } })
+    expect(screen.queryByRole('button', { name: '接受下一次请求预测' })).not.toBeInTheDocument()
+    fireEvent.keyDown(textbox, { key: 'Tab' })
+    expect(textbox).toHaveValue('/help')
+  })
+
   it('keeps provider settings out of the AI header', () => {
     render(<AiWorkspace {...buildProps({ onOpenSettings: vi.fn() })} />)
 

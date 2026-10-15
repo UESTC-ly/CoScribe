@@ -631,6 +631,7 @@ export default function App(): React.JSX.Element {
         store.updateMessage(request.sessionId, request.assistantMessageId, {
           sources: event.sources,
           operation: event.operation,
+          nextRequest: event.nextRequest,
           ...(request.noteOrganization ? { noteOrganization: { ...request.noteOrganization } } : {})
         })
         const session = appStore.getState().sessions.find((item) => item.id === request.sessionId)
@@ -1595,6 +1596,7 @@ export default function App(): React.JSX.Element {
     const requestId = makeId('ai')
     store.updateMessage(session.id, message.id, {
       content: '',
+      nextRequest: undefined,
       sources: undefined,
       operation: undefined,
       stopped: undefined,
@@ -2189,7 +2191,7 @@ export default function App(): React.JSX.Element {
             ) : activePluginId === 'daily-notes' ? (
               <DailyNotesWorkspace projectName={state.project.name} onOpenMarkdown={(path) => openPath(path, 'markdown')} onFileChanged={plannerFileChanged} />
             ) : activePluginId === 'flashcards' ? (
-              <FlashcardsWorkspace files={pluginFiles} aiConfigured={isConfigured} onOpenMarkdown={(path) => openPath(path, 'markdown')} onGenerateWithAi={generateFlashcards} onOpenSettings={() => openSettings('providers')} />
+              <FlashcardsWorkspace files={pluginFiles} aiConfigured={isConfigured} learningGranted={(state.settings.pluginGrants.flashcards ?? []).includes('learning:read')} learningWritable={(state.settings.pluginGrants.flashcards ?? []).includes('learning:write')} readingContext={capturedSelectionContext?.documentPath ? { path: capturedSelectionContext.documentPath, quote: capturedSelectionContext.selection?.trim() || undefined, page: capturedSelectionContext.pdfPage } : undefined} onOpenMarkdown={(path) => openPath(path, inferKind(path))} onGenerateWithAi={generateFlashcards} onOpenSettings={() => openSettings('providers')} />
             ) : activePluginId === 'backlinks' ? (
               <BacklinksWorkspace activePath={activeTab?.kind === 'markdown' ? activeTab.path : undefined} onOpenMarkdown={(path) => openPath(path, 'markdown')} />
             ) : activePluginId === 'diagnostics' ? (
@@ -2198,6 +2200,8 @@ export default function App(): React.JSX.Element {
               <ReferencesWorkspace
                 files={pluginFiles}
                 networkGranted={(state.settings.pluginGrants.references ?? []).includes('network:read')}
+                aiGranted={(state.settings.pluginGrants.references ?? []).includes('ai:request')}
+                mcpGranted={state.settings.enabledPlugins.includes('mcp-connectors') && (state.settings.pluginGrants['mcp-connectors'] ?? []).includes('mcp:connect')}
                 onOpenFile={(path, kind) => openPath(path, kind ?? inferKind(path))}
                 onProjectChanged={refreshTree}
                 onSendToAi={sendPluginTextToAi}

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import type { McpServerConfig } from '../../src/shared/types'
+import { ResearchProviders } from './research/providers'
 import { McpService, sanitizeMcpServerConfig, type McpConfigRepository } from './mcp'
 
 class MemoryRepository implements McpConfigRepository {
@@ -25,7 +26,18 @@ describe('MCP client bridge', () => {
     const catalog = await service.inspect('test')
     expect(catalog.serverName).toBe('coscribe-test-mcp')
     expect(catalog.tools.map((tool) => tool.name)).toContain('echo')
+    await expect(service.invoke({ serverId: 'test', kind: 'tool', name: 'echo', arguments: { message: 'never' } }, { readOnly: true })).rejects.toThrow('只读')
     expect(catalog.prompts.map((prompt) => prompt.name)).toContain('summarize')
     await expect(service.invoke({ serverId: 'test', kind: 'tool', name: 'echo', arguments: { message: 'hello' } })).resolves.toMatchObject({ content: 'echo:hello', structuredContent: { echoed: 'hello' }, isError: false })
   }, 20_000)
+  it('uses an actual declared read-only MCP repository tool for Auto Research', async () => {
+    const fixture = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../tests/fixtures/research-mcp-server.mjs')
+    const config = sanitizeMcpServerConfig({ id: 'research', name: 'Research Fixture', transport: 'stdio', command: process.execPath, args: [fixture] }, undefined, 10)
+    const service = new McpService(new MemoryRepository([config]))
+    const providers = new ResearchProviders(fetch, service)
+    const candidates = await providers.search('github', 'graph research', 3, new AbortController().signal, 'research')
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0]).toMatchObject({ source: 'github', sourceId: 'fixture/graph-research', reference: { title: 'fixture/graph-research' } })
+  }, 20_000)
+
 })

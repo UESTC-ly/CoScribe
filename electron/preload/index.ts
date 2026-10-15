@@ -34,6 +34,36 @@ function subscribe<T>(channel: string, listener: (value: T) => void): () => void
 }
 
 const api: CoScribeAPI = {
+  assistant: {
+    learning: {
+      list: () => ipcRenderer.invoke(IPC.learningList),
+      inspect: () => ipcRenderer.invoke(IPC.learningInspect),
+      correct: (input) => ipcRenderer.invoke(IPC.learningCorrect, input),
+      mutate: (input) => ipcRenderer.invoke(IPC.learningMutate, input),
+      due: (through) => ipcRenderer.invoke(IPC.learningDue, through),
+      importLegacy: (input) => ipcRenderer.invoke(IPC.learningImport, input)
+    },
+    memory: {
+      list: () => ipcRenderer.invoke(IPC.assistantMemoryList),
+      remember: (input) => ipcRenderer.invoke(IPC.assistantMemoryRemember, input),
+      update: (input) => ipcRenderer.invoke(IPC.assistantMemoryUpdate, input),
+      forget: (input) => ipcRenderer.invoke(IPC.assistantMemoryForget, input),
+      setPolicy: (input) => ipcRenderer.invoke(IPC.assistantMemoryPolicy, input),
+      setSearch: (input) => ipcRenderer.invoke(IPC.assistantMemorySearchPolicy, input),
+      rebuildIndex: (input) => ipcRenderer.invoke(IPC.assistantMemoryRebuildIndex, input),
+      setAutomatic: (input) => ipcRenderer.invoke(IPC.assistantAutomaticPolicy, input),
+      resolveCandidate: (input) => ipcRenderer.invoke(IPC.assistantCandidateResolve, input)
+    },
+    review: {
+      policy: () => ipcRenderer.invoke(IPC.assistantReviewPolicy),
+      setPolicy: (input) => ipcRenderer.invoke(IPC.assistantReviewSetPolicy, input),
+      addActivity: (input) => ipcRenderer.invoke(IPC.assistantReviewAdd, input),
+      generate: (input) => ipcRenderer.invoke(IPC.assistantReviewGenerate, input),
+      prepareExport: (input) => ipcRenderer.invoke(IPC.assistantReviewPrepare, input),
+      commitExport: (id) => ipcRenderer.invoke(IPC.assistantReviewCommit, id),
+      clear: (revision) => ipcRenderer.invoke(IPC.assistantReviewClear, revision)
+    }
+  },
   app: {
     platform: process.platform,
     version: () => ipcRenderer.invoke(IPC.appVersion)
@@ -105,6 +135,15 @@ const api: CoScribeAPI = {
   },
   diagnostics: {
     snapshot: () => ipcRenderer.invoke(IPC.diagnosticsSnapshot)
+  },
+  research: {
+    list: () => ipcRenderer.invoke(IPC.researchList),
+    start: (request) => ipcRenderer.invoke(IPC.researchStart, request),
+    get: (id) => ipcRenderer.invoke(IPC.researchGet, id),
+    cancel: (id) => ipcRenderer.invoke(IPC.researchCancel, id),
+    import: (id, candidateIds, download) => ipcRenderer.invoke(IPC.researchImport, id, candidateIds, download),
+    draft: (id, candidateIds, kind, useAi) => ipcRenderer.invoke(IPC.researchDraft, id, candidateIds, kind, useAi),
+    confirm: (draftId) => ipcRenderer.invoke(IPC.researchConfirm, draftId)
   },
   references: {
     lookupDoi: (doi: string) => ipcRenderer.invoke(IPC.referencesLookupDoi, doi)

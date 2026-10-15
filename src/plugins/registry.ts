@@ -38,7 +38,8 @@ export const TRUSTED_PLUGIN_REGISTRY: readonly TrustedPluginManifest[] = [
     kind: 'built-in',
     entry: 'flashcards',
     permissions: ['project:read', 'project:write', 'ai:request'],
-    features: ['Markdown 闪卡', '本地复习算法', '到期队列', 'AI 候选卡片'],
+    optionalPermissions: ['learning:read', 'learning:write'],
+    features: ['Markdown 闪卡', '跨项目学习状态', '到期队列', '关联复习'],
     activation: 'on-view'
   },
   {
@@ -71,7 +72,7 @@ export const TRUSTED_PLUGIN_REGISTRY: readonly TrustedPluginManifest[] = [
     kind: 'built-in',
     entry: 'references',
     permissions: ['project:read', 'project:write'],
-    optionalPermissions: ['network:read'],
+    optionalPermissions: ['network:read', 'ai:request'],
     features: ['BibTeX / RIS 导入', 'DOI 查询', 'PDF 关联', '文献笔记'],
     activation: 'on-view'
   },
@@ -131,7 +132,9 @@ export const PLUGIN_PERMISSION_LABELS: Record<TrustedPluginManifest['permissions
   'diagnostics:read': '读取 CoScribe 进程性能快照',
   'network:read': '访问你指定的网络来源',
   'mcp:connect': '启动或连接你明确配置的 MCP 服务',
-  'git:snapshot': '读取项目 Git 状态并创建本地提交'
+  'git:snapshot': '读取项目 Git 状态并创建本地提交',
+  'learning:read': '读取全局个人学习库与复习材料',
+  'learning:write': '写入或纠正全局个人学习库与复习记录'
 }
 
 export function trustedPlugin(id: string): TrustedPluginManifest | undefined {

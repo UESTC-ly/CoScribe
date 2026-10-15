@@ -6,6 +6,7 @@ import type { ProjectPathGuard } from './security'
 interface PdfCacheEntry {
   signature: string
   pages: PdfPageText[]
+  totalPages: number
   touchedAt: number
 }
 
@@ -41,17 +42,18 @@ export class PdfTextService {
     if (oldest) this.cache.delete(oldest[0])
   }
 
-  private async extract(inputPath: string): Promise<{ path: string; pages: PdfPageText[] }> {
+  private async extract(inputPath: string, maximumPages = Infinity): Promise<{ path: string; pages: PdfPageText[]; totalPages: number }> {
     const guard = this.getGuard()
     const canonical = await guard.existing(inputPath, 'file')
     if (!canonical.toLowerCase().endsWith('.pdf')) throw new Error('目标文件不是 PDF。')
 
     const info = await stat(canonical)
-    const signature = `${info.size}:${info.mtimeMs}`
+    if (maximumPages !== Infinity && info.size > 20 * 1024 * 1024) throw new Error('研究 PDF 超过 20 MB 摘录上限。')
+    const signature = `${info.size}:${info.mtimeMs}:${maximumPages}`
     const cached = this.cache.get(canonical)
     if (cached?.signature === signature) {
       cached.touchedAt = Date.now()
-      return { path: canonical, pages: cached.pages }
+      return { path: canonical, pages: cached.pages, totalPages: cached.totalPages }
     }
 
     const descriptor = await guard.openReadOnly(canonical)
@@ -63,14 +65,12 @@ export class PdfTextService {
     }
 
     let loadingTask: { promise: Promise<any>; destroy: () => Promise<void> } | undefined
-    let document: { numPages: number; getPage: (page: number) => Promise<any>; destroy: () => Promise<void> } | undefined
     try {
       const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
       loadingTask = pdfjs.getDocument({ data, useSystemFonts: true })
       const pdfDocument = await loadingTask.promise
-      document = pdfDocument
       const pages: PdfPageText[] = []
-      for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+      for (let pageNumber = 1; pageNumber <= Math.min(pdfDocument.numPages, maximumPages); pageNumber += 1) {
         const page = await pdfDocument.getPage(pageNumber)
         try {
           const content = await page.getTextContent()
@@ -80,14 +80,13 @@ export class PdfTextService {
           page.cleanup?.()
         }
       }
-      this.cache.set(canonical, { signature, pages, touchedAt: Date.now() })
+      this.cache.set(canonical, { signature, pages, totalPages: pdfDocument.numPages, touchedAt: Date.now() })
       this.prune()
-      return { path: canonical, pages }
+      return { path: canonical, pages, totalPages: pdfDocument.numPages }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`PDF 无法解析或提取正文：${message}`)
     } finally {
-      await document?.destroy().catch(() => undefined)
       await loadingTask?.destroy().catch(() => undefined)
     }
   }
@@ -98,6 +97,10 @@ export class PdfTextService {
     const result = pages[page - 1]
     if (!result) throw new Error(`PDF 不包含第 ${page} 页。`)
     return result
+  }
+
+  async evidencePages(inputPath: string): Promise<{ pages: PdfPageText[]; totalPages: number }> {
+    return this.extract(inputPath, 8)
   }
 
   async allPages(inputPath: string): Promise<PdfPageText[]> {

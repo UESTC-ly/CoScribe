@@ -665,3 +665,43 @@
     box-shadow: var(--shadow-panel);
   }
 }
+.personal-memory-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.personal-memory-text {
+  white-space: pre-wrap;
+}
+
+.personal-memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.daily-review-card { margin-top: 18px; }
+.daily-review-card fieldset { border: 0; padding: 0; min-width: 0; display: grid; gap: 12px; }
+.daily-review-card textarea.field { min-height: 90px; max-height: 360px; resize: vertical; font-family: inherit; }
+.daily-review-card .field-label { display: grid; gap: 6px; }
+.daily-review-card .check-row input { flex: 0 0 auto; }
+
+.auto-research-panel { margin: 0 0 18px; }
+.auto-research-panel summary { cursor: pointer; padding: 6px 0; }
+.auto-research-panel > p, .auto-research-help { color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.auto-research-topic { display: grid; gap: 7px; }
+.auto-research-options { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 12px 0; }
+.auto-research-options label, .auto-research-candidates label { display: flex; align-items: center; gap: 7px; }
+.auto-research-options input[type='number'] { width: 65px; }
+.auto-research-panel input[type='checkbox'] { width: auto; accent-color: var(--accent); }
+.auto-research-candidates { display: grid; gap: 10px; max-height: 380px; overflow-y: auto; margin: 12px 0; }
+.auto-research-candidates article { border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.auto-research-candidates p { font-size: 12px; overflow-wrap: anywhere; line-height: 1.6; margin: 6px 0; }
+.auto-research-candidates small { color: var(--text-secondary); }
+.auto-research-panel textarea { width: 100%; resize: vertical; }
+.auto-research-panel > label { display: grid; gap: 6px; margin: 10px 0; font-size: 12px; }
+.auto-research-panel input[type='text'], .auto-research-topic input, .auto-research-panel select, .auto-research-options input[type='number'] { min-height: 32px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--bg-content); }
+.auto-research-panel .research-panel-actions { flex-wrap: wrap; }
+.auto-research-panel [aria-label='研究草稿预览'] > p { overflow-wrap: anywhere; }

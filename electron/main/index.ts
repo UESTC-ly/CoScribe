@@ -6,6 +6,7 @@ import { app, BrowserWindow, globalShortcut, net, protocol, session, shell, type
 
 import { IPC } from '../ipc-channels'
 import { AiService } from './ai'
+import { AssistantService } from './assistant/service'
 import { CalendarService } from './calendar'
 import { DiagnosticsService } from './diagnostics'
 import { GitSnapshotService } from './git-snapshot'
@@ -13,6 +14,7 @@ import { KnowledgeIndexService } from './knowledge-index'
 import { McpService } from './mcp'
 import { ResearchBrowserService } from './browser'
 import { registerIpc } from './ipc'
+import type { AutoResearchService } from './research/service'
 import { PdfTextService } from './pdf'
 import { ProjectService } from './project'
 import { ProjectSearchService } from './search'
@@ -90,6 +92,7 @@ const settings = new SettingsStore()
 let pdf: PdfTextService
 let knowledge: KnowledgeIndexService
 const projectLifecycle = {
+  research: null as AutoResearchService | null,
   ai: null as AiService | null,
   browser: null as ResearchBrowserService | null,
   speech: null as SpeechRecognitionService | null,
@@ -105,6 +108,7 @@ const project = new ProjectService(
     knowledge?.invalidate(filePath)
   },
   () => {
+    projectLifecycle.research?.stopAll()
     projectLifecycle.ai?.stopAll()
     projectLifecycle.browser?.close()
     projectLifecycle.speech?.stopAll()
@@ -117,7 +121,8 @@ projectLifecycle.terminal = terminal
 pdf = new PdfTextService(() => project.guard)
 knowledge = new KnowledgeIndexService(project, pdf)
 const search = new ProjectSearchService(project, knowledge)
-const ai = new AiService(settings, project, pdf, search, terminal)
+const assistant = new AssistantService(app.getPath('userData'), path.join(currentDirectory, 'assistant-storage-worker.js'), settings)
+const ai = new AiService(settings, project, pdf, search, terminal, assistant)
 projectLifecycle.ai = ai
 const screenshot = new ScreenshotService(() => mainWindow)
 const speech = new SpeechRecognitionService()
@@ -271,9 +276,9 @@ void app.whenReady().then(() => {
       trustedRendererUrl(webContents.getURL())
     )
   })
-  registerIpc({
+  projectLifecycle.research = registerIpc({
     project, pdf, search, settings, ai, screenshot, browser, speech, knowledge, calendar, diagnostics,
-    references, mcp, gitSnapshots, webTracker, terminal
+    references, mcp, gitSnapshots, webTracker, terminal, assistant
   })
   webTracker.start()
   protocol.handle('coscribe-app', async (request) => {
@@ -332,7 +337,20 @@ void app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', () => {
+let assistantShutdownComplete = false
+let assistantShutdownStarted = false
+app.on('before-quit', (event) => {
+  if (!assistantShutdownComplete) {
+    event.preventDefault()
+    if (!assistantShutdownStarted) {
+      assistantShutdownStarted = true
+      projectLifecycle.research?.stopAll()
+      void Promise.allSettled([assistant.close(), projectLifecycle.research?.settled()]).finally(() => {
+        assistantShutdownComplete = true
+        app.quit()
+      })
+    }
+  }
   ai.stopAll()
   terminal.killAll()
   speech.stopAll()

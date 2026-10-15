@@ -22,6 +22,7 @@ import {
   type AppSettings
 } from '../../shared/types'
 import { Dialog } from './Dialog'
+import { PersonalMemoryPanel } from '../assistant/PersonalMemoryPanel'
 
 const MAX_AI_PROFILES = 20
 const REASONING_LABELS: Record<AppSettings['reasoningEffort'], string> = {
@@ -33,7 +34,7 @@ const REASONING_LABELS: Record<AppSettings['reasoningEffort'], string> = {
   max: 'More reasoning...'
 }
 
-export type SettingsPanel = 'general' | 'providers' | 'ai-behavior' | 'image'
+export type SettingsPanel = 'general' | 'providers' | 'ai-behavior' | 'image' | 'personal-memory'
 
 interface SettingsDialogProps {
   open: boolean
@@ -346,7 +347,7 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
       description="系统偏好与 AI 服务独立管理；密钥只保存在本机安全存储中。"
       onClose={onClose}
       width={900}
-      footer={(
+      footer={panel === 'personal-memory' ? <button className="secondary-button" onClick={onClose}>关闭</button> : (
         <>
           <button className="secondary-button" onClick={onClose}>取消</button>
           <button className="primary-button" disabled={saving} onClick={() => void save()}>
@@ -357,6 +358,9 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
     >
       <div className="settings-workbench">
         <nav className="settings-navigation" aria-label="设置分类">
+          <button type="button" aria-current={panel === 'personal-memory' ? 'page' : undefined} onClick={() => setPanel('personal-memory')}>
+            <BrainCircuit size={16} aria-hidden="true" /><span><strong>关于我</strong><small>个人记忆与隐私</small></span>
+          </button>
           <button type="button" aria-current={panel === 'general' ? 'page' : undefined} onClick={() => setPanel('general')}>
             <MonitorCog size={16} /><span><strong>通用设置</strong><small>外观、项目与保存</small></span>
           </button>
@@ -372,6 +376,7 @@ export function SettingsDialog({ open, initialPanel = 'general', settings, onSav
         </nav>
 
         <div className="settings-panel">
+          {panel === 'personal-memory' && <PersonalMemoryPanel />}
           {panel === 'general' && (
             <section className="settings-section">
               <header><div><h3>通用设置</h3><p>只影响本地工作台，不会修改项目内容。</p></div></header>

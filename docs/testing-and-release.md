@@ -1,6 +1,6 @@
 # 测试、打包与部署
 
-> 事实源：`package.json`、三套 Vitest 配置、`playwright.config.ts`、`tests/e2e/`、三平台校验脚本和 `.github/workflows/`；核对日期 2026-07-31。
+> 事实源：`package.json`、三套 Vitest 配置、`playwright.config.ts`、`tests/e2e/`、三平台校验脚本和 `.github/workflows/`；v4.1.0 核对日期 2026-10-16。本轮本地环境为 macOS arm64、Node.js 26.8.1。
 
 ## 当前本地证据
 
@@ -9,12 +9,12 @@
 | 命令 | 结果 |
 | --- | --- |
 | `npm run typecheck` | 通过：Renderer 与 Node/Electron 两套 TypeScript 检查 |
-| `npm test` | 通过：29 文件/111 unit，23 文件/162 Electron，2 文件/36 AI；合计 309 项 |
+| `npm test` | 通过：29 文件/112 unit，39 文件/373 Electron，3 文件/43 AI；合计 528 项 |
 | `npm run build` | 通过：main、preload、renderer 均产出；Vite 报告 OpenCV 的 `fs/path/crypto` 浏览器外部化警告 |
-| `npm run test:e2e` | 通过：40 项；2 项按条件跳过（未提供成品可执行文件、未提供 ASR WAV 夹具） |
-| `node scripts/capture-readme-images.mjs` | 通过：临时项目、临时 userData、本地 mock Provider，刷新 7 张截图 |
+| `npm run test:e2e` | 通过：包含 typecheck 与生产构建，53 项通过、2 项按条件跳过（未提供成品可执行文件、未提供 ASR WAV 夹具） |
+| `node scripts/capture-readme-images.mjs` | 本轮未重跑；脚本使用临时项目、临时 userData 和本地 mock Provider，并要求 7 张输出图片通过大小校验 |
 
-上述证据不包含当前工作树的成品包 smoke、真实第三方 Provider、签名/公证或三平台安装体验。
+预测功能另外对当前配置的第三方 Responses 服务执行了最小真实请求，验证模型输出的候选可以提取。其余自动化 Provider 场景使用本地可控响应；这些证据不包含当前工作树的成品包 smoke、签名/公证、三平台安装体验或所有真实服务兼容性。
 
 ## 本地验证层级
 
@@ -35,7 +35,7 @@ npm run build
 npm run test:e2e
 ```
 
-`npm run test:e2e` 会先构建，再运行 Playwright。不要单独运行 Playwright 后把旧 `out/` 产物的结果当作当前源码证据。
+`npm run test:e2e` 会先构建，再运行 Playwright。不要单独运行 Playwright 后把旧 `out/` 产物的结果当作当前源码证据；如果完整套件出现失败，文档应记录完整运行结果，定点重试只能作为补充证据。
 
 ## E2E 约定
 
@@ -78,7 +78,7 @@ npm run verify:package:linux
 
 | 平台 | 静态/运行校验重点 |
 | --- | --- |
-| macOS | app/asar、版本、ASR 与 sherpa 资源、`node-pty` 文件与真实 PTY probe |
+| macOS | app/asar、运行时依赖、source map 排除、ASR 与 sherpa 资源、`node-pty` 文件与真实 PTY probe；当前脚本不独立读取 Info.plist 版本或 Mach-O 架构 |
 | Windows | EXE/NSIS x64 架构、asar、source map、禁止误带 macOS ASR、安装器体积 |
 | Linux | ELF/AppImage x64、deb 结构/版本/amd64、asar、source map、禁止误带 macOS ASR |
 
@@ -98,8 +98,8 @@ npm run build
 Release 工作流（`.github/workflows/release.yml`）由 `v*` tag 触发：
 
 1. 校验 tag 与 `package.json.version` 一致。
-2. 在 macOS arm64、Windows x64、Linux x64 原生 Runner 上构建。
-3. 校验每个平台包内容和架构。
+2. 分别在 `macos-15`、`windows-2022`、`ubuntu-24.04` Runner 上构建 macOS arm64、Windows x64、Linux x64 目标。
+3. 校验每个平台包内容；Windows/Linux 脚本会检查目标架构，macOS arm64 目标由 `dist:mac:arm64` 构建命令指定，当前 macOS 校验脚本不独立检查 Mach-O 架构。
 4. 对成品运行 package smoke。
 5. 收集五个安装包，生成 `SHA256SUMS.txt`，创建或更新 GitHub Release。
 
@@ -120,7 +120,7 @@ flowchart LR
 ## 发布清单
 
 1. 确认版本、README 下载块、release tag 和变更记录一致。
-2. `git status --short` 只包含预期文件；排除 `/learn/`、`release/`、本地 `CLAUDE.md`、密钥和用户数据。
+2. `git status --short` 只包含预期文件；排除 `/learn/`、`release/`、密钥、用户数据，以及与当前任务无关的 `CLAUDE.md` 本地修改。
 3. 在本地完成与改动匹配的验证。
 4. 提交并推送发布分支，创建 PR。
 5. 合并后创建 `vX.Y.Z` tag 并推送 tag。

@@ -1,6 +1,6 @@
 # 开发指南
 
-> 本页已按 `package.json`、三套 Vitest 配置、`playwright.config.ts`、`electron.vite.config.ts` 与脚本目录于 2026-07-31 重新核对。
+> 本页已按 `package.json`、三套 Vitest 配置、`playwright.config.ts`、`electron.vite.config.ts` 与脚本目录于 2026-08-23 重新核对。
 
 ## 前置条件
 
@@ -99,7 +99,7 @@ scripts/           打包和验证脚本
 - React 组件和文件使用 `PascalCase`；函数和变量使用 `camelCase`。
 - 不新增依赖，除非该依赖解决了无法由现有工具完成的明确问题。
 - 不混入无关重构；安全或持久化改动需先补回归保护。
-- 不提交密钥、用户数据、`release/`、`/learn/` 或本地 `CLAUDE.md`。
+- 不提交密钥、用户数据、`release/`、`/learn/`，也不要把与当前任务无关的 `CLAUDE.md` 本地修改混入提交。
 
 ## 本地调试
 

@@ -1,35 +1,47 @@
 # Line Edit Feature for propose_workspace_operation
 
+> 核对基线：2026-08-23，`package.json` 版本 `4.0.5`。本文以 `src/shared/types.ts`、`electron/main/project.ts`、`electron/main/line-edits.ts`、`src/lib/file-operations.ts` 和对应测试为事实源。
+
 ## 概述
 
-为 AI 工具 `propose_workspace_operation` 增加了 `edit` 操作类型，支持精确的行级文件修改。之前修改文件中的几行需要使用 `replace` 重写整个文件，现在可以通过 `edit` 操作指定具体的行范围进行修改。
+AI 工具 `propose_workspace_operation` 支持 `edit` 操作类型，用于对 Markdown、代码和普通文本文件做行级修改。模型仍可以使用 `replace` 做整文件改写；当模型把不可用的行级编辑标成 `edit`，但同时提供了整文件 `proposedContent`，主进程会把该提议降级为 `replace` 预览。
 
-## 类型定义
+所有 AI 文件写入仍遵守同一条安全链路：模型只产生结构化提议，Renderer 展示内容或差异预览及确认卡片，主进程在写入前重新验证项目路径、符号链接、mtime、完整内容和用户确认的 pending 提议。
 
-### LineEdit 接口
+## 类型契约
+
+当前共享类型定义在 `src/shared/types.ts`：
 
 ```typescript
-interface LineEdit {
-  startLine: number   // 1-based，要修改的起始行
-  endLine: number     // 1-based，要修改的结束行（包含）
-  newContent: string  // 替换后的内容（可以是多行，用 \n 分隔）
+export type FileOperationKind = 'create' | 'append' | 'replace' | 'edit'
+
+export interface LineEdit {
+  startLine: number
+  endLine: number
+  newContent: string
 }
-```
 
-### 扩展的 WorkspaceOperation
-
-```typescript
-interface WorkspaceOperation {
-  kind: "create" | "append" | "replace" | "edit"
+export interface TextFileOperation {
+  kind: FileOperationKind
   targetPath: string
-  
-  // 用于 create/append/replace
   proposedContent?: string
-  
-  // 用于 edit（局部修改）
-  edits?: Array<LineEdit>
+  edits?: LineEdit[]
+  originalContent?: string
+  diskContent?: string
+  baseSource?: 'disk' | 'buffer'
+  expectedModifiedAt?: number
+}
+
+export interface FileOperationProposal extends TextFileOperation {
+  id: string
+  operations?: TextFileOperation[]
+  summary: string
+  status: 'pending' | 'accepted' | 'rejected' | 'failed'
+  error?: string
 }
 ```
+
+`MarkdownFileOperation` 只是为 v3 历史记录保留的兼容别名，当前通用文本操作类型是 `TextFileOperation`。
 
 ## 使用示例
 
@@ -37,13 +49,13 @@ interface WorkspaceOperation {
 
 ```typescript
 {
-  kind: "edit",
-  targetPath: "src/utils.ts",
+  kind: 'edit',
+  targetPath: 'src/utils.ts',
   edits: [
     {
       startLine: 10,
       endLine: 10,
-      newContent: "function getUsername(id: string) {"
+      newContent: 'function getUsername(id: string) {'
     }
   ]
 }
@@ -53,13 +65,13 @@ interface WorkspaceOperation {
 
 ```typescript
 {
-  kind: "edit",
-  targetPath: "config.json",
+  kind: 'edit',
+  targetPath: 'config.json',
   edits: [
     {
       startLine: 15,
       endLine: 18,
-      newContent: ""  // 空字符串表示删除
+      newContent: ''
     }
   ]
 }
@@ -69,18 +81,18 @@ interface WorkspaceOperation {
 
 ```typescript
 {
-  kind: "edit",
-  targetPath: "README.md",
+  kind: 'edit',
+  targetPath: 'README.md',
   edits: [
     {
       startLine: 5,
       endLine: 5,
-      newContent: "## 项目简介\n\n这是一个学习项目。"
+      newContent: '## 项目简介\n\n这是一个学习项目。'
     },
     {
       startLine: 23,
       endLine: 25,
-      newContent: "## 贡献指南\n\n欢迎提交 PR。"
+      newContent: '## 贡献指南\n\n欢迎提交 PR。'
     }
   ]
 }
@@ -88,146 +100,121 @@ interface WorkspaceOperation {
 
 ## 实现细节
 
-### 核心函数
+### `applyLineEdits(originalContent, edits)`
 
-#### `applyLineEdits(originalContent: string, edits: LineEdit[]): string`
+- 位置：`electron/main/line-edits.ts`
+- `src/lib/file-operations.ts` 还保留一份供纯逻辑安全预览测试使用的同等实现 `applyLineEditsClient()`；当前聊天确认卡片在 `src/components/ai/MarkdownOperationCard.tsx` 中渲染实际预览。
+- 行号为 1-based，`endLine` 为包含端点。
+- `newContent: ''` 表示删除行；多行内容用 `\n` 分隔。
+- 编辑按从后向前应用，避免前面的修改导致后续行号偏移。
+- 空 `edits` 数组在底层应用函数中返回原文，但不会被主进程当作有效 `edit` 提议。
 
-- 位置：`electron/line-edits.ts` 和 `src/lib/file-operations.ts`（客户端版本）
-- 功能：将多个行编辑应用到原始内容上
-- 验证逻辑：
-  - 行号必须在有效范围内（1 到文件总行数）
-  - `edits` 数组必须按 `startLine` 升序排列
-  - 编辑范围不能重叠
-- 应用策略：从后向前应用编辑，避免行号偏移
+### `normalizeLineEdits(value)`
 
-#### `validateEditOperation(operation)`
+- 位置：`electron/main/line-edits.ts`
+- 只接受非空数组，且每个元素都必须满足：
+  - `startLine` 是整数；
+  - `endLine` 是整数；
+  - `newContent` 是字符串。
+- 返回 `LineEdit[]` 或 `null`。`project.ts` 用它对不可信模型输出做结构归一化；行号范围、排序和重叠仍由随后调用的 `applyLineEdits()` 校验。
 
-- 位置：`electron/line-edits.ts`
-- 功能：验证操作的字段一致性
-- 规则：
-  - `edit` 操作必须有非空的 `edits` 数组，不应有 `proposedContent`
-  - 其他操作（`create`/`append`/`replace`）必须有 `proposedContent`，不应有 `edits`
+### `validateEditOperation(operation)`
 
-### 修改的文件
+- 位置：`electron/main/line-edits.ts`
+- 当前主要由单元测试覆盖字段兼容契约，不是 `ProjectService.prepareAiOperation()` 的生产入口。
+- 规则是宽松的：`edit` 需要有效 `edits`；`create`、`append`、`replace` 需要字符串 `proposedContent`。多余字段不会导致失败。
 
-#### 类型定义
-- `src/shared/types.ts`
-  - 添加 `LineEdit` 接口
-  - 扩展 `FileOperationKind` 类型，添加 `'edit'`
-  - `FileOperationProposal` 的 `proposedContent` 变为可选
-  - 添加可选的 `edits` 字段
+### 主进程提议准备
 
-#### 主进程逻辑
-- `electron/line-edits.ts` (新建)
-  - `applyLineEdits()` - 服务端行编辑应用
-  - `validateEditOperation()` - 操作字段验证
-- `electron/line-edits.test.ts` (新建)
-  - 28 个测试用例，覆盖各种场景
-- `electron/main/project.ts`
-  - 导入 `applyLineEdits` 和 `validateEditOperation`
-  - 在 `applyAiOperation` 中添加字段验证
-  - 在操作应用逻辑中处理 `edit` 类型
-- `electron/main/ai.ts`
-  - 更新 AI 工具 schema，添加 `'edit'` 到 `kind` 枚举
-  - 添加 `edits` 数组定义到工具参数
-  - 使 `proposedContent` 在 schema 中可选
+`electron/main/project.ts` 中的 `prepareAiOperation()` 是生产入口：
 
-#### 渲染进程逻辑
-- `src/lib/file-operations.ts`
-  - 添加客户端版本的 `applyLineEditsClient()`
-  - 更新 `validateFileOperation()` 接受 `edits` 字段
-  - 更新 `describeFileOperationIntent()` 处理 `edit` 类型
-  - 更新 `buildFileOperationPreview()` 生成 edit 操作的 diff
-- `src/components/ai/MarkdownOperationCard.tsx`
-  - 处理 `proposedContent` 可能为 `undefined` 的情况
-  - 计算 `edit` 操作的 diff 预览
+- 支持 `create`、`append`、`replace`、`edit`。
+- `edit` 同时带 `edits` 和 `proposedContent` 时，`edits` 优先；主进程用行编辑基于磁盘或冻结 IDE 缓冲区计算最终 `proposedContent`，供差异预览和确认一致性校验使用。
+- 非 `edit` 操作多带 `edits` 时，主进程忽略多余 `edits`。
+- `edit` 的 `edits` 不可用但 `proposedContent` 是字符串时，提议会降级为 `replace`。
+- `edit` 既没有可用 `edits`，也没有可降级的 `proposedContent` 时，抛出 `AI edit 操作缺少有效的 edits 数组。`
+- 目标只允许项目内可编辑的 Markdown、代码或文本文件。
 
 ## 边界情况处理
 
-### 验证规则
-1. **行号范围**：`startLine >= 1` 且 `endLine <= 文件总行数`
-2. **行号顺序**：`startLine <= endLine`
-3. **编辑排序**：`edits` 数组必须按 `startLine` 升序排列
-4. **无重叠**：后一个编辑的 `startLine` 必须 > 前一个编辑的 `endLine`
+`applyLineEdits()` 会检查：
 
-### 错误信息
-- `起始行号必须 >= 1，实际: X`
-- `结束行号不能小于起始行号: X-Y`
-- `行号超出文件范围（共 N 行）: X-Y`
+1. `startLine >= 1`
+2. `endLine >= startLine`
+3. `startLine` 和 `endLine` 均不超过文件总行数
+4. `edits` 按 `startLine` 升序排列
+5. 编辑范围不重叠；相邻但不重叠的编辑允许
+
+当前主进程错误文本包括：
+
+- `起始行号必须 >= 1，实际为 X`
+- `结束行号 Y 不能小于起始行号 X`
+- `起始行号 X 超出文件范围（共 N 行）`
+- `结束行号 Y 超出文件范围（共 N 行）`
 - `编辑列表必须按起始行号升序排列`
-- `编辑范围重叠: 第 N 个编辑 (X-Y) 与前一个编辑 (A-B)`
+- `编辑范围重叠：第 N 个编辑 (X-Y) 与第 M 个编辑 (A-B) 冲突`
 
-### 文件冲突检测
-操作应用前会检查：
-- 文件的 `modifiedAt` 时间戳是否匹配
-- 文件内容是否与预期一致（通过 `diskContent` 或 `originalContent` 验证）
+如果文件在预览后被修改，确认写入会拒绝并提示：`文件在预览后已被修改。请重新加载并生成新的修改建议。`
 
-如果不匹配，抛出错误：`文件在预览后已被修改。请重新加载并生成新的修改建议。`
+## 字段兼容性
 
-## 向下兼容性
-
-- ✅ 现有的 `create`/`append`/`replace` 操作完全不受影响
-- ✅ 预览生成逻辑统一使用 unified diff 格式
-- ✅ AI 模型可以继续使用 `replace`（稳妥但低效）
-- ✅ AI 模型可以选择使用 `edit`（精确但需要准确行号）
+- 现有 `create`、`append`、`replace` 操作继续使用 `proposedContent`。
+- `edit` 推荐只发送 `edits`，但同时发送 `proposedContent` 也会被接受；最终以 `edits` 计算结果为准。
+- 非 `edit` 操作带多余 `edits` 不会失败。
+- 不可用 `edit` 加字符串 `proposedContent` 会按整文件 `replace` 处理。
+- `src/lib/file-operations.ts` 是仍只允许 Markdown 目标的纯逻辑安全预览工具；当前聊天中的生产确认卡片是 `src/components/ai/MarkdownOperationCard.tsx`，主进程操作边界允许 Markdown、代码和文本文件。
 
 ## 测试覆盖
 
-### 单元测试（28 个测试用例）
-- 单行替换、多行替换
-- 删除单行、删除多行
-- 多处不重叠编辑
-- 首行/末行编辑
-- 边界情况：空文件、无尾部换行符
-- 错误情况：行号越界、重叠、未排序
+当前测试覆盖以源码内测试文件和 `npm test` 输出为准：
 
-### 集成测试
-- 所有现有的 111 个单元测试通过
-- 所有现有的 212 个主进程测试通过
-- 所有现有的 36 个 AI 组件测试通过
-- TypeScript 类型检查通过
+- `electron/main/line-edits.test.ts`：24 个测试用例，覆盖应用、规范化和字段兼容验证。
+- `electron/main/project-ai-operations.test.ts`：覆盖同时携带 `edits`/`proposedContent`、无效 `edit` 降级 `replace`、越界拒绝、未保存 IDE 缓冲区基线和代码/文本文件操作。
+- `npm test` 当前分组结果：unit 29 文件/111 项，Electron 24 文件/193 项，AI 组件 3 文件/38 项，合计 342 项。
 
 ## AI 模型使用指南
 
-AI 模型在调用 `propose_workspace_operation` 工具时可以这样使用：
-
 ### 何时使用 `edit`
-- 修改文件中的几行（例如：改函数名、改配置项）
-- 删除特定的行范围
-- 在特定位置插入新内容
+
+- 修改少量明确行号的内容；
+- 删除特定行范围；
+- 用“原行 + 新内容”替换某一行来实现插入，且能可靠定位行号；当前协议没有零宽度插入范围。
 
 ### 何时使用 `replace`
-- 文件内容需要大范围重构
-- 修改涉及大部分行
-- 不确定具体行号时
+
+- 文件需要大范围重构；
+- 修改涉及大部分行；
+- 模型无法可靠定位行号；
+- 希望显式提交完整新文件内容。
 
 ### 注意事项
-1. **行号是 1-based**：第一行是 1，不是 0
-2. **`edits` 数组必须排序**：按 `startLine` 从小到大
-3. **不能重叠**：每个编辑的范围不能与其他编辑重叠
-4. **字段互斥**：
-   - `edit` 操作用 `edits` 字段，不用 `proposedContent`
-   - 其他操作用 `proposedContent`，不用 `edits`
 
-## 未来优化方向
+1. 行号是 1-based，第一行是 1。
+2. `edits` 必须按 `startLine` 升序排列。
+3. 编辑范围不能重叠。
+4. `edit` 可带 `proposedContent` 作为整文件降级信息，但正常路径中 `edits` 优先。
+5. 文件写入不会因为模型提议而静默发生，必须经过用户确认和主进程重新校验。
 
-1. **自动降级**：当 `edit` 操作失败时，自动回退到 `replace`
-2. **智能合并**：多个小范围编辑自动合并为一个 `replace`
-3. **冲突解决**：提供三方合并界面处理文件冲突
-4. **性能优化**：大文件懒加载和增量 diff
+## 后续优化方向
+
+1. 智能合并：多个小范围编辑自动合并为更易读的预览。
+2. 冲突解决：提供三方合并界面处理预览后的外部修改。
+3. 性能优化：大文件懒加载和增量 diff。
 
 ## 相关文件
 
 - `src/shared/types.ts` - 类型定义
-- `electron/line-edits.ts` - 服务端核心逻辑
-- `electron/line-edits.test.ts` - 单元测试
-- `electron/main/project.ts` - 操作应用逻辑
-- `electron/main/ai.ts` - AI 工具 schema
-- `src/lib/file-operations.ts` - 客户端验证和预览
-- `src/components/ai/MarkdownOperationCard.tsx` - UI 渲染
+- `electron/main/line-edits.ts` - 主进程行编辑核心逻辑
+- `electron/main/line-edits.test.ts` - 行编辑单元测试
+- `electron/main/project.ts` - AI 文件提议准备、确认写入和撤销
+- `electron/main/project-ai-operations.test.ts` - 主进程 AI 文件操作集成测试
+- `electron/main/ai.ts` - AI 工具 schema 和模型响应处理
+- `src/lib/file-operations.ts` - Markdown-only 的纯逻辑安全预览工具及测试入口
+- `src/components/ai/MarkdownOperationCard.tsx` - 文件操作确认卡片
 
 ## 版本信息
 
-- **添加日期**：2026-08-11
-- **版本**：4.0.5
-- **功能状态**：✅ 已完成并测试通过
+- 添加日期：2026-08-11
+- 最近核对：2026-08-23
+- 版本：4.0.5
+- 功能状态：已完成并由当前测试覆盖

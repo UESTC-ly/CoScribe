@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 
 import type { FileKind, ResearchReference, ResearchReferenceType } from '../../shared/types'
+import AutoResearchPanel from './AutoResearchPanel'
 import { writeClipboardText } from '../../lib/clipboard'
 import {
   bibTeXFor,
@@ -47,6 +48,8 @@ type ReferenceDraft = {
 interface ReferencesWorkspaceProps {
   files: ReferenceFile[]
   networkGranted: boolean
+  aiGranted: boolean
+  mcpGranted: boolean
   onOpenFile: (path: string, kind?: Exclude<FileKind, 'folder'>) => void
   onProjectChanged: () => void | Promise<void>
   onSendToAi: (text: string) => void
@@ -106,6 +109,7 @@ function storedReferences(value: unknown): ResearchReference[] {
 }
 
 export default function ReferencesWorkspace(props: ReferencesWorkspaceProps): React.JSX.Element {
+  const [libraryRevision, setLibraryRevision] = useState(0)
   const [references, setReferences] = useState<ResearchReference[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<ReferenceDraft>(EMPTY_DRAFT)
@@ -121,7 +125,9 @@ export default function ReferencesWorkspace(props: ReferencesWorkspaceProps): Re
     setLoading(true)
     setMessage(null)
     try {
-      const next = storedReferences(await window.coscribe.plugins.data('references'))
+      const stored = await window.coscribe.plugins.data('references')
+      const next = storedReferences(stored)
+      setLibraryRevision((stored as { revision?: number } | null)?.revision ?? 0)
       setReferences(next)
       setSelectedId((current) => current && next.some((reference) => reference.id === current) ? current : next[0]?.id ?? null)
     } catch (reason) {
@@ -146,8 +152,9 @@ export default function ReferencesWorkspace(props: ReferencesWorkspaceProps): Re
   const metadataFiles = props.files.filter((file) => /\.(?:bib|ris)$/iu.test(file.path))
 
   const persist = async (next: ResearchReference[]): Promise<void> => {
-    await window.coscribe.plugins.saveData('references', { version: 1, references: next })
+    await window.coscribe.plugins.saveData('references', { version: 1, revision: libraryRevision, references: next })
     setReferences(next)
+    setLibraryRevision((current) => current + 1)
   }
 
   const saveDraft = async (): Promise<void> => {
@@ -243,9 +250,11 @@ export default function ReferencesWorkspace(props: ReferencesWorkspaceProps): Re
   return (
     <section className="plugin-workspace research-workspace" aria-label="文献与引用插件">
       <header className="plugin-hero">
-        <div className="plugin-hero__identity"><span><Library size={23} /></span><div><small>LOCAL REFERENCE LIBRARY</small><h1>文献与引用</h1><p>BibTeX / RIS 元数据留在项目中，PDF 只保存本地关联路径</p></div></div>
+        <div className="plugin-hero__identity"><span><Library size={23} /></span><div><small>LOCAL REFERENCE LIBRARY</small><h1>文献与引用</h1><p>BibTeX / RIS 元数据留在项目中，支持主题检索、公开资料导入与研究草稿</p></div></div>
         <div className="research-hero-actions"><button className="secondary-button" type="button" onClick={() => setImportOpen((value) => !value)}><Import size={14} />导入</button><button className="primary-button" type="button" onClick={() => { setSelectedId(null); setDraft(EMPTY_DRAFT) }}><Plus size={14} />新建文献</button></div>
       </header>
+
+      <AutoResearchPanel networkGranted={props.networkGranted} aiGranted={props.aiGranted} mcpGranted={props.mcpGranted} onOpenFile={props.onOpenFile} onChanged={async () => { await load(); await props.onProjectChanged() }} />
 
       {message && <p className="plugin-inline-message research-message" role="status">{message}</p>}
 

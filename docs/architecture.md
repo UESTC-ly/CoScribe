@@ -1,6 +1,6 @@
 # 系统架构
 
-> 事实源：`electron/main/index.ts`、`electron/main/ipc.ts`、`electron/preload/index.ts`、`src/shared/types.ts`、`src/App.tsx`；核对日期 2026-07-31。
+> 事实源：`electron/main/index.ts`、`electron/main/ipc.ts`、`electron/preload/index.ts`、`src/shared/types.ts`、`src/App.tsx`；核对日期 2026-08-23。
 
 ## 总览
 
@@ -18,7 +18,7 @@ flowchart LR
   R -->|local UI state| S[Zustand-style app store]
 ```
 
-Renderer 没有 Node.js、文件系统或子进程访问能力。所有磁盘、网络、系统对话框、浏览器、OCR 持久化、终端和 AI Provider 请求都通过主进程处理。
+Renderer 没有 Node.js、文件系统或子进程访问能力。磁盘写入、外部 Provider/高权限网络、系统对话框、资料浏览器、OCR 持久化、终端和 AI Provider 请求都通过主进程处理。Renderer 可以加载项目内图片、Markdown 引用资源和 PPTX 转换结果；其中 JavaScript 的 OCR/PPTX 路径会调用 `fetch`，其他资源可由浏览器元素直接加载。这些 URL 都使用受保护的 `coscribe-file://project/...` 自定义协议，最终由 main protocol handler 解析并通过项目路径守卫校验后读取。
 
 主窗口在 `electron/main/index.ts` 中显式启用 `contextIsolation`、`sandbox` 和 `webSecurity`，并关闭 `nodeIntegration`。资料浏览器不是 Renderer DOM iframe，而是 main 管理的隔离 `WebContentsView`；它使用 `persist:coscribe-research-browser` 分区保存站点状态。
 
@@ -33,7 +33,7 @@ Renderer 没有 Node.js、文件系统或子进程访问能力。所有磁盘、
 | `electron/main/` | 项目文件、AI、终端、设置、搜索、浏览器、MCP、OCR 等高权限服务 |
 | `electron/preload/` | 受限 `contextBridge` API |
 | `electron/ipc-channels.ts` | IPC 通道常量的唯一来源 |
-| `tests/` | 单元、主进程、AI 和 Playwright 桌面测试 |
+| `tests/` | `unit/` 纯逻辑/Renderer 测试和 `e2e/` Playwright 桌面测试；主进程与 AI 组件测试分别就近放在 `electron/main/`、`src/components/ai/` |
 | `resources/` | 内置指南、OCR 模型、许可证和打包资源 |
 
 ## 服务装配与数据流
@@ -56,7 +56,7 @@ flowchart TD
 
 ### 项目文件
 
-主进程把当前打开的项目根目录视为文件操作边界。读写、重命名、移动、删除、导入和 AI 应用操作均重新验证路径、项目根、符号链接和预期版本；写入使用原子方式完成。
+主进程把当前打开的项目根目录视为文件操作边界。读写、重命名、移动、删除、导入和 AI 应用操作均重新验证路径、项目根、符号链接和预期 `modifiedAt`/内容；写入使用原子方式完成。
 
 ### AI 上下文与写操作
 
@@ -87,7 +87,7 @@ sequenceDiagram
   M-->>R: 差异和确认卡片
   U->>R: 接受
   R->>M: file:apply-ai-operation
-  M->>M: 重新验证项目路径、revision、hash、symlink
+  M->>M: 深比较 pending 提议；重验项目路径、symlink、mtime 和完整内容
   M-->>R: 成功或冲突结果
 ```
 
@@ -113,3 +113,9 @@ sequenceDiagram
 - 新权限能力先在主进程实现，再通过 `electron/ipc-channels.ts` 和 `electron/preload/index.ts` 暴露最小方法集。
 - 不向 Renderer 暴露泛化 IPC、文件系统、`child_process` 或终端对象。
 - 影响文件、凭据、网络、MCP、浏览器或终端的改动必须补充主进程测试；影响交互路径时再补充 Playwright 场景。
+
+## 全局学习库与复习插件
+
+个人记忆正文以 `userData/assistant/memory/<稳定 ID>.md` 为准，SQLite schema 4 保存来源、版本、授权和派生索引，并通过持久化 outbox 与内容哈希核对文件。普通 AI 请求先提供少量偏好与相关摘要，再使用只读 `memory_search` / `memory_read` 逐步展开；可选 embedding 与 BM25 候选按排名融合。动态资料放在最新用户消息，符合条件的会话保留实际工具历史以支持前缀复用；纠正、删除和撤销会使旧记忆历史失效。详见 [个人记忆检索](./personal-memory-retrieval.md)。
+
+`AssistantService` 在专用 worker 内运行 SQLite；`LearningStore` 管理 schema 3 的学习聚合事务和整体版本，`LearningService` 校验插件授权、来源文件、项目生命周期和兼容导入。全局知识点／学习自述／复习证据可跨项目使用，项目来源只在当前项目范围内核对。新 IPC 通过同一可信 sender 入口，preload 暴露有限命令；核心 `inspect/correct` 供撤销插件后的个人数据管理。模型没有学习库写入工具。学习修改递增个人记忆召回版本并中止正在进行的请求；普通聊天在记忆与远程授权允许时按相关性和总字符预算读取当前自述与近期复习证据。详见 [学习与复习 MVP](./learning-review-mvp.md)。

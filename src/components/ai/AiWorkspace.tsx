@@ -28,7 +28,7 @@ import {
   WandSparkles,
   X
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type {
   AiOperationMode,
   AiRequestActivity,
@@ -51,6 +51,7 @@ import {
   isChatImageMimeType,
   normalizeChatImageAttachments
 } from '../../shared/chat-images'
+import { normalizeNextRequest } from '../../shared/next-request'
 import { ConversationTurnNavigator } from './ConversationTurnNavigator'
 import { MarkdownMessage } from './MarkdownMessage'
 import { useLocalSpeechInput } from './useLocalSpeechInput'
@@ -392,6 +393,11 @@ export function AiWorkspace({
   const [imageSize, setImageSize] = useState<ImageGenerationPayload['size']>('1024x1024')
   const [imageQuality, setImageQuality] = useState<ImageGenerationPayload['quality']>('medium')
   const [pathDragActive, setPathDragActive] = useState(false)
+  const [dismissedPredictionId, setDismissedPredictionId] = useState<string | null>(null)
+  const [caretAtEnd, setCaretAtEnd] = useState(true)
+  const [isComposing, setIsComposing] = useState(false)
+  const predictionDescriptionId = useId()
+  const predictionRef = useRef<HTMLDivElement>(null)
   const sessionMenuRef = useRef<HTMLDivElement>(null)
   const referenceMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -486,13 +492,31 @@ export function AiWorkspace({
     onDraftChange: updateDraft,
     onError: (message) => setComposerError(message)
   })
+  const lastMessage = activeSession?.messages.at(-1)
+  const predictedRequest = lastMessage?.role === 'assistant' && !lastMessage.error && !lastMessage.stopped && !lastMessage.kind
+    ? normalizeNextRequest(lastMessage.nextRequest)
+    : undefined
+  const showPrediction = Boolean(
+    predictedRequest && lastMessage?.id !== dismissedPredictionId &&
+    composerMode === 'chat' && isConfigured && !disabled && !isBusy && !speech.active &&
+    !isComposing && caretAtEnd && !commandHelpOpen && !visibleCommands.length && !pendingImages.length &&
+    predictedRequest.startsWith(currentDraft) && currentDraft.length < predictedRequest.length
+  )
+  const acceptPrediction = (): void => {
+    if (!showPrediction || !predictedRequest || !lastMessage) return
+    setDismissedPredictionId(lastMessage.id)
+    resetPromptHistory()
+    updateDraft(predictedRequest)
+    textareaRef.current?.focus()
+    moveCaretToDraftEnd()
+  }
 
   useEffect(() => {
     const textarea = textareaRef.current
     if (!textarea) return
     textarea.style.height = '0px'
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 46), 180)}px`
-  }, [currentDraft])
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, showPrediction ? predictionRef.current?.scrollHeight ?? 0 : 0, 46), 180)}px`
+  }, [currentDraft, showPrediction, predictedRequest])
 
   useEffect(() => {
     if (draftFocusToken > 0) textareaRef.current?.focus()
@@ -506,6 +530,9 @@ export function AiWorkspace({
     setCommandHelpOpen(false)
     setCommandIndex(0)
     setComposerMode('chat')
+    setDismissedPredictionId(null)
+    setCaretAtEnd(true)
+    setIsComposing(false)
   }, [currentSessionId])
 
   useEffect(() => {
@@ -536,7 +563,6 @@ export function AiWorkspace({
     }
   }, [currentSessionId])
 
-  const lastMessage = activeSession?.messages.at(-1)
   useEffect(() => {
     const container = messagesRef.current
     if (!container || !isBusy) return
@@ -1165,71 +1191,112 @@ export function AiWorkspace({
               </label>
             </div>
           )}
-          <textarea
-            ref={textareaRef}
-            value={currentDraft}
-            rows={1}
-            disabled={disabled || !activeSession || (composerMode === 'chat' ? !isConfigured : !isImageConfigured)}
-            readOnly={speech.active}
-            placeholder={
-              composerMode === 'image'
-                ? (isImageConfigured ? '描述想生成的图片…' : '请先配置 GPT-Image 2')
-                : speech.active ? '正在本地实时转写；再次点击麦克风结束…' : !isConfigured ? '请先配置 AI' : activeSession ? '针对当前内容提问，也可直接粘贴图片…' : '请先新建会话'
-            }
-            aria-label="向 AI 提问"
-            onChange={(event) => updateDraft(event.target.value)}
-            onPaste={pasteImages}
-            onKeyDown={(event) => {
-              if (visibleCommands.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-                event.preventDefault()
-                setCommandIndex((current) => event.key === 'ArrowDown'
-                  ? (current + 1) % visibleCommands.length
-                  : (current - 1 + visibleCommands.length) % visibleCommands.length)
-                return
-              }
-              if (
-                composerMode === 'chat' &&
-                (event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
-                !event.shiftKey &&
-                !event.altKey &&
-                !event.ctrlKey &&
-                !event.metaKey &&
-                !event.nativeEvent.isComposing &&
-                event.currentTarget.selectionStart === event.currentTarget.selectionEnd
-              ) {
-                const direction = event.key === 'ArrowUp' ? 'previous' : 'next'
-                if (
-                  (direction === 'previous' || promptHistoryIndex.current !== null) &&
-                  isTextareaCaretAtVisualBoundary(event.currentTarget, direction) &&
-                  navigatePromptHistory(direction)
-                ) {
+          <div className="ai-composer__input">
+            {showPrediction && (
+              <div ref={predictionRef} className="ai-composer__prediction" aria-hidden="true">
+                <span className="ai-composer__prediction-prefix">{currentDraft}</span>
+                <span>{predictedRequest?.slice(currentDraft.length)}</span>
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={currentDraft}
+              rows={1}
+              disabled={disabled || !activeSession || (composerMode === 'chat' ? !isConfigured : !isImageConfigured)}
+              readOnly={speech.active}
+              placeholder={showPrediction ? '' : (
+                composerMode === 'image'
+                  ? (isImageConfigured ? '描述想生成的图片…' : '请先配置 GPT-Image 2')
+                  : speech.active ? '正在本地实时转写；再次点击麦克风结束…' : !isConfigured ? '请先配置 AI' : activeSession ? '针对当前内容提问，也可直接粘贴图片…' : '请先新建会话'
+              )}
+              aria-label="向 AI 提问"
+              aria-autocomplete="inline"
+              aria-describedby={showPrediction ? predictionDescriptionId : undefined}
+              onChange={(event) => {
+                updateDraft(event.target.value)
+                setCaretAtEnd(event.target.selectionStart === event.target.value.length && event.target.selectionEnd === event.target.value.length)
+              }}
+              onSelect={(event) => setCaretAtEnd(event.currentTarget.selectionStart === currentDraft.length && event.currentTarget.selectionEnd === currentDraft.length)}
+              onScroll={(event) => {
+                if (predictionRef.current) predictionRef.current.scrollTop = event.currentTarget.scrollTop
+              }}
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={() => setIsComposing(false)}
+              onPaste={pasteImages}
+              onKeyDown={(event) => {
+                if (isComposing || event.nativeEvent.isComposing || event.keyCode === 229) return
+                if (showPrediction && event.key === 'Escape') {
                   event.preventDefault()
+                  setDismissedPredictionId(lastMessage?.id ?? null)
                   return
                 }
-              }
-              if (visibleCommands.length && event.key === 'Tab' && !event.shiftKey) {
-                event.preventDefault()
-                chooseCommand(visibleCommands[commandIndex] ?? visibleCommands[0]!)
-                return
-              }
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                const command = parseChatCommand(currentDraft.trim())
-                if ((!command || command.kind === 'unknown') && commandSuggestions.length) {
-                  const selected = commandSuggestions[commandIndex] ?? commandSuggestions[0]
-                  if (selected) {
-                    if (selected.acceptsArgument) {
-                      chooseCommand(selected)
-                    } else {
-                      chooseCommand(selected)
-                    }
+                if (showPrediction && event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+                  event.preventDefault()
+                  acceptPrediction()
+                  return
+                }
+                if (visibleCommands.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                  event.preventDefault()
+                  setCommandIndex((current) => event.key === 'ArrowDown'
+                    ? (current + 1) % visibleCommands.length
+                    : (current - 1 + visibleCommands.length) % visibleCommands.length)
+                  return
+                }
+                if (
+                  composerMode === 'chat' &&
+                  (event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
+                  !event.shiftKey &&
+                  !event.altKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  !event.nativeEvent.isComposing &&
+                  event.currentTarget.selectionStart === event.currentTarget.selectionEnd
+                ) {
+                  const direction = event.key === 'ArrowUp' ? 'previous' : 'next'
+                  if (
+                    (direction === 'previous' || promptHistoryIndex.current !== null) &&
+                    isTextareaCaretAtVisualBoundary(event.currentTarget, direction) &&
+                    navigatePromptHistory(direction)
+                  ) {
+                    event.preventDefault()
                     return
                   }
                 }
-                submit()
-              }
-            }}
-          />
+                if (visibleCommands.length && event.key === 'Tab' && !event.shiftKey) {
+                  event.preventDefault()
+                  chooseCommand(visibleCommands[commandIndex] ?? visibleCommands[0]!)
+                  return
+                }
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault()
+                  const command = parseChatCommand(currentDraft.trim())
+                  if ((!command || command.kind === 'unknown') && commandSuggestions.length) {
+                    const selected = commandSuggestions[commandIndex] ?? commandSuggestions[0]
+                    if (selected) {
+                      if (selected.acceptsArgument) {
+                        chooseCommand(selected)
+                      } else {
+                        chooseCommand(selected)
+                      }
+                      return
+                    }
+                  }
+                  submit()
+                }
+              }}
+            />
+          </div>
+          {showPrediction && (
+            <div className="ai-composer__prediction-hint">
+              <span id={predictionDescriptionId} className="sr-only" role="status">
+                预测下一次请求：{predictedRequest}。按 Tab 接受，Escape 忽略。
+              </span>
+              <button type="button" aria-label="接受下一次请求预测" onClick={acceptPrediction}>
+                <kbd>Tab</kbd> 接受预测
+              </button>
+              <span>Esc 忽略</span>
+            </div>
+          )}
           {(commandHelpOpen || commandSuggestions.length > 0) && (
             <div className="ai-command-menu" role="listbox" aria-label="聊天命令">
               <header>

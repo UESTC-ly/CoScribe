@@ -6,7 +6,8 @@ import {
   mergeReferences,
   parseBibTeX,
   parseRis,
-  referenceNoteMarkdown
+  referenceNoteMarkdown,
+  normalizeReference
 } from '../../src/plugins/references/reference-utils'
 
 describe('reference library utilities', () => {
@@ -46,4 +47,12 @@ ER  -`, 200)
     expect(merged[0].id).toBe(reference.id)
     expect(merged[0].notes).toBe('updated')
   })
+  it('keeps distinct DOI records with colliding citation keys separate', () => {
+    const first = normalizeReference({ citeKey: 'same', title: 'First', doi: '10.1000/first' })
+    const second = normalizeReference({ citeKey: 'same', title: 'Second', doi: '10.1000/second' })
+    const merged = mergeReferences([first], [second])
+    expect(merged).toHaveLength(2)
+    expect(merged[1].citeKey).toBe('same-2')
+  })
+
 })

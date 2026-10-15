@@ -15,6 +15,7 @@ export default defineConfig({
       lib: {
         entry: {
           index: resolve(rootDir, 'electron/main/index.ts'),
+          'assistant-storage-worker': resolve(rootDir, 'electron/main/assistant/storage-worker.ts'),
           'asr-worker': resolve(rootDir, 'electron/main/asr-worker.ts')
         },
         formats: ['es']

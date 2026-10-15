@@ -2343,12 +2343,28 @@
   border-color: var(--ai-accent);
 }
 
-.ai-composer textarea {
+.ai-composer__input {
+  position: relative;
+}
+
+.ai-composer textarea,
+.ai-composer__prediction {
+  box-sizing: border-box;
   width: 100%;
+  padding: 11px 11px 5px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.ai-composer textarea {
+  position: relative;
   min-height: 46px;
   max-height: 180px;
   margin: 0;
-  padding: 11px 11px 5px;
   color: var(--ai-ink);
   background: transparent;
   border: 0;
@@ -2356,8 +2372,50 @@
   display: block;
   resize: none;
   overflow-y: auto;
-  font-size: 12px;
-  line-height: 1.5;
+}
+
+.ai-composer__prediction {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: color-mix(in srgb, var(--ai-ink) 46%, transparent);
+}
+
+.ai-composer__prediction-prefix {
+  color: transparent;
+}
+
+.ai-composer__prediction-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 11px 5px;
+  color: var(--ai-ink-faint);
+  font-size: 11px;
+}
+
+.ai-composer__prediction-hint button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 0;
+  color: var(--ai-ink-soft);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ai-composer__prediction-hint button:hover {
+  color: var(--ai-accent);
+}
+
+.ai-composer__prediction-hint kbd {
+  padding: 0 4px;
+  border: 1px solid var(--ai-line-strong);
+  border-radius: 3px;
+  font: inherit;
 }
 
 .ai-composer textarea::placeholder {

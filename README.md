@@ -29,7 +29,7 @@ CoScribe treats an ordinary folder as the project. Read documents and webpages, 
 
 ## 中文
 
-> `v4.0.5` 稳定版聚焦 AI 文件修改的精度与阅读体验：AI 现在可以只改动指定行区间（局部编辑），预览只显示受影响的行而不是整篇重写，接受后仍可整笔撤销；代码块在流式回答刷新期间保持文本选中状态，shell、Python 等语言不再需要重新划选才能复制。v4.0.3 的隐藏项目记忆、确认后写入的“整理笔记”、持续生效的全量会话压缩与 macOS 高分辨率透明框选截图保持不变；v4.0.1 的网页选区上下文与 v4.0.0 的 IDE、终端和受控 AI Shell 同样保留。
+> 当前源码版本为 `v4.1.0`：新增可管理的个人记忆、学习状态与关联复习、每日复盘、Auto Research，以及可按 Tab 接受的下一次请求预测。详情见 [v4.1.0 版本说明](docs/release-v4.1.0.md)。已发布的稳定版安装包见下方 `v4.0.5` 下载列表。
 
 ### 下载与安装
 
@@ -302,7 +302,7 @@ npm run verify:package:linux
 
 ## English
 
-> The stable `v4.0.5` release focuses on precise AI file edits and steadier reading: AI can now rewrite just the line ranges it needs (line-level edits), the preview shows only the affected lines instead of a whole-file rewrite, and an accepted edit stays fully undoable. Code blocks also keep their text selection while a streamed answer refreshes, so shell, Python, and other highlighted languages no longer lose a selection before you can copy it. The hidden project memory, preview-gated Quick Note, persistent full-session compaction, and high-resolution transparent macOS capture from v4.0.3 are unchanged, as are the webpage-selection context from v4.0.1 and the IDE, terminal, and controlled AI Shell from v4.0.0.
+> The current source version is `v4.1.0`, adding manageable personal memory, learning state and linked review, daily reflection, Auto Research, and Tab-to-accept next-request predictions. See the [v4.1.0 release notes](docs/release-v4.1.0.md). Published stable installers remain available in the `v4.0.5` download list below.
 
 ### Download and install
 

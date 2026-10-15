@@ -1,8 +1,8 @@
 # CoScribe 文档中心
 
-> 核对基线：2026-08-11，`package.json` 版本 `4.0.5`。本目录以当前源码、类型契约、测试配置和发布工作流为事实源；历史 Release 结果只在明确标注时使用。
+> 核对基线：2026-10-16，`package.json` 版本 `4.1.0`。本目录以当前源码、类型契约、测试配置和发布工作流为事实源；历史 Release 结果只在明确标注时使用。
 
-CoScribe 是一个本地优先的 Electron 桌面工作台：普通文件夹就是项目，用户可以阅读资料、维护 Markdown 笔记、使用 AI 协作，并在 v4.0.5 的 IDE 工作区编辑代码和运行受控终端。
+CoScribe 是一个本地优先的 Electron 桌面工作台：普通文件夹就是项目，用户可以阅读资料、维护 Markdown 笔记、使用 AI 协作、管理个人记忆与学习复习，并在 IDE 工作区编辑代码和运行受控终端。
 
 ![CoScribe 文件、阅读区与 AI 侧栏的真实界面](./images/workspace-overview.png)
 
@@ -12,17 +12,24 @@ CoScribe 是一个本地优先的 Electron 桌面工作台：普通文件夹就�
 
 | 文档 | 适合读者 | 内容 |
 | --- | --- | --- |
+| [v4.1.0 版本说明](./release-v4.1.0.md) | 使用者、发布负责人 | 本版功能、数据影响、验证结果与边界 |
+| [产品主线与 MVP 顺序](./product-vision.md) | 产品负责人、开发者 | 上下文感知、个人画像、关联复习、科研/日程/技术跟踪插件及交付顺序 |
 | [产品需求与工作流](./product-and-workflows.md) | 使用者、产品负责人 | 用户目标、功能范围、资料阅读、AI 协作、IDE 与终端 |
 | [系统架构](./architecture.md) | 开发者、审查者 | Electron 三进程边界、模块职责、数据与信任流 |
 | [开发指南](./development.md) | 开发者 | 环境、命令、目录、代码约定和本地调试 |
 | [配置与 AI 服务](./configuration.md) | 使用者、运维者 | 服务商配置、密钥存储、上下文和环境变量 |
 | [安全与 AI Shell](./security-and-ai-shell.md) | 使用者、审查者 | 文件确认、IPC、终端、权限与风险模型 |
 | [桌面 API](./desktop-api.md) | 开发者、插件维护者 | `window.coscribe` 的公开预加载 API 分类与契约来源 |
+| [行级文件编辑](./LINE_EDIT_FEATURE.md) | 开发者、审查者 | `edit` 操作的共享类型、运行时归一化、降级与边界校验 |
 | [数据与存储](./data-and-storage.md) | 使用者、运维者 | 项目文件、隐藏元数据、备份和兼容性 |
 | [测试、打包与部署](./testing-and-release.md) | 开发者、发布负责人 | Vitest、Playwright、三平台打包、CI 和 GitHub Release |
 | [运维与排障](./operations-and-troubleshooting.md) | 支持、运维者 | 日志/诊断、安装、常见故障和问题报告 |
 | [已知限制](./known-limitations.md) | 所有人 | 当前能力边界、风险和非目标 |
 | [贡献指南](./contributing.md) | 贡献者 | 分支、提交、评审、测试和安全变更要求 |
+| [个人助理 MVP](./personal-assistant-mvp.md) | 开发者、验收者 | 显式/自动记忆、活动账本、每日复盘、权限与恢复边界 |
+| [个人记忆检索](./personal-memory-retrieval.md) | 使用者、开发者 | Markdown 正文、SQLite 索引、分层工具召回、可选 embedding 与前缀复用 |
+| [学习状态与关联复习](./learning-review-mvp.md) | 使用者、开发者 | 知识点、独立学习状态、来源关联、确认后的复习题与历史迁移 |
+| [Auto Research MVP](./auto-research-mvp.md) | 使用者、开发者 | 主题检索、公开资料导入、文献笔记与综述草稿 |
 
 产品交互与视觉约束的当前决策记录在仓库根目录的 [DESIGN.md](../DESIGN.md)。快速上手、安装说明和完整功能导览见根目录 [README.md](../README.md)。
 
@@ -31,6 +38,8 @@ CoScribe 是一个本地优先的 Electron 桌面工作台：普通文件夹就�
 - **代码与类型契约优先**：接口和行为以 `src/shared/types.ts`、`electron/ipc-channels.ts`、`electron/preload/index.ts` 及主进程实现为准。
 - **测试通过不等于所有环境均已验证**：平台签名、公证、真实第三方 AI 服务和用户硬件权限须按发布环境单独验证。
 - **AI 是协作工具，不是安全主体**：AI 的写文件和 Shell 操作都必须经过主进程的项目范围校验与用户确认。
-- **当前验证边界**：本次文档更新重新运行了 `npm run typecheck`、`npm test`（311 项），并运行了 `npm run build` 和 Anthropic 工具参数修正回归测试；这些结果不等同于成品包 smoke、签名、公证、真实 Provider 或所有目标系统均已验收。
+- **当前验证边界**：本版验证记录见 [测试、打包与部署](./testing-and-release.md) 和 [版本说明](./release-v4.1.0.md)。本地源码回归不能代替成品包 smoke、签名、公证或所有目标系统的验收。
 
-最后更新：2026-08-11，适用源码版本：`4.0.5`。
+最后更新：2026-08-23，适用源码版本：`4.0.5`。
+
+- [个人学习状态与复习后端 MVP](./learning-review-mvp.md)：全局学习库、来源、确认关系／题目、反馈调度、迁移与后续缺口。
