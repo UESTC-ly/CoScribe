@@ -23,6 +23,16 @@ CoScribe 直接把普通文件夹作为项目：阅读 Markdown、PDF、DOCX、P
 
 CoScribe treats an ordinary folder as the project. Read documents and webpages, choose exactly what AI may use, then save durable results as standard Markdown—without locking the project inside a proprietary database.
 
+### 功能演示 / Product demo
+
+[![CoScribe 功能演示：把阅读变成知识](docs/images/demo-video-cover.png)](https://github.com/UESTC-ly/CoScribe/raw/refs/heads/main/docs/videos/coscribe-demo-zh-CN.mp4)
+
+**[观看／下载演示视频](https://github.com/UESTC-ly/CoScribe/raw/refs/heads/main/docs/videos/coscribe-demo-zh-CN.mp4)** · 2 分 52 秒 · 1080p · 中文神经合成配音与字幕 · [章节与演示说明](docs/videos/README.md) · [SRT 字幕](docs/videos/coscribe-demo-zh-CN.srt)
+
+演示资料阅读、选区提问、确认保存笔记、本地 OCR、个人记忆、间隔复习、文献管理、日程与 IDE。使用独立示例项目录制；AI 回答和笔记生成采用已标注的示例响应，其余展示为真实应用操作。
+
+Watch the 1080p walkthrough with Chinese narration and subtitles. AI responses are clearly labeled examples; document reading, confirmed file writes, local OCR, memory, review, planning, and terminal interactions use the real application.
+
 ---
 
 <a id="中文"></a>

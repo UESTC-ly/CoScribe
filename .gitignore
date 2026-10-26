@@ -5,6 +5,7 @@ release/
 playwright-report/
 test-results/
 coverage/
+/output/
 .cache/
 .coscribe/
 .vibeknowledge/
